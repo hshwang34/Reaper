@@ -7,3 +7,5 @@ sidecar/settings.json
 *.log
 .DS_Store
 .claude/worktrees/
+server/data.sqlite*
+server/uploads/
