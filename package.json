@@ -1,0 +1,22 @@
+{
+  "name": "reality-hijack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "sidecar",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n sidecar,web -c cyan,magenta \"npm:dev:sidecar\" \"npm:dev:web\"",
+    "dev:sidecar": "npm run dev --workspace sidecar",
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build --workspace web",
+    "typecheck": "npm run typecheck --workspace shared && npm run typecheck --workspace sidecar && npm run typecheck --workspace web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}

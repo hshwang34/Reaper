@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.local
+sidecar/uploads/
+sidecar/settings.json
+*.log
+.DS_Store
