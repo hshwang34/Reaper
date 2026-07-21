@@ -6,6 +6,10 @@
 // Observed/documented shape: { type: "donation", message: [ { name, amount,
 // message, formatted_amount, currency, isTest? }, ... ] }. amount is a string.
 
+// The shim ships with this file (triple-slash, not tsconfig include) so every
+// host that compiles @rh/core from source — sidecar, server, app — gets it
+// without repeating the ambient declaration in its own tsconfig.
+/// <reference path="../types/socket.io-client.d.ts" />
 import ioClient from "socket.io-client";
 import type { TipEvent } from "@rh/shared";
 import type { TriggerAdapter } from "./types.js";

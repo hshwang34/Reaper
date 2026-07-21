@@ -22,12 +22,13 @@ Everything runs on one machine. There is no cloud backend; the "server" is a loc
 npm install
 cp .env.example .env      # leave keys blank → MOCK mode (camera passthrough, no cost)
 npm run dev               # concurrently: sidecar :7712 + web :5173
-npm run typecheck         # typechecks shared, sidecar, web in order — the only test gate
+npm run typecheck         # typechecks shared, core, sidecar, web in order — the only test gate
 npm run build             # builds the web app only
+npm run start             # production mode: build, then ONE process on :7712 serving everything
 ```
 
 Per-workspace: `npm run dev:sidecar`, `npm run dev:web`. There is **no test runner and no
-linter** — `npm run typecheck` (tsc `--noEmit` across all three workspaces) is the check to run
+linter** — `npm run typecheck` (tsc `--noEmit` across all four workspaces) is the check to run
 after edits.
 
 ### Demoing the loop without credentials
@@ -39,13 +40,20 @@ after edits.
 
 ## Architecture
 
-npm-workspaces monorepo. Three packages, five runtime processes:
+npm-workspaces monorepo. Four packages:
 
 - **`shared/`** (`@rh/shared`) — the single source of truth: domain `types.ts`, the WS
-  `protocol.ts` (discriminated union on `t`), and the `presets.ts` catalog. Both the sidecar
-  and web import it; the web consumes it *as source* via a Vite alias (see `web/vite.config.ts`).
-- **`sidecar/`** (`@rh/sidecar`, tsx) — Node/Express + `ws` hub. Holds all secrets. Owns the
-  money logic, trigger adapters, Decart token minting, and server-side OBS control.
+  `protocol.ts` (discriminated union on `t`), and the `presets.ts` catalog. Everything
+  imports it; the web consumes it *as source* via a Vite alias (see `web/vite.config.ts`).
+- **`core/`** (`@rh/core`) — the portable money path: `engine.ts` (tip→job→queue),
+  `correlation.ts` (tip↔submission matching), `moderation.ts`, `hub.ts` (WS relay), and the
+  trigger adapters. Host-agnostic by construction: `Engine` takes an injected `getSettings`,
+  the log sink is swappable (`setLogger`). One implementation, multiple hosts (sidecar today;
+  the hosted control plane and Electron app per `docs/COMMERCIALIZATION.md`).
+- **`sidecar/`** (`@rh/sidecar`, tsx) — the demo-rig composition root: Node/Express wiring
+  `@rh/core` to local config, uploads, Decart token minting, and server-side OBS control.
+  Holds all secrets. In production mode (`npm run start`) it also serves the built web app,
+  so the whole product is one process on one port.
 - **`web/`** (`@rh/web`, Vite + React 19 + Tailwind 4) — three routes, each a distinct role:
   - `/portal` — viewer UI (prompt, image, claim code, live status).
   - `/router` — the streamer's real Chrome tab: captures the camera, runs the per-job state

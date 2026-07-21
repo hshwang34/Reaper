@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS, type Settings } from "@rh/shared";
 import { log, warn } from "./log.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = resolve(__dirname, "..", ".."); // repo root
+export const rootDir = resolve(__dirname, "..", ".."); // repo root
 loadDotenv({ path: resolve(rootDir, ".env") });
 
 export const env = {

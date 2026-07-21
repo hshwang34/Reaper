@@ -10,21 +10,19 @@
   },
   "dependencies": {
     "@decartai/sdk": "^0.1.14",
+    "@rh/core": "*",
     "@rh/shared": "*",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "multer": "^2.2.0",
-    "obs-websocket-js": "^5.0.8",
-    "socket.io-client": "^2.5.0",
-    "ws": "^8.21.1"
+    "obs-websocket-js": "^5.0.8"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.0.0",
     "@types/node": "^26.1.1",
-    "@types/ws": "^8.18.1",
     "tsx": "^4.23.1",
     "typescript": "^5.7.3"
   }

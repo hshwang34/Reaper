@@ -5,6 +5,7 @@
   "type": "module",
   "workspaces": [
     "shared",
+    "core",
     "sidecar",
     "web"
   ],
@@ -13,7 +14,8 @@
     "dev:sidecar": "npm run dev --workspace sidecar",
     "dev:web": "npm run dev --workspace web",
     "build": "npm run build --workspace web",
-    "typecheck": "npm run typecheck --workspace shared && npm run typecheck --workspace sidecar && npm run typecheck --workspace web"
+    "start": "npm run build && npm run start --workspace sidecar",
+    "typecheck": "npm run typecheck --workspace shared && npm run typecheck --workspace core && npm run typecheck --workspace sidecar && npm run typecheck --workspace web"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

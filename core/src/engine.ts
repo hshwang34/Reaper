@@ -10,11 +10,11 @@ import {
   getPreset,
   type HijackJob,
   type RouterState,
+  type Settings,
   type StatusSnapshot,
   type SubmissionStatus,
   type TipEvent,
 } from "@rh/shared";
-import { getSettings } from "./config.js";
 import { CorrelationStore } from "./correlation.js";
 import { log, warn } from "./log.js";
 
@@ -49,6 +49,10 @@ export class Engine {
   constructor(
     public readonly correlation: CorrelationStore,
     private emit: EngineEmit,
+    /** Settings provider, injected by the host (sidecar reads settings.json;
+     *  the hosted control plane reads the channel row; Electron reads
+     *  userData). Read fresh on every use so live edits apply immediately. */
+    private getSettings: () => Settings,
   ) {
     correlation.onExpire = (code) =>
       this.emit.submissionUpdate(code, {
@@ -61,7 +65,7 @@ export class Engine {
 
   /** Handle a normalized tip. Returns a human-readable outcome for logs/API. */
   onTip(tip: TipEvent): string {
-    const s = getSettings();
+    const s = this.getSettings();
     if (tip.amount < s.minTipUSD) {
       warn("engine", `tip $${tip.amount} below min $${s.minTipUSD} — ignored`);
       return `ignored: below min tip ($${s.minTipUSD})`;
@@ -105,7 +109,7 @@ export class Engine {
   /** Streamer-fired hijack from the router console: no payment, no matching,
    *  no min-tip — but the same duration cap, queue, and state machine. */
   manual(prompt: string, durationSec: number): string {
-    const s = getSettings();
+    const s = this.getSettings();
     const d = Math.min(Math.max(1, Math.floor(durationSec)), s.maxDurationSec);
     const job: HijackJob = {
       jobId: randomUUID(),
@@ -127,7 +131,7 @@ export class Engine {
   }
 
   private enqueue(job: HijackJob): string {
-    const s = getSettings();
+    const s = this.getSettings();
     if (this.queue.length >= s.queueDepth) {
       warn("engine", `queue full (${s.queueDepth}) — dropping job`);
       this.notify(job, { state: "failed", message: "Queue is full." });
@@ -201,9 +205,9 @@ export class Engine {
     this.active = null;
     this.activeRemaining = 0;
     // Cooldown before the next job inits.
-    this.cooldownUntil = Date.now() + getSettings().cooldownSec * 1000;
+    this.cooldownUntil = Date.now() + this.getSettings().cooldownSec * 1000;
     this.broadcast();
-    setTimeout(() => this.tryDispatch(), getSettings().cooldownSec * 1000 + 50);
+    setTimeout(() => this.tryDispatch(), this.getSettings().cooldownSec * 1000 + 50);
   }
 
   private tryDispatch(): void {

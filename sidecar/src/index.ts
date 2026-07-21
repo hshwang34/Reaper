@@ -1,26 +1,36 @@
 // Sidecar entrypoint: HTTP API + WebSocket hub + trigger adapters, wired to the
-// engine. Holds all secrets (Decart key, Streamlabs token); pages talk to it
-// through the Vite proxy so everything is same-origin in the browser.
+// engine. Holds all secrets (Decart key, Streamlabs token). This is the demo-rig
+// composition root: the money logic itself lives in @rh/core (shared with the
+// hosted control plane and the Electron app) — this file only wires it to local
+// config, local uploads, and local OBS. In dev, pages talk to it through the
+// Vite proxy; in production (`npm run start`) it serves the built web app
+// itself, so everything is same-origin either way.
 
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
+import { resolve } from "node:path";
 import express from "express";
 import cors from "cors";
 import { getPreset, PRESETS } from "@rh/shared";
 import {
+  CorrelationStore,
+  Engine,
+  Hub,
+  checkPrompt,
+  createStreamlabsAdapter,
+  parseFakeTip,
+  type EngineEmit,
+} from "@rh/core";
+import {
   decartEnabled,
   env,
   getSettings,
+  rootDir,
   updateSettings,
   uploadsDir,
 } from "./config.js";
 import { log, warn } from "./log.js";
-import { CorrelationStore } from "./correlation.js";
-import { Engine, type EngineEmit } from "./engine.js";
-import { Hub } from "./hub.js";
-import { checkPrompt } from "./moderation.js";
 import { upload, publicUploadUrl, deleteUpload } from "./uploads.js";
-import { parseFakeTip } from "./triggers/fake.js";
-import { createStreamlabsAdapter } from "./triggers/streamlabs.js";
 import { obs } from "./obs.js";
 
 const app = express();
@@ -36,7 +46,7 @@ const engineEmit: EngineEmit = {
   status: (snap) => hub.broadcastStatus(snap),
   submissionUpdate: (code, status) => hub.sendSubmissionUpdate(code, status),
 };
-const engine = new Engine(correlation, engineEmit);
+const engine = new Engine(correlation, engineEmit, getSettings);
 
 // ── HTTP API ───────────────────────────────────────────────────────────────
 
@@ -189,6 +199,31 @@ app.post("/api/dev/fake-tip", (req, res) => {
 
 // Serve uploaded reference images (also reachable via the Vite proxy).
 app.use("/uploads", express.static(uploadsDir));
+
+// ── Production static serving ──────────────────────────────────────────────
+// When `web/dist` exists (npm run build), the sidecar serves the built app
+// itself so the whole product runs as ONE process on ONE port — no Vite, no
+// proxy. This is the seam the Electron app reuses: its local bridge is this
+// same composition serving the same bundle. In dev the folder is usually
+// absent and the Vite proxy provides the same-origin glue instead.
+const webDist = resolve(rootDir, "web", "dist");
+if (existsSync(webDist)) {
+  app.use(express.static(webDist));
+  // SPA fallback: the web app uses browser-history routing (/portal, /router,
+  // /viewer), so any GET that isn't an API/upload/asset path gets index.html.
+  // Registered after every API route; /ws never reaches Express (it's a
+  // WebSocket upgrade handled at the HTTP-server level by the Hub).
+  app.use((req, res, next) => {
+    if (req.method !== "GET") return next();
+    if (req.path.startsWith("/api") || req.path.startsWith("/uploads")) {
+      return next();
+    }
+    res.sendFile(resolve(webDist, "index.html"));
+  });
+  log("index", `serving web/dist (production mode)`);
+} else {
+  log("index", "web/dist not found — dev mode, expecting the Vite server");
+}
 
 // ── Server + Hub ─────────────────────────────────────────────────────────
 const server = createServer(app);
