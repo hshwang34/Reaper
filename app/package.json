@@ -1,0 +1,25 @@
+{
+  "name": "@rh/app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reality Hijack companion app — the single download for streamers",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "build:main": "esbuild src/main/main.ts --bundle --platform=node --format=esm --packages=external --alias:@rh/shared=../shared/src/index.ts --alias:@rh/core=../core/src/index.ts --alias:@rh/sidecar=../sidecar/src/server.ts --outfile=dist/main.mjs",
+    "dev": "npm run build:main && electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rh/core": "*",
+    "@rh/shared": "*",
+    "@rh/sidecar": "*",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "electron": "^35.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.3"
+  }
+}

@@ -7,7 +7,8 @@
     "shared",
     "core",
     "sidecar",
-    "web"
+    "web",
+    "app"
   ],
   "scripts": {
     "dev": "concurrently -n sidecar,web -c cyan,magenta \"npm:dev:sidecar\" \"npm:dev:web\"",
@@ -15,7 +16,8 @@
     "dev:web": "npm run dev --workspace web",
     "build": "npm run build --workspace web",
     "start": "npm run build && npm run start --workspace sidecar",
-    "typecheck": "npm run typecheck --workspace shared && npm run typecheck --workspace core && npm run typecheck --workspace sidecar && npm run typecheck --workspace web"
+    "dev:app": "npm run build && npm run dev --workspace app",
+    "typecheck": "npm run typecheck --workspace shared && npm run typecheck --workspace core && npm run typecheck --workspace sidecar && npm run typecheck --workspace web && npm run typecheck --workspace app"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
