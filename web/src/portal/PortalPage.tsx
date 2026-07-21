@@ -280,7 +280,13 @@ function ClaimView(props: {
   onReset: () => void;
 }) {
   const { code, secsLeft, status, tipAmount, durationPreview } = props;
-  const expired = status?.state === "expired" || secsLeft === 0;
+  // The claim-code TTL only matters while we're still waiting for a tip. Once a
+  // tip has matched (queued/live/done/failed), the code is consumed server-side
+  // — so a lapsed TTL must not overwrite a real terminal state (e.g. flip a
+  // completed "done" into a false "expired" if the viewer lingers on the page).
+  const stillWaiting = !status || status.state === "pending";
+  const expired = status?.state === "expired" || (stillWaiting && secsLeft === 0);
+  const terminal = expired || status?.state === "done" || status?.state === "failed";
 
   return (
     <div className="space-y-6 text-center">
@@ -291,7 +297,7 @@ function ClaimView(props: {
         <p className="my-2 font-mono text-5xl font-black tracking-[0.3em] text-fuchsia-300">
           {code}
         </p>
-        {secsLeft != null && !expired && (
+        {stillWaiting && secsLeft != null && !expired && (
           <p className="text-xs text-zinc-500">
             expires in {Math.floor(secsLeft / 60)}:
             {String(secsLeft % 60).padStart(2, "0")}
@@ -309,7 +315,7 @@ function ClaimView(props: {
         </p>
         <button
           onClick={props.onSimulate}
-          disabled={expired}
+          disabled={terminal}
           className="w-full rounded-lg bg-emerald-600 px-4 py-2 font-semibold hover:bg-emerald-500 disabled:opacity-50"
         >
           Send ${tipAmount} test tip ({durationPreview}s)
