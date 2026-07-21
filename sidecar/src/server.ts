@@ -20,13 +20,13 @@ import {
   Hub,
   checkPrompt,
   createStreamlabsAdapter,
+  mintClientToken,
   parseFakeTip,
   log,
   warn,
   type EngineEmit,
   type TriggerAdapter,
 } from "@rh/core";
-import { mintClientToken } from "./decart.js";
 import { ObsController } from "./obs.js";
 import { createUploads } from "./uploads.js";
 
@@ -49,6 +49,21 @@ export interface LocalServerHost {
    *  viewer); the CLI demo rig leaves it unset for the frictionless local
    *  loop. */
   authToken?: string;
+  /** Cloud mode (Electron): mirror router lifecycle events upstream. Called
+   *  alongside the local engine — the cloud engine owns the money logic, the
+   *  local one just idles. */
+  observer?: {
+    onRouterState(
+      state: import("@rh/shared").RouterState,
+      jobId?: string,
+      remainingSec?: number,
+    ): void;
+    onJobDone(jobId: string, ok: boolean, reason?: string): void;
+  };
+  /** Cloud mode (Electron): delegate ek_ minting to the control plane (which
+   *  job-gates and budget-caps it). When set, /api/token never touches a
+   *  local key — there is none. */
+  mintProxy?: (durationSec: number) => Promise<string>;
 }
 
 export interface LocalServer {
@@ -144,11 +159,9 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     }
     const origin = String(req.body?.origin ?? "");
     try {
-      const token = await mintClientToken(
-        host.decartApiKey,
-        durationSec,
-        origin,
-      );
+      const token = host.mintProxy
+        ? await host.mintProxy(durationSec)
+        : await mintClientToken(host.decartApiKey, durationSec, origin);
       res.json({ token });
     } catch (e) {
       res.status(502).json({ error: (e as Error).message });
@@ -283,12 +296,18 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   // ── Server + Hub ─────────────────────────────────────────────────────────
   const server = createServer(app);
   hub = new Hub(server, {
-    onRouterState: (state, jobId, rem) =>
-      engine.setRouterState(state, jobId, rem),
-    onJobDone: (jobId, ok, reason) => engine.onJobDone(jobId, ok, reason),
+    onRouterState: (state, jobId, rem) => {
+      engine.setRouterState(state, jobId, rem);
+      host.observer?.onRouterState(state, jobId, rem);
+    },
+    onJobDone: (jobId, ok, reason) => {
+      engine.onJobDone(jobId, ok, reason);
+      host.observer?.onJobDone(jobId, ok, reason);
+    },
     onRouterDisconnected: () => {
       warn("server", "router disconnected");
       engine.setRouterState("OFFLINE");
+      host.observer?.onRouterState("OFFLINE");
     },
     getStatus: () => engine.snapshot(),
   }, { authToken: host.authToken });

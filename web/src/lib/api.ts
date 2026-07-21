@@ -4,6 +4,7 @@
 
 import type { Preset, Settings } from "@rh/shared";
 import { authHeaders } from "./auth.js";
+import { apiPath } from "./channel.js";
 
 export interface PublicConfig {
   presets: Preset[];
@@ -30,56 +31,56 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const api = {
-  getConfig: () => fetch("/api/config").then(json<PublicConfig>),
+  getConfig: () => fetch(apiPath("/api/config")).then(json<PublicConfig>),
   getRouterConfig: () =>
-    fetch("/api/router-config", { headers: authHeaders() }).then(
+    fetch(apiPath("/api/router-config"), { headers: authHeaders() }).then(
       json<RouterConfig>,
     ),
   getSettings: () =>
-    fetch("/api/settings", { headers: authHeaders() }).then(json<Settings>),
+    fetch(apiPath("/api/settings"), { headers: authHeaders() }).then(json<Settings>),
 
   saveSettings: (patch: Partial<Settings>) =>
-    fetch("/api/settings", {
+    fetch(apiPath("/api/settings"), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify(patch),
     }).then(json<Settings>),
 
   submit: (form: FormData) =>
-    fetch("/api/submissions", { method: "POST", body: form }).then(
+    fetch(apiPath("/api/submissions"), { method: "POST", body: form }).then(
       json<{ code: string; expiresAt: number }>,
     ),
 
   manualHijack: (prompt: string, durationSec: number) =>
-    fetch("/api/dev/hijack", {
+    fetch(apiPath("/api/dev/hijack"), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ prompt, durationSec }),
     }).then(json<{ ok: boolean; outcome: string }>),
 
   fakeTip: (amount: number, message: string, username?: string) =>
-    fetch("/api/dev/fake-tip", {
+    fetch(apiPath("/api/dev/fake-tip"), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ amount, message, username }),
     }).then(json<{ ok: boolean; outcome: string }>),
 
   mintToken: (durationSec: number) =>
-    fetch("/api/token", {
+    fetch(apiPath("/api/token"), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ durationSec, origin: location.origin }),
     }).then(json<{ token: string }>),
 
   obsToggle: (visible: boolean) =>
-    fetch("/api/obs/toggle", {
+    fetch(apiPath("/api/obs/toggle"), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ visible }),
     }).then(json<{ ok: boolean; visible?: boolean; error?: string }>),
 
   panic: () =>
-    fetch("/api/panic", { method: "POST", headers: authHeaders() }).then(
+    fetch(apiPath("/api/panic"), { method: "POST", headers: authHeaders() }).then(
       json<{ paused: boolean }>,
     ),
 };

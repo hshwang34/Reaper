@@ -38,12 +38,17 @@ export interface HubOptions {
    *  CORS-gated, so this is what stops a hostile local page from registering
    *  as router (job theft) or viewer (stream hijack / fake frames-ok). */
   authToken?: string;
+  /** Hosted control plane: drop local-plane messages (rtc:* signaling and
+   *  viewer:frames-ok). Those never leave the streamer's machine — the
+   *  Electron bridge relays them locally; anything arriving here is either a
+   *  misconfigured client or an attack. */
+  rejectLocalPlane?: boolean;
 }
 
 const PRIVILEGED_ROLES: ReadonlySet<Role> = new Set(["router", "viewer"]);
 
 export class Hub {
-  private wss: WebSocketServer;
+  private wss: WebSocketServer | null = null;
   private meta = new WeakMap<WebSocket, SocketMeta>();
   private byRole: Record<Role, Set<WebSocket>> = {
     portal: new Set(),
@@ -51,13 +56,41 @@ export class Hub {
     viewer: new Set(),
   };
 
+  /**
+   * Two modes:
+   *  · Local (server given) — the hub owns a WebSocketServer at /ws and
+   *    processes hellos itself. The sidecar CLI and the Electron bridge.
+   *  · Adopted (server null) — a multi-tenant front door owns the single
+   *    WebSocketServer, reads the hello to pick the channel (and verify its
+   *    JWT), then hands the socket over via adopt(). The hosted control
+   *    plane: one Hub instance per ChannelRuntime.
+   */
   constructor(
-    server: Server,
+    server: Server | null,
     private handlers: HubHandlers,
     private opts: HubOptions = {},
   ) {
-    this.wss = new WebSocketServer({ server, path: "/ws" });
-    this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
+    if (server) {
+      this.wss = new WebSocketServer({ server, path: "/ws" });
+      this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
+    }
+  }
+
+  /** Adopted-mode entry: attach a socket whose hello the front door already
+   *  read and authenticated. Processes the hello as if it arrived here. */
+  adopt(ws: WebSocket, hello: AnyMsg): void {
+    ws.on("message", (raw) => {
+      let msg: AnyMsg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      this.onMessage(ws, msg);
+    });
+    ws.on("close", () => this.onClose(ws));
+    ws.on("error", () => this.onClose(ws));
+    this.onMessage(ws, hello);
   }
 
   private onConnection(ws: WebSocket, _req: IncomingMessage): void {
@@ -99,13 +132,20 @@ export class Hub {
     if (!meta) return; // ignore pre-hello traffic
 
     // Relay RTC signaling + the frame-gate straight to the target role.
-    if (isRtcMsg(msg)) {
-      this.forwardToRole(msg.target, { ...msg, from: meta.role } as ServerMsg);
-      return;
-    }
-    if (msg.t === "viewer:frames-ok") {
-      // Router listens for this to close the buffering gate.
-      this.forwardToRole("router", msg as unknown as ServerMsg);
+    if (isRtcMsg(msg) || msg.t === "viewer:frames-ok") {
+      if (this.opts.rejectLocalPlane) {
+        warn("hub", `dropped local-plane ${msg.t} on hosted hub`);
+        return;
+      }
+      if (isRtcMsg(msg)) {
+        this.forwardToRole(msg.target, {
+          ...msg,
+          from: meta.role,
+        } as ServerMsg);
+      } else {
+        // Router listens for this to close the buffering gate.
+        this.forwardToRole("router", msg as unknown as ServerMsg);
+      }
       return;
     }
 

@@ -14,6 +14,9 @@ import DecartTestPage from "./decarttest/DecartTestPage.js";
 const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/portal" replace /> },
   { path: "/portal", element: <PortalPage /> },
+  // Hosted portal: the control plane serves the same SPA at /c/<channel>
+  // (login or id); channel scoping happens in lib/channel.ts, not the page.
+  { path: "/c/:channel", element: <PortalPage /> },
   { path: "/router", element: <RouterPage /> },
   { path: "/viewer", element: <ViewerPage /> },
   { path: "/decart-test", element: <DecartTestPage /> },

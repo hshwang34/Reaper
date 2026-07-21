@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SubmissionStatus } from "@rh/shared";
 import { api, type PublicConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
+import { channelSlug } from "../lib/channel.js";
 import { downscaleImage } from "../lib/image.js";
 
 export default function PortalPage() {
@@ -308,19 +309,23 @@ function ClaimView(props: {
       <StatusTimeline status={status} expired={expired} />
 
       {/* Dev-only shortcut: fire the same server path a real Streamlabs tip
-          would, so the whole demo runs on one machine. */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-        <p className="mb-2 text-xs uppercase tracking-widest text-zinc-500">
-          Demo · simulate the tip
-        </p>
-        <button
-          onClick={props.onSimulate}
-          disabled={terminal}
-          className="w-full rounded-lg bg-emerald-600 px-4 py-2 font-semibold hover:bg-emerald-500 disabled:opacity-50"
-        >
-          Send ${tipAmount} test tip ({durationPreview}s)
-        </button>
-      </div>
+          would, so the whole demo runs on one machine. Hidden on the hosted
+          portal (/c/…) — there the endpoint is streamer-authed and viewers
+          pay through the real tip rail. */}
+      {!channelSlug() && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+          <p className="mb-2 text-xs uppercase tracking-widest text-zinc-500">
+            Demo · simulate the tip
+          </p>
+          <button
+            onClick={props.onSimulate}
+            disabled={terminal}
+            className="w-full rounded-lg bg-emerald-600 px-4 py-2 font-semibold hover:bg-emerald-500 disabled:opacity-50"
+          >
+            Send ${tipAmount} test tip ({durationPreview}s)
+          </button>
+        </div>
+      )}
 
       <button
         onClick={props.onReset}

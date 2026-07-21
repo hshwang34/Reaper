@@ -2,6 +2,7 @@
 
 import type { ClientMsg, Role, ServerMsg } from "@rh/shared";
 import { authToken } from "./auth.js";
+import { channelSlug } from "./channel.js";
 
 export class HubSocket {
   private ws: WebSocket | null = null;
@@ -25,6 +26,7 @@ export class HubSocket {
         role: this.role,
         code: this.code,
         auth: authToken(),
+        channel: channelSlug() ?? undefined,
       });
       const pending = this.outbox;
       this.outbox = [];

@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "types": ["node"],
+    "paths": {
+      "@rh/shared": ["../shared/src/index.ts"],
+      "@rh/core": ["../core/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

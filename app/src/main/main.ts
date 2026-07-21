@@ -44,6 +44,12 @@ import {
   webDistDir,
   type Keys,
 } from "./config.js";
+import {
+  CloudLink,
+  loadCloudConfig,
+  saveCloudConfig,
+  type CloudConfig,
+} from "./cloudLink.js";
 
 // Fixed local port (D2). Fallbacks keep the app alive on collision; the OBS
 // source URL is repaired to whatever port actually bound.
@@ -88,20 +94,50 @@ async function boot(): Promise<void> {
     },
   );
 
+  // ── Mode: cloud (signed in — the control plane owns money logic + keys)
+  //    or local (M2 behavior — pasted keys, kept forever as the offline
+  //    demo path). Dev shortcut: RH_CLOUD_URL + RH_CLOUD_LOGIN provision a
+  //    dev-auth session automatically against a dev-mode control plane.
+  let cloudCfg = loadCloudConfig();
+  if (!cloudCfg && process.env.RH_CLOUD_URL && process.env.RH_CLOUD_LOGIN) {
+    cloudCfg = await devCloudSignIn(
+      process.env.RH_CLOUD_URL,
+      process.env.RH_CLOUD_LOGIN,
+    );
+  }
+  const cloudMode = Boolean(cloudCfg);
+
   // ── Local bridge: the embedded sidecar composition ─────────────────────
   const keys = loadKeys();
   const authToken = getAuthToken();
+  let link: CloudLink | null = null;
   local = createLocalServer({
     ...keys,
+    // Cloud mode: triggers + minting live server-side. The local bridge
+    // keeps OBS control, signaling, uploads, and page serving.
+    streamlabsToken: cloudMode ? "" : keys.streamlabsToken,
+    decartApiKey: cloudMode ? "" : keys.decartApiKey,
     getSettings,
     updateSettings,
     uploadsDir,
     webDist: webDistDir(),
     authToken,
+    observer: cloudMode
+      ? {
+          onRouterState: (s, j, r) => link?.onRouterState(s, j, r),
+          onJobDone: (j, ok, r) => link?.onJobDone(j, ok, r),
+        }
+      : undefined,
+    mintProxy: cloudMode ? (d) => link!.mint(d) : undefined,
   });
 
   const port = await listenOnFirstFreePort(local, PORTS);
-  log("app", `local bridge on 127.0.0.1:${port}`);
+  log("app", `local bridge on 127.0.0.1:${port} (${cloudMode ? "CLOUD" : "local"} mode)`);
+
+  if (cloudMode && cloudCfg) {
+    link = new CloudLink(cloudCfg, local.hub);
+    void link.start();
+  }
 
   // ── OBS auto-provisioning (best-effort; retried via tray or next boot) ──
   // The viewer URL carries the privilege token: the OBS page must register
@@ -160,6 +196,39 @@ async function boot(): Promise<void> {
     },
   );
   if (!registered) warn("app", "panic hotkey unavailable (already taken?)");
+}
+
+/** Dev-only cloud sign-in against a dev-auth control plane (no Twitch app
+ *  needed). The real sign-in is the wizard's loopback OAuth flow. */
+async function devCloudSignIn(
+  url: string,
+  login: string,
+): Promise<CloudConfig | null> {
+  try {
+    const res = await fetch(`${url}/auth/dev`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ login }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const t = (await res.json()) as {
+      refresh: string;
+      channelId: string;
+      login: string;
+    };
+    const cfg: CloudConfig = {
+      url,
+      channelId: t.channelId,
+      login: t.login,
+      refresh: t.refresh,
+    };
+    saveCloudConfig(cfg);
+    log("app", `dev cloud sign-in as ${t.login}`);
+    return cfg;
+  } catch (e) {
+    warn("app", `dev cloud sign-in failed: ${(e as Error).message}`);
+    return null;
+  }
 }
 
 /** Try the fixed port, then fallbacks (D2 — OBS URL is repaired afterwards). */

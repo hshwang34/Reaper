@@ -12,7 +12,8 @@
 export { Engine, type EngineEmit } from "./engine.js";
 export { CorrelationStore, type MatchResult } from "./correlation.js";
 export { checkPrompt, type ModerationResult } from "./moderation.js";
-export { Hub, type HubHandlers } from "./hub.js";
+export { Hub, type HubHandlers, type HubOptions } from "./hub.js";
+export { mintClientToken, decartModel } from "./decart.js";
 export { setLogger, log, warn, err, type Logger } from "./log.js";
 export { type TriggerAdapter } from "./triggers/types.js";
 export { parseFakeTip } from "./triggers/fake.js";
