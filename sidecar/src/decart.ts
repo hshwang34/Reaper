@@ -9,9 +9,9 @@ import { log, err } from "./log.js";
 const MODEL = "lucy-2.5";
 
 /**
- * Mint an ek_ client token scoped to lucy-2.5, expiring soon, with a server-
- * side session cap of durationSec + 15s. Returns "MOCK" when no key is set so
- * the router can run a camera-passthrough demo without incurring cost.
+ * Mint an ek_ client token scoped to lucy-2.5, with a 45s validity window and a
+ * server-side session cap of durationSec + 15s. Returns "MOCK" when no key is
+ * set so the router can run a camera-passthrough demo without incurring cost.
  */
 export async function mintClientToken(
   durationSec: number,
@@ -25,13 +25,17 @@ export async function mintClientToken(
   const client = createDecartClient({ apiKey: env.decartApiKey });
 
   try {
-    // NOTE: allowedOrigins was removed — Decart appears to reject the realtime
-    // WebSocket when the Origin check is set for a localhost origin, which
-    // surfaced as `wasConnected:false` / no remote video track. Re-add once the
-    // exact matching behavior is confirmed against a deployed origin.
+    // allowedOrigins is intentionally omitted: on localhost, setting it made
+    // Decart reject the realtime WebSocket (`wasConnected:false` / no remote
+    // track). With origin-locking off, the compensating control is a short
+    // token lifetime — 45s easily covers mint→connect (seconds) while sharply
+    // limiting how long a leaked ek_ token could open a session from any page.
+    // TODO(phase1): re-enable allowedOrigins once we serve from a real HTTPS
+    // origin and can confirm Decart's matching against it (tracked in
+    // docs/PHASE0.md live-verification).
     void origin;
     const res = await client.tokens.create({
-      expiresIn: 120,
+      expiresIn: 45,
       allowedModels: [MODEL],
       constraints: { realtime: { maxSessionDuration: durationSec + 15 } },
     });
