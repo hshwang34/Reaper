@@ -59,7 +59,7 @@ function cookieValue(req: express.Request, name: string): string | null {
 /** Start an OAuth flow with a browser-bound nonce (login-CSRF defense). */
 async function startOauth(
   res: express.Response,
-  payload: { app?: boolean },
+  payload: { app?: boolean; appState?: string },
 ): Promise<void> {
   const nonce = newNonce();
   res
@@ -74,8 +74,14 @@ async function startOauth(
 /** Browser sign-in (dashboard). */
 app.get("/auth/twitch", (_req, res) => void startOauth(res, {}));
 
-/** Desktop-app sign-in: same OAuth, loopback redirect at the end. */
-app.get("/auth/app", (_req, res) => void startOauth(res, { app: true }));
+/** Desktop-app sign-in: same OAuth, loopback redirect at the end. The app's
+ *  own state nonce is carried through so its loopback listener can bind the
+ *  final callback to the sign-in it started (anti session-fixation). */
+app.get("/auth/app", (req, res) => {
+  const appState =
+    typeof req.query.app_state === "string" ? req.query.app_state : undefined;
+  void startOauth(res, { app: true, appState });
+});
 
 app.get("/auth/twitch/callback", async (req, res) => {
   const state = await readState(String(req.query.state ?? ""));
@@ -100,6 +106,7 @@ app.get("/auth/twitch/callback", async (req, res) => {
     u.searchParams.set("refresh", tokens.refresh);
     u.searchParams.set("channel", tokens.channelId);
     u.searchParams.set("login", tokens.login);
+    if (state.appState) u.searchParams.set("state", state.appState);
     res.redirect(u.toString());
     return;
   }

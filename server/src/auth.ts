@@ -142,6 +142,9 @@ export function twitchAuthorizeUrl(stateToken: string): string {
 export async function signState(payload: {
   app?: boolean;
   nonce: string;
+  /** The desktop app's own sign-in nonce, round-tripped back to its loopback
+   *  listener so it can reject callbacks it didn't initiate. */
+  appState?: string;
 }): Promise<string> {
   return new SignJWT(payload as Record<string, unknown>)
     .setProtectedHeader({ alg: "HS256" })
@@ -151,10 +154,10 @@ export async function signState(payload: {
 
 export async function readState(
   state: string,
-): Promise<{ app?: boolean; nonce?: string } | null> {
+): Promise<{ app?: boolean; nonce?: string; appState?: string } | null> {
   try {
     const { payload } = await jwtVerify(state, secret);
-    return payload as { app?: boolean; nonce?: string };
+    return payload as { app?: boolean; nonce?: string; appState?: string };
   } catch {
     return null;
   }

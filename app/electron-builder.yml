@@ -1,0 +1,46 @@
+# electron-builder — macOS-first (plan M5; Windows is a post-M5 fast-follow).
+#
+# The app is a bundled main process (dist/main.mjs, dist/preload.cjs) plus
+# staged resources (web-dist + the one unbundled dep). Signing/notarization
+# are gated on the Apple Developer enrollment: with CSC_* env unset, builds
+# are unsigned (fine for the internal M5 dry-run); CI sets them for release.
+appId: com.realityhijack.app
+productName: Reality Hijack
+copyright: © Reality Hijack
+# Electron is hoisted to the workspace root, so electron-builder can't infer
+# the version from app/node_modules — pin it explicitly.
+electronVersion: 35.7.5
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+
+extraResources:
+  - from: build-resources
+    to: .
+
+mac:
+  category: public.app-category.video
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSCameraUsageDescription: Reality Hijack restyles your OBS Virtual Camera in real time.
+
+dmg:
+  title: Reality Hijack
+
+# electron-updater feed (GitHub Releases). Enabled once the repo is public
+# and releases are cut in CI.
+publish:
+  provider: github
+  owner: hshwang34
+  repo: Reaper

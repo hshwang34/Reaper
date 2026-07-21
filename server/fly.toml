@@ -1,0 +1,29 @@
+# Fly.io — one machine, one region, one volume (plan M3/M5).
+# Secrets set out-of-band: fly secrets set DECART_API_KEY=… TWITCH_CLIENT_ID=…
+#   TWITCH_CLIENT_SECRET=… RH_JWT_SECRET=… RH_PUBLIC_URL=https://<app>.fly.dev
+app = "reality-hijack"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RH_SERVER_PORT = "8790"
+
+[[mounts]]
+  source = "rh_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8790
+  force_https = true
+  # Long-lived WS connections: never auto-stop the machine, keep exactly one.
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+[[http_service.checks]]
+  method = "GET"
+  path = "/healthz"
+  interval = "15s"
+  timeout = "2s"

@@ -53,6 +53,7 @@ import {
 } from "./cloudLink.js";
 import { discoverObsWebsocket } from "./obsDiscovery.js";
 import { signInWithBrowser } from "./signIn.js";
+import { startAutoUpdate } from "./updater.js";
 
 // Fixed local port (D2). Fallbacks keep the app alive on collision; the OBS
 // source URL is repaired to whatever port actually bound.
@@ -259,6 +260,9 @@ async function boot(): Promise<void> {
     },
   );
   if (!registered) warn("app", "panic hotkey unavailable (already taken?)");
+
+  // Auto-update (packaged builds only; never relaunches mid-hijack).
+  void startAutoUpdate(() => local?.engine ?? null);
 }
 
 /** Dev-only cloud sign-in against a dev-auth control plane (no Twitch app

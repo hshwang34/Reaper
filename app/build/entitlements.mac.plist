@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Camera capture (getUserMedia on the OBS Virtual Camera). -->
+  <key>com.apple.security.device.camera</key>
+  <true/>
+  <!-- The bundled Node main process runs a JIT (V8) and loads the esbuild
+       bundle; the hardened runtime needs these to allow it. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- Outbound network: local bridge, OBS websocket, Decart, the control plane. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <key>com.apple.security.network.server</key>
+  <true/>
+</dict>
+</plist>
