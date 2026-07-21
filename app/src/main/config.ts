@@ -13,10 +13,11 @@
 // --workspace app`) and keys.json doesn't exist yet, credentials are read from
 // the repo's .env so the dev loop needs zero extra setup.
 
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app } from "electron";
+import { app, safeStorage } from "electron";
 import { config as loadDotenv } from "dotenv";
 import { DEFAULT_SETTINGS, type Settings } from "@rh/shared";
 import { log, warn } from "@rh/core";
@@ -25,6 +26,7 @@ import { discoverObsWebsocket } from "./obsDiscovery.js";
 const userData = app.getPath("userData");
 const settingsPath = resolve(userData, "settings.json");
 const keysPath = resolve(userData, "keys.json");
+const authTokenPath = resolve(userData, "auth-token");
 
 export const uploadsDir = resolve(userData, "uploads");
 
@@ -44,18 +46,55 @@ export interface Keys {
   obsWsPassword: string;
 }
 
+/** The per-install privilege token: gates the local bridge's privileged HTTP
+ *  endpoints and hub roles. Per-install (not per-boot) so the provisioned OBS
+ *  Browser Source URL — which embeds it as ?auth= — stays stable across
+ *  launches instead of rewriting OBS config every boot. Random 256-bit;
+ *  regenerating it is just deleting the file (OBS URL self-repairs). */
+export function getAuthToken(): string {
+  try {
+    if (existsSync(authTokenPath)) {
+      const t = readFileSync(authTokenPath, "utf8").trim();
+      if (t.length >= 32) return t;
+    }
+  } catch {
+    /* regenerate below */
+  }
+  const t = randomBytes(32).toString("hex");
+  writeFileSync(authTokenPath, t, { mode: 0o600 });
+  log("app-config", "generated new local auth token");
+  return t;
+}
+
+/** keys.json on-disk shape: encrypted with the OS keychain via safeStorage
+ *  when available, plaintext fallback otherwise (flagged in the file). */
+interface KeysFile {
+  enc: boolean;
+  blob?: string; // base64(safeStorage.encryptString(JSON(Keys)))
+  plain?: Partial<Keys>;
+}
+
+function readKeysFile(): Partial<Keys> {
+  if (!existsSync(keysPath)) return {};
+  try {
+    const f = JSON.parse(readFileSync(keysPath, "utf8")) as KeysFile;
+    if (f.enc && f.blob) {
+      return JSON.parse(
+        safeStorage.decryptString(Buffer.from(f.blob, "base64")),
+      ) as Partial<Keys>;
+    }
+    return f.plain ?? {};
+  } catch {
+    warn("app-config", "keys.json unreadable — falling back");
+    return {};
+  }
+}
+
 export function loadKeys(): Keys {
   // OBS credential precedence: keys.json explicit → auto-discovery from
   // obs-websocket's own config file (the "nothing to paste" path — and ground
   // truth, since it's the file OBS actually reads) → .env (dev) → default.
-  let saved: Partial<Keys> = {};
-  if (existsSync(keysPath)) {
-    try {
-      saved = JSON.parse(readFileSync(keysPath, "utf8")) as Partial<Keys>;
-    } catch {
-      warn("app-config", "keys.json unreadable — falling back");
-    }
-  }
+  const saved: Partial<Keys> = readKeysFile();
 
   // Dev fallback: the repo's .env.
   const root = devRepoRoot();
@@ -87,9 +126,36 @@ export function loadKeys(): Keys {
   };
 }
 
-export function saveKeys(keys: Keys): void {
-  writeFileSync(keysPath, JSON.stringify(keys, null, 2));
+export function saveKeys(keys: Partial<Keys>): void {
+  // Merge over whatever is stored so a partial save (e.g. only the Decart
+  // key) doesn't wipe the rest.
+  const merged = { ...readKeysFile(), ...keys };
+  let file: KeysFile;
+  if (safeStorage.isEncryptionAvailable()) {
+    file = {
+      enc: true,
+      blob: safeStorage
+        .encryptString(JSON.stringify(merged))
+        .toString("base64"),
+    };
+  } else {
+    warn("app-config", "OS keychain unavailable — storing keys unencrypted");
+    file = { enc: false, plain: merged };
+  }
+  writeFileSync(keysPath, JSON.stringify(file), { mode: 0o600 });
   log("app-config", "keys saved");
+}
+
+/** Redacted view for the settings UI (never ship secrets to the renderer —
+ *  it only needs to know what's set). */
+export function keysStatus(): Record<keyof Keys, boolean> {
+  const k = loadKeys();
+  return {
+    decartApiKey: Boolean(k.decartApiKey),
+    streamlabsToken: Boolean(k.streamlabsToken),
+    obsWsUrl: Boolean(k.obsWsUrl),
+    obsWsPassword: Boolean(k.obsWsPassword),
+  };
 }
 
 let settings: Settings = loadSettingsFile();

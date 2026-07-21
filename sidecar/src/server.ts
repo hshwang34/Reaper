@@ -43,6 +43,12 @@ export interface LocalServerHost {
   uploadsDir: string;
   /** Built web app to serve (absent/missing → dev mode, Vite provides pages). */
   webDist?: string;
+  /** When set, privileged HTTP endpoints (mint/panic/OBS/settings/dev) and
+   *  privileged WS roles (router/viewer) require this token. The Electron
+   *  host sets a per-install token (preload → router; provisioned OBS URL →
+   *  viewer); the CLI demo rig leaves it unset for the frictionless local
+   *  loop. */
+  authToken?: string;
 }
 
 export interface LocalServer {
@@ -85,6 +91,16 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   };
   const engine = new Engine(correlation, engineEmit, host.getSettings);
 
+  /** Gate for privileged endpoints. Public surface stays: health, config,
+   *  presets, submissions, uploads, static pages. */
+  const requireAuth: express.RequestHandler = (req, res, next) => {
+    if (!host.authToken) return next(); // CLI demo rig — ungated
+    const provided =
+      req.header("x-rh-auth") ?? String(req.query.auth ?? "");
+    if (provided === host.authToken) return next();
+    res.status(401).json({ error: "auth required" });
+  };
+
   // ── HTTP API ─────────────────────────────────────────────────────────────
 
   app.get("/api/health", (_req, res) => {
@@ -110,7 +126,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   });
 
   /** Router-only wiring (decart mode + OBS target). Localhost only. */
-  app.get("/api/router-config", (_req, res) => {
+  app.get("/api/router-config", requireAuth, (_req, res) => {
     const s = host.getSettings();
     res.json({
       decartEnabled,
@@ -121,7 +137,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   });
 
   /** Mint a per-job Decart client token (ek_) capped to the paid duration. */
-  app.post("/api/token", async (req, res) => {
+  app.post("/api/token", requireAuth, async (req, res) => {
     const durationSec = Number(req.body?.durationSec);
     if (!Number.isFinite(durationSec) || durationSec <= 0) {
       return res.status(400).json({ error: "durationSec required" });
@@ -140,7 +156,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   });
 
   /** Toggle the OBS Browser Source that shows the AI viewer page. */
-  app.post("/api/obs/toggle", async (req, res) => {
+  app.post("/api/obs/toggle", requireAuth, async (req, res) => {
     const visible = Boolean(req.body?.visible);
     const s = host.getSettings();
     try {
@@ -152,9 +168,9 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   });
 
   /** Full settings for the streamer control panel. */
-  app.get("/api/settings", (_req, res) => res.json(host.getSettings()));
+  app.get("/api/settings", requireAuth, (_req, res) => res.json(host.getSettings()));
 
-  app.post("/api/settings", (req, res) => {
+  app.post("/api/settings", requireAuth, (req, res) => {
     const next = host.updateSettings(req.body ?? {});
     engineEmit.status(engine.snapshot()); // reflect any wiring changes
     res.json(next);
@@ -208,7 +224,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   });
 
   /** Streamer panic toggle (also bound to a hotkey on the router page). */
-  app.post("/api/panic", (_req, res) => {
+  app.post("/api/panic", requireAuth, (_req, res) => {
     const paused = engine.togglePause();
     res.json({ paused });
   });
@@ -216,7 +232,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   /** Streamer console trigger — fire a hijack directly from the router page.
    *  Runs the identical job pipeline (queue → state machine → OBS), minus
    *  payment/matching. Localhost-only by nature (server binds locally). */
-  app.post("/api/dev/hijack", (req, res) => {
+  app.post("/api/dev/hijack", requireAuth, (req, res) => {
     const prompt = String(req.body?.prompt ?? "").trim();
     const durationSec = Number(req.body?.durationSec ?? 15);
     if (!prompt) return res.status(400).json({ error: "prompt required" });
@@ -229,7 +245,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   });
 
   /** Dev trigger — fakes a tip so the whole path runs without Streamlabs. */
-  app.post("/api/dev/fake-tip", (req, res) => {
+  app.post("/api/dev/fake-tip", requireAuth, (req, res) => {
     const parsed = parseFakeTip(req.body);
     if ("error" in parsed) return res.status(400).json(parsed);
     const outcome = engine.onTip(parsed);
@@ -275,7 +291,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       engine.setRouterState("OFFLINE");
     },
     getStatus: () => engine.snapshot(),
-  });
+  }, { authToken: host.authToken });
 
   // ── Triggers ─────────────────────────────────────────────────────────────
   const triggers: TriggerAdapter[] = [];

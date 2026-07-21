@@ -17,10 +17,13 @@
 //    countdown honest; this kills the tab-throttling failure mode that a
 //    Chrome-tab router suffers.
 
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   app,
   BrowserWindow,
   globalShortcut,
+  ipcMain,
   Menu,
   nativeImage,
   powerSaveBlocker,
@@ -31,11 +34,15 @@ import {
 import { createLocalServer, type LocalServer } from "@rh/sidecar";
 import { log, warn } from "@rh/core";
 import {
+  getAuthToken,
   getSettings,
+  keysStatus,
   loadKeys,
+  saveKeys,
   updateSettings,
   uploadsDir,
   webDistDir,
+  type Keys,
 } from "./config.js";
 
 // Fixed local port (D2). Fallbacks keep the app alive on collision; the OBS
@@ -45,6 +52,8 @@ const PORTS = [17712, 17713, 17714];
 let local: LocalServer | null = null;
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
+/** Canonical viewer URL (with auth) — set at boot, reused by tray actions. */
+let viewerUrlGlobal = "";
 
 // ── Single instance ────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -81,20 +90,40 @@ async function boot(): Promise<void> {
 
   // ── Local bridge: the embedded sidecar composition ─────────────────────
   const keys = loadKeys();
+  const authToken = getAuthToken();
   local = createLocalServer({
     ...keys,
     getSettings,
     updateSettings,
     uploadsDir,
     webDist: webDistDir(),
+    authToken,
   });
 
   const port = await listenOnFirstFreePort(local, PORTS);
   log("app", `local bridge on 127.0.0.1:${port}`);
 
   // ── OBS auto-provisioning (best-effort; retried via tray or next boot) ──
-  const viewerUrl = `http://127.0.0.1:${port}/viewer`;
-  void provisionObs(viewerUrl);
+  // The viewer URL carries the privilege token: the OBS page must register
+  // the "viewer" hub role, which is auth-gated (stream-hijack hardening).
+  viewerUrlGlobal = `http://127.0.0.1:${port}/viewer?auth=${authToken}`;
+  void provisionObs(viewerUrlGlobal);
+
+  // ── Keys/settings IPC for the in-app setup panel ───────────────────────
+  ipcMain.handle("rh:keys-status", () => keysStatus());
+  ipcMain.handle("rh:save-keys", (_e, k: Record<string, string>) => {
+    // Drop empty fields so a partial paste never blanks a stored secret.
+    const patch: Partial<Keys> = {};
+    if (k.decartApiKey) patch.decartApiKey = k.decartApiKey;
+    if (k.streamlabsToken) patch.streamlabsToken = k.streamlabsToken;
+    if (k.obsWsUrl) patch.obsWsUrl = k.obsWsUrl;
+    if (k.obsWsPassword) patch.obsWsPassword = k.obsWsPassword;
+    saveKeys(patch);
+  });
+  ipcMain.handle("rh:relaunch", () => {
+    app.relaunch();
+    app.exit(0);
+  });
 
   // ── Router window ──────────────────────────────────────────────────────
   win = new BrowserWindow({
@@ -104,6 +133,9 @@ async function boot(): Promise<void> {
     webPreferences: {
       // The countdown + teardown timers must run while minimized/occluded.
       backgroundThrottling: false,
+      preload: resolve(dirname(fileURLToPath(import.meta.url)), "preload.cjs"),
+      // The token rides preload argv — process.argv is readable there.
+      additionalArguments: [`--rh-auth=${authToken}`],
     },
   });
   // Closing the window quits the app (the router IS the product for now);
@@ -188,13 +220,11 @@ function setupTray(port: number): void {
   // icon lands with M5 packaging.
   tray = new Tray(nativeImage.createEmpty());
   tray.setToolTip("Reality Hijack");
-  trayPort = port;
+  void port; // reserved: shown in a future tray "about" line
   refreshTray();
   // Cheap status poll — the tray is a glanceable, not a dashboard.
   setInterval(refreshTray, 3000);
 }
-
-let trayPort = 0;
 
 function refreshTray(): void {
   if (!tray || !local) return;
@@ -228,7 +258,7 @@ function refreshTray(): void {
       },
       {
         label: "Re-provision OBS source",
-        click: () => void provisionObs(`http://127.0.0.1:${trayPort}/viewer`),
+        click: () => void provisionObs(viewerUrlGlobal),
       },
       { type: "separator" },
       {

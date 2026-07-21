@@ -6,7 +6,7 @@
   "description": "Reality Hijack companion app — the single download for streamers",
   "main": "dist/main.mjs",
   "scripts": {
-    "build:main": "esbuild src/main/main.ts --bundle --platform=node --format=esm --packages=external --alias:@rh/shared=../shared/src/index.ts --alias:@rh/core=../core/src/index.ts --alias:@rh/sidecar=../sidecar/src/server.ts --outfile=dist/main.mjs",
+    "build:main": "esbuild src/main/main.ts --bundle --platform=node --format=esm --packages=external --alias:@rh/shared=../shared/src/index.ts --alias:@rh/core=../core/src/index.ts --alias:@rh/sidecar=../sidecar/src/server.ts --outfile=dist/main.mjs && esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.cjs",
     "dev": "npm run build:main && electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

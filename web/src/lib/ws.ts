@@ -1,6 +1,7 @@
 // Typed hub WebSocket client with auto-reconnect + role registration.
 
 import type { ClientMsg, Role, ServerMsg } from "@rh/shared";
+import { authToken } from "./auth.js";
 
 export class HubSocket {
   private ws: WebSocket | null = null;
@@ -19,7 +20,12 @@ export class HubSocket {
     this.ws = ws;
 
     ws.onopen = () => {
-      this.raw({ t: "hello", role: this.role, code: this.code });
+      this.raw({
+        t: "hello",
+        role: this.role,
+        code: this.code,
+        auth: authToken(),
+      });
       const pending = this.outbox;
       this.outbox = [];
       pending.forEach((m) => this.raw(m));

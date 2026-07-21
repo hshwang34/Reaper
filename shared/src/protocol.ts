@@ -18,6 +18,13 @@ export interface HelloMsg {
   role: Role;
   /** Portal only: the claim code it wants submission updates for. */
   code?: string;
+  /** Privileged-role auth (router/viewer). Local hosts use a per-install
+   *  token (Electron preload / provisioned OBS URL); the hosted control
+   *  plane uses a session JWT. Absent on public portal connections. */
+  auth?: string;
+  /** Multi-tenant routing on the hosted control plane (M3). A local
+   *  single-streamer hub ignores it. */
+  channel?: string;
 }
 
 /** Router reports a lifecycle transition. */

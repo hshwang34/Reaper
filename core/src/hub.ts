@@ -31,6 +31,17 @@ export interface HubHandlers {
   getStatus(): StatusSnapshot;
 }
 
+export interface HubOptions {
+  /** When set, hello as a privileged role (router/viewer) must carry this
+   *  token or the socket is dropped. Portal stays public — it only receives
+   *  broadcast status and its own submission updates. WS connections aren't
+   *  CORS-gated, so this is what stops a hostile local page from registering
+   *  as router (job theft) or viewer (stream hijack / fake frames-ok). */
+  authToken?: string;
+}
+
+const PRIVILEGED_ROLES: ReadonlySet<Role> = new Set(["router", "viewer"]);
+
 export class Hub {
   private wss: WebSocketServer;
   private meta = new WeakMap<WebSocket, SocketMeta>();
@@ -40,7 +51,11 @@ export class Hub {
     viewer: new Set(),
   };
 
-  constructor(server: Server, private handlers: HubHandlers) {
+  constructor(
+    server: Server,
+    private handlers: HubHandlers,
+    private opts: HubOptions = {},
+  ) {
     this.wss = new WebSocketServer({ server, path: "/ws" });
     this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
   }
@@ -62,6 +77,15 @@ export class Hub {
   private onMessage(ws: WebSocket, msg: AnyMsg): void {
     // Registration must come first.
     if (msg.t === "hello") {
+      if (
+        this.opts.authToken &&
+        PRIVILEGED_ROLES.has(msg.role) &&
+        msg.auth !== this.opts.authToken
+      ) {
+        warn("hub", `rejected unauthenticated ${msg.role} hello`);
+        ws.close(4401, "auth required");
+        return;
+      }
       const meta: SocketMeta = { role: msg.role, code: msg.code };
       this.meta.set(ws, meta);
       this.byRole[msg.role].add(ws);
