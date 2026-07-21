@@ -194,8 +194,14 @@ export default function RouterPage() {
           </dl>
         </section>
 
-        {/* Right: guardrail settings + log */}
+        {/* Right: manual fire + guardrail settings + log */}
         <section className="space-y-4">
+          <ManualHijackPanel
+            armed={state !== "OFFLINE" && state !== "ARMING"}
+            busy={state !== "IDLE"}
+            state={state}
+            onFired={(outcome) => pushLog(`manual hijack → ${outcome}`)}
+          />
           <SettingsPanel onSaved={(s) => pushLog(`settings saved (min $${s.minTipUSD}, max ${s.maxDurationSec}s)`)} />
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
@@ -209,6 +215,88 @@ export default function RouterPage() {
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+/** Streamer console: type a prompt, fire a hijack directly — no tip, no chat.
+ *  Disabled until the camera is armed; queues normally if a job is running. */
+function ManualHijackPanel({
+  armed,
+  busy,
+  state,
+  onFired,
+}: {
+  armed: boolean;
+  busy: boolean;
+  state: string;
+  onFired: (outcome: string) => void;
+}) {
+  const [prompt, setPrompt] = useState(
+    "Transform the person into an ancient Egyptian mummy wrapped in tattered linen bandages, dim golden tomb lighting",
+  );
+  const [duration, setDuration] = useState(15);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function fire() {
+    if (!prompt.trim()) return;
+    setSending(true);
+    setError(null);
+    try {
+      const res = await api.manualHijack(prompt.trim(), duration);
+      onFired(res.outcome);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-fuchsia-900/60 bg-zinc-950 p-4">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-fuchsia-400">
+        Manual hijack
+      </h3>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        rows={2}
+        placeholder="Describe the reality to impose…"
+        className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-2 text-sm outline-none focus:border-fuchsia-500"
+      />
+      <div className="mt-2 flex items-center gap-3">
+        <label className="flex items-center gap-2 text-sm text-zinc-400">
+          Duration
+          <input
+            type="number"
+            min={1}
+            max={120}
+            value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))}
+            className="w-16 rounded bg-zinc-900 px-2 py-1"
+          />
+          s
+        </label>
+        <button
+          onClick={fire}
+          disabled={!armed || sending || !prompt.trim()}
+          className="ml-auto rounded-lg bg-fuchsia-600 px-4 py-1.5 text-sm font-bold hover:bg-fuchsia-500 disabled:opacity-40"
+        >
+          {sending ? "Firing…" : busy ? "Queue hijack" : "Fire hijack"}
+        </button>
+      </div>
+      {!armed && (
+        <p className="mt-2 text-xs text-amber-400">
+          Arm the camera first — the hijack needs a live camera feed.
+        </p>
+      )}
+      {busy && armed && (
+        <p className="mt-2 text-xs text-zinc-500">
+          A job is running ({state}) — new fires join the queue.
+        </p>
+      )}
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
     </div>
   );
 }

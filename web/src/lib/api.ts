@@ -43,6 +43,13 @@ export const api = {
       json<{ code: string; expiresAt: number }>,
     ),
 
+  manualHijack: (prompt: string, durationSec: number) =>
+    fetch("/api/dev/hijack", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt, durationSec }),
+    }).then(json<{ ok: boolean; outcome: string }>),
+
   fakeTip: (amount: number, message: string, username?: string) =>
     fetch("/api/dev/fake-tip", {
       method: "POST",

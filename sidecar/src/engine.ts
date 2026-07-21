@@ -91,6 +91,30 @@ export class Engine {
     return this.enqueue(job);
   }
 
+  /** Streamer-fired hijack from the router console: no payment, no matching,
+   *  no min-tip — but the same duration cap, queue, and state machine. */
+  manual(prompt: string, durationSec: number): string {
+    const s = getSettings();
+    const d = Math.min(Math.max(1, Math.floor(durationSec)), s.maxDurationSec);
+    const job: HijackJob = {
+      jobId: randomUUID(),
+      prompt,
+      presetId: null,
+      imageUrl: null,
+      durationSec: d,
+      tip: {
+        source: "manual",
+        amount: 0,
+        message: "(streamer console)",
+        username: "streamer",
+        isTest: true,
+      },
+      matchedBy: "manual",
+    };
+    this.jobCode.set(job.jobId, null);
+    return this.enqueue(job);
+  }
+
   private enqueue(job: HijackJob): string {
     const s = getSettings();
     if (this.queue.length >= s.queueDepth) {

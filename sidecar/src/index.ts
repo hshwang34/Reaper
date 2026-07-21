@@ -163,6 +163,21 @@ app.post("/api/panic", (_req, res) => {
   res.json({ paused });
 });
 
+/** Streamer console trigger — fire a hijack directly from the router page.
+ *  Runs the identical job pipeline (queue → state machine → OBS), minus
+ *  payment/matching. Localhost-only by nature (sidecar binds locally). */
+app.post("/api/dev/hijack", (req, res) => {
+  const prompt = String(req.body?.prompt ?? "").trim();
+  const durationSec = Number(req.body?.durationSec ?? 15);
+  if (!prompt) return res.status(400).json({ error: "prompt required" });
+  if (!Number.isFinite(durationSec) || durationSec <= 0) {
+    return res.status(400).json({ error: "durationSec must be positive" });
+  }
+  const outcome = engine.manual(prompt, durationSec);
+  log("manual", `${durationSec}s "${prompt.slice(0, 40)}…" → ${outcome}`);
+  res.json({ ok: true, outcome });
+});
+
 /** Dev trigger — fakes a tip so the whole path runs without Streamlabs. */
 app.post("/api/dev/fake-tip", (req, res) => {
   const parsed = parseFakeTip(req.body);

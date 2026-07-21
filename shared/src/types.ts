@@ -3,9 +3,10 @@
 /** A page's role in the system. Registered on WS connect. */
 export type Role = "portal" | "router" | "viewer";
 
-/** Normalized trigger event — every trigger adapter emits this shape. */
+/** Normalized trigger event — every trigger adapter emits this shape.
+ *  "manual" = fired by the streamer from the router console (no payment). */
 export interface TipEvent {
-  source: "streamlabs" | "twitch-eventsub" | "fake";
+  source: "streamlabs" | "twitch-eventsub" | "fake" | "manual";
   /** Amount in USD. */
   amount: number;
   /** Free-text message the tipper attached (may contain the claim code). */
@@ -38,7 +39,7 @@ export interface HijackJob {
   durationSec: number;
   tip: TipEvent;
   /** How the tip was matched to a submission (for logs / portal display). */
-  matchedBy: "code" | "username" | "sole-pending" | "default-preset";
+  matchedBy: "code" | "username" | "sole-pending" | "default-preset" | "manual";
 }
 
 /** The router's lifecycle state, reported to the sidecar and fanned out. */
