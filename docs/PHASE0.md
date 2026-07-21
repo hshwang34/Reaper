@@ -67,3 +67,7 @@ With S1–S4 done: open `/router` (arm) and `/portal` on one machine, add the
 `/viewer` Browser Source in OBS, submit a prompt+image on the portal, fire a
 Streamlabs test donation carrying the claim code, and watch your OBS program
 output get hijacked for exactly the paid number of seconds, then revert.
+
+Once that works, harden it into a demo rig you can trust in front of anyone:
+work through [`VERIFICATION.md`](./VERIFICATION.md) — the cost-safety, kill-test,
+latency, and soak checklist that signs the MVP off as commercialization-ready.
