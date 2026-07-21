@@ -16,20 +16,29 @@ appear throughout the code comments.
 
 ## Commands
 
-Everything runs on one machine. There is no cloud backend; the "server" is a local sidecar.
+The **demo rig** runs on one machine with no cloud (the "server" is a local sidecar). The
+**commercial path** adds a downloadable Electron app + a hosted control plane; both reuse the
+same `core/` money path.
 
 ```bash
 npm install
 cp .env.example .env      # leave keys blank → MOCK mode (camera passthrough, no cost)
-npm run dev               # concurrently: sidecar :7712 + web :5173
-npm run typecheck         # typechecks shared, core, sidecar, web in order — the only test gate
+npm run dev               # demo rig: concurrently sidecar :7712 + web :5173
+npm run typecheck         # tsc --noEmit across all SIX workspaces — the only test gate
 npm run build             # builds the web app only
-npm run start             # production mode: build, then ONE process on :7712 serving everything
+npm run start             # production demo rig: build, then ONE process on :7712
+
+npm run dev:app           # build web, then launch the Electron app (local mode)
+npm run dev:server        # the hosted control plane on :8790 (DEV AUTH if no Twitch app)
 ```
 
-Per-workspace: `npm run dev:sidecar`, `npm run dev:web`. There is **no test runner and no
-linter** — `npm run typecheck` (tsc `--noEmit` across all four workspaces) is the check to run
-after edits.
+Cloud-mode dev loop: run `dev:server`, then launch the app with
+`RH_CLOUD_URL=http://127.0.0.1:8790 RH_CLOUD_LOGIN=<name>` — it dev-signs-in and links.
+Package the app: `npm run package --workspace app` (unsigned `--dir`) or `dist` (dmg;
+signing/notarization gated on Apple secrets, see `.github/workflows/release.yml`).
+
+Per-workspace dev: `npm run dev:sidecar`, `npm run dev:web`. There is **no test runner and no
+linter** — `npm run typecheck` is the check to run after edits.
 
 ### Demoing the loop without credentials
 1. Open `http://localhost:5173/router`, click **Arm camera** (needs a real Chrome tab).
@@ -40,29 +49,41 @@ after edits.
 
 ## Architecture
 
-npm-workspaces monorepo. Four packages:
+npm-workspaces monorepo. Six packages. The `core/` money path runs unchanged in three
+hosts — the sidecar demo rig, the Electron app's local bridge, and the hosted control
+plane's per-channel runtimes — which is the whole point of the extraction.
 
 - **`shared/`** (`@rh/shared`) — the single source of truth: domain `types.ts`, the WS
-  `protocol.ts` (discriminated union on `t`), and the `presets.ts` catalog. Everything
-  imports it; the web consumes it *as source* via a Vite alias (see `web/vite.config.ts`).
+  `protocol.ts` (discriminated union on `t`; `HelloMsg` carries `auth`/`channel`), and the
+  `presets.ts` catalog. Everything imports it; the web consumes it *as source* via a Vite alias.
 - **`core/`** (`@rh/core`) — the portable money path: `engine.ts` (tip→job→queue),
-  `correlation.ts` (tip↔submission matching), `moderation.ts`, `hub.ts` (WS relay), and the
-  trigger adapters. Host-agnostic by construction: `Engine` takes an injected `getSettings`,
-  the log sink is swappable (`setLogger`). One implementation, multiple hosts (sidecar today;
-  the hosted control plane and Electron app per `docs/COMMERCIALIZATION.md`).
-- **`sidecar/`** (`@rh/sidecar`, tsx) — the demo-rig composition root: Node/Express wiring
-  `@rh/core` to local config, uploads, Decart token minting, and server-side OBS control.
-  Holds all secrets. In production mode (`npm run start`) it also serves the built web app,
-  so the whole product is one process on one port.
-- **`web/`** (`@rh/web`, Vite + React 19 + Tailwind 4) — three routes, each a distinct role:
-  - `/portal` — viewer UI (prompt, image, claim code, live status).
-  - `/router` — the streamer's real Chrome tab: captures the camera, runs the per-job state
-    machine, talks to Decart.
-  - `/viewer` — a dumb display page loaded inside an **OBS Browser Source**; receives the AI
-    stream over a local WebRTC loopback and reports verified frames.
+  `correlation.ts` (tip↔submission matching), `moderation.ts`, `hub.ts` (WS relay, with a
+  local mode that owns a `WebSocketServer` and an adopted mode the hosted front door drives),
+  `decart.ts` (ek_ minting), and the trigger adapters. Host-agnostic by construction: `Engine`
+  takes an injected `getSettings`, the log sink is swappable (`setLogger`).
+- **`sidecar/`** (`@rh/sidecar`, tsx) — the demo-rig composition root. `server.ts` is a
+  `createLocalServer(host)` factory (routes + hub + minting + OBS + static serving) that both
+  the CLI (`index.ts`, config from `.env`) and the Electron app embed. `obs.ts` also does
+  `ensureBrowserSource()` auto-provisioning. In production mode (`npm run start`) it serves the
+  built web app — one process, one port.
+- **`app/`** (`@rh/app`, Electron) — the "single download" for streamers. Main process embeds
+  the sidecar composition as a local bridge (127.0.0.1:17712), auto-provisions the OBS Browser
+  Source, holds a per-install auth token, tray + ⌘⇧H panic, and — when signed in — a
+  `cloudLink.ts` to the control plane (**cloud mode**: no Decart key on the machine; the local
+  bridge keeps only OBS control + signaling + page serving). Renderer runs the existing
+  `/router` page in bundled Chromium. `local mode` (pasted keys) is the permanent offline demo.
+- **`server/`** (`@rh/server`, tsx) — the hosted control plane. Twitch OAuth → our JWTs,
+  per-channel in-memory `ChannelRuntime` (one `@rh/core` engine each), server-side job-gated +
+  budget-capped minting, the hijack ledger (SQLite/Drizzle), and the hosted portal at
+  `/c/:channel`. One WS front door routes sockets to per-channel adopted hubs.
+- **`web/`** (`@rh/web`, Vite + React 19 + Tailwind 4) — routes: `/portal` (viewer; also served
+  hosted at `/c/:channel`), `/router` (streamer capture + state machine), `/viewer` (OBS
+  Browser Source display), `/setup` (desktop onboarding wizard), `/dashboard` (hosted streamer
+  dashboard). `lib/auth.ts` + `lib/channel.ts` make the same pages work local and hosted.
 
-The browser only ever talks to the sidecar, same-origin, through the Vite dev proxy
-(`/api`, `/uploads`, `/ws` → `:7712`). Secrets never reach a page.
+Browser pages talk to whichever host serves them, same-origin (Vite proxy in dev). Secrets
+never reach a page. The **local plane** (rtc signaling + `viewer:frames-ok`) never leaves the
+streamer's machine — the cloud front door rejects it (`rejectLocalPlane`).
 
 ### The one hard-won constraint (don't "simplify" these)
 
