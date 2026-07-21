@@ -26,14 +26,50 @@ export async function findObsCameraDeviceId(): Promise<string | null> {
   return cam?.deviceId ?? null;
 }
 
+/** All video inputs, for the router's device picker. Labels are only
+ *  populated after a getUserMedia grant, so call this post-arm. */
+export async function listCameras(): Promise<
+  { deviceId: string; label: string }[]
+> {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices
+    .filter((d) => d.kind === "videoinput")
+    .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Camera ${i + 1}` }));
+}
+
+/** 1080p ideal-constraints for a specific device: Decart downscales to its
+ *  720p input anyway, and a sharper source measurably improves restyle quality. */
+function constraintsFor(deviceId: string): MediaStreamConstraints {
+  return {
+    video: {
+      deviceId: { exact: deviceId },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+      frameRate: { ideal: 30 },
+    },
+    audio: false,
+  };
+}
+
 /**
- * Acquire the OBS Virtual Camera at 720p. Falls back to the default camera if
- * OBS's virtual cam isn't present (so the demo still runs on any webcam).
+ * Acquire a camera. With no argument: prefer the OBS Virtual Camera by label,
+ * falling back to the default camera (so the demo still runs on any webcam).
+ * With an explicit deviceId (the router's picker): use exactly that device.
  */
-export async function acquireCamera(): Promise<{
+export async function acquireCamera(deviceId?: string): Promise<{
   stream: MediaStream;
   usingObs: boolean;
 }> {
+  if (deviceId) {
+    const stream = await navigator.mediaDevices.getUserMedia(
+      constraintsFor(deviceId),
+    );
+    const track = stream.getVideoTracks()[0];
+    const s = track?.getSettings();
+    debugLog("camera", `capturing ${s?.width}x${s?.height}@${s?.frameRate}`);
+    return { stream, usingObs: OBS_CAMERA_RE.test(track?.label ?? "") };
+  }
+
   // One generic grant first so device labels become visible.
   const probe = await navigator.mediaDevices.getUserMedia({
     video: true,
@@ -43,17 +79,9 @@ export async function acquireCamera(): Promise<{
   if (!obsId) return { stream: probe, usingObs: false };
 
   probe.getTracks().forEach((t) => t.stop());
-  // Ask for the virtual camera's full 1080p: Decart downscales to its 720p
-  // input anyway, and a sharper source measurably improves restyle quality.
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      deviceId: { exact: obsId },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-      frameRate: { ideal: 30 },
-    },
-    audio: false,
-  });
+  const stream = await navigator.mediaDevices.getUserMedia(
+    constraintsFor(obsId),
+  );
   const s = stream.getVideoTracks()[0]?.getSettings();
   debugLog("camera", `capturing ${s?.width}x${s?.height}@${s?.frameRate}`);
   return { stream, usingObs: true };

@@ -20,6 +20,7 @@ import { app } from "electron";
 import { config as loadDotenv } from "dotenv";
 import { DEFAULT_SETTINGS, type Settings } from "@rh/shared";
 import { log, warn } from "@rh/core";
+import { discoverObsWebsocket } from "./obsDiscovery.js";
 
 const userData = app.getPath("userData");
 const settingsPath = resolve(userData, "settings.json");
@@ -44,30 +45,45 @@ export interface Keys {
 }
 
 export function loadKeys(): Keys {
+  // OBS credential precedence: keys.json explicit → auto-discovery from
+  // obs-websocket's own config file (the "nothing to paste" path — and ground
+  // truth, since it's the file OBS actually reads) → .env (dev) → default.
+  let saved: Partial<Keys> = {};
   if (existsSync(keysPath)) {
     try {
-      const k = JSON.parse(readFileSync(keysPath, "utf8"));
-      return {
-        decartApiKey: String(k.decartApiKey ?? ""),
-        streamlabsToken: String(k.streamlabsToken ?? ""),
-        obsWsUrl: String(k.obsWsUrl ?? "ws://127.0.0.1:4455"),
-        obsWsPassword: String(k.obsWsPassword ?? ""),
-      };
+      saved = JSON.parse(readFileSync(keysPath, "utf8")) as Partial<Keys>;
     } catch {
       warn("app-config", "keys.json unreadable — falling back");
     }
   }
+
   // Dev fallback: the repo's .env.
   const root = devRepoRoot();
   if (root) {
     loadDotenv({ path: resolve(root, ".env"), quiet: true });
     log("app-config", "using repo .env credentials (dev fallback)");
   }
+
+  const discovered = discoverObsWebsocket();
+  const obsExplicit = saved.obsWsUrl != null || saved.obsWsPassword != null;
+
   return {
-    decartApiKey: process.env.DECART_API_KEY?.trim() || "",
-    streamlabsToken: process.env.STREAMLABS_SOCKET_TOKEN?.trim() || "",
-    obsWsUrl: process.env.OBS_WS_URL?.trim() || "ws://127.0.0.1:4455",
-    obsWsPassword: process.env.OBS_WS_PASSWORD ?? "",
+    decartApiKey:
+      String(saved.decartApiKey ?? "") ||
+      process.env.DECART_API_KEY?.trim() ||
+      "",
+    streamlabsToken:
+      String(saved.streamlabsToken ?? "") ||
+      process.env.STREAMLABS_SOCKET_TOKEN?.trim() ||
+      "",
+    obsWsUrl: obsExplicit
+      ? String(saved.obsWsUrl ?? "ws://127.0.0.1:4455")
+      : (discovered.url ??
+        process.env.OBS_WS_URL?.trim() ??
+        "ws://127.0.0.1:4455"),
+    obsWsPassword: obsExplicit
+      ? String(saved.obsWsPassword ?? "")
+      : (discovered.password ?? process.env.OBS_WS_PASSWORD ?? ""),
   };
 }
 

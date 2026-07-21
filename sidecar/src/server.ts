@@ -13,7 +13,6 @@ import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import express from "express";
-import cors from "cors";
 import { getPreset, PRESETS, type Settings } from "@rh/shared";
 import {
   CorrelationStore,
@@ -67,7 +66,12 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   );
 
   const app = express();
-  app.use(cors());
+  // Deliberately NO cors() here: every legitimate consumer is same-origin
+  // (dev pages reach us through the Vite proxy; in production/Electron we
+  // serve the pages ourselves). A wildcard CORS header would instead invite
+  // any website open in the streamer's browser to drive the money/panic/OBS
+  // endpoints. Browser WS connections aren't CORS-gated, so role auth on the
+  // hub (per-boot token) is the remaining hardening — tracked for M2 polish.
   app.use(express.json());
 
   // ── Engine ↔ Hub wiring (late-bound to break the construction cycle) ─────
@@ -295,7 +299,10 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       if (!host.streamlabsToken) {
         warn("server", "no Streamlabs token — only fake-tip trigger active");
       }
-      server.listen(port, () => {
+      // Loopback-only: this server holds panic/OBS/token-mint endpoints and
+      // must never be reachable from the LAN. (Was previously an implicit
+      // all-interfaces bind — flagged by security review.)
+      server.listen(port, "127.0.0.1", () => {
         log("server", `local server on http://localhost:${port}`);
         log("server", `decart: ${decartEnabled ? "LIVE" : "MOCK (no key)"}`);
         // Best-effort OBS connect; fine if OBS isn't running yet.

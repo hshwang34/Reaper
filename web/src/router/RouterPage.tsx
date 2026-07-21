@@ -10,7 +10,7 @@ import { api, type RouterConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
 import { LoopbackSender } from "../lib/loopback.js";
 import { RouterMachine } from "./stateMachine.js";
-import { acquireCamera } from "./decartSession.js";
+import { acquireCamera, listCameras } from "./decartSession.js";
 
 const STATE_COLOR: Record<RouterState, string> = {
   OFFLINE: "bg-zinc-600",
@@ -36,6 +36,9 @@ export default function RouterPage() {
   const [cfg, setCfg] = useState<RouterConfig | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [armError, setArmError] = useState<string | null>(null);
+  const [cams, setCams] = useState<{ deviceId: string; label: string }[]>([]);
+  const [camId, setCamId] = useState<string>("auto");
+  const camStreamRef = useRef<MediaStream | null>(null);
 
   const pushLog = (line: string) =>
     setLogLines((prev) => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev].slice(0, 40));
@@ -97,10 +100,13 @@ export default function RouterPage() {
     };
   }, []);
 
-  async function arm() {
+  async function arm(deviceId?: string) {
     setArmError(null);
     try {
-      const { stream, usingObs } = await acquireCamera();
+      const { stream, usingObs } = await acquireCamera(deviceId);
+      // Re-arm path (picker change): release the previous device first.
+      camStreamRef.current?.getTracks().forEach((t) => t.stop());
+      camStreamRef.current = stream;
       if (previewRef.current) {
         previewRef.current.srcObject = stream;
         void previewRef.current.play().catch(() => {});
@@ -109,11 +115,22 @@ export default function RouterPage() {
       pushLog(
         usingObs
           ? "armed on OBS Virtual Camera"
-          : "armed on default camera (OBS Virtual Camera not found)",
+          : deviceId
+            ? `armed on ${stream.getVideoTracks()[0]?.label ?? "selected camera"}`
+            : "armed on default camera (OBS Virtual Camera not found)",
       );
+      // Labels are visible now that permission is granted — populate picker.
+      setCams(await listCameras());
     } catch (e) {
       setArmError((e as Error).message);
     }
+  }
+
+  /** Picker fallback for when the label match got the wrong device (or the
+   *  streamer wants a different one). Only offered between jobs. */
+  function switchCamera(id: string) {
+    setCamId(id);
+    void arm(id === "auto" ? undefined : id);
   }
 
   async function panic() {
@@ -176,11 +193,28 @@ export default function RouterPage() {
           </div>
           {!machineRef.current?.hasCamera() && state === "OFFLINE" && (
             <button
-              onClick={arm}
+              onClick={() => void arm()}
               className="w-full rounded-lg bg-emerald-600 px-4 py-2 font-semibold hover:bg-emerald-500"
             >
               Arm camera
             </button>
+          )}
+          {cams.length > 0 && (state === "IDLE" || state === "OFFLINE") && (
+            <label className="flex items-center gap-2 text-sm text-zinc-400">
+              Camera
+              <select
+                value={camId}
+                onChange={(e) => switchCamera(e.target.value)}
+                className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-sm"
+              >
+                <option value="auto">Auto (prefer OBS Virtual Camera)</option>
+                {cams.map((c) => (
+                  <option key={c.deviceId} value={c.deviceId}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
           {armError && (
             <p className="text-sm text-red-400">Arm failed: {armError}</p>
