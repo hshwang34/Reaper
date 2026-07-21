@@ -25,6 +25,15 @@ export interface EngineEmit {
   submissionUpdate(code: string, status: Omit<SubmissionStatus, "code">): void;
 }
 
+// Engine-side backstop: how long past a job's paid duration we wait for the
+// router to report `job:done` before force-failing it to free the queue. Must
+// comfortably exceed the router's worst-case healthy wall-time (AUTHORIZING +
+// ≤10s connect + ≤8s buffer + duration + its own duration+10s watchdog), so it
+// only ever fires when the router genuinely died mid-job. This frees the queue;
+// runaway billing is already bounded independently by the token's
+// maxSessionDuration (see decart.ts).
+const JOB_DEADLINE_GRACE_MS = 45_000;
+
 export class Engine {
   private queue: HijackJob[] = [];
   private active: HijackJob | null = null;
@@ -32,6 +41,8 @@ export class Engine {
   private routerState: RouterState = "OFFLINE";
   private paused = false;
   private cooldownUntil = 0;
+  /** Backstop timer for the active job; cleared when it reports done. */
+  private jobDeadline?: ReturnType<typeof setTimeout>;
   /** jobId → originating submission code (null for default-preset jobs). */
   private jobCode = new Map<string, string | null>();
 
@@ -149,20 +160,46 @@ export class Engine {
         message: "Your hijack is LIVE.",
       });
     }
+    // The router vanished (tab closed/crashed/disarmed, or WS dropped) with a
+    // job in flight. Its Decart session and OBS state died with it, and no
+    // job:done will ever arrive — so fail the job now instead of stalling the
+    // queue forever. Decart's server-side cap already stops any billing.
+    if (state === "OFFLINE" && this.active) {
+      this.finishActive(false, "router disconnected mid-hijack");
+    }
     this.broadcast();
     if (state === "IDLE") this.tryDispatch();
   }
 
   onJobDone(jobId: string, ok: boolean, reason?: string): void {
-    if (this.active && this.active.jobId === jobId) {
-      this.notify(this.active, {
-        state: ok ? "done" : "failed",
-        message: ok ? "Hijack complete." : `Hijack failed: ${reason ?? "error"}`,
-      });
-      this.jobCode.delete(jobId);
-      this.active = null;
-      this.activeRemaining = 0;
-    }
+    // Ignore stale reports for a job we've already cleared (e.g. after an
+    // engine-side deadline or a router-loss fail).
+    if (this.active?.jobId === jobId) this.finishActive(ok, reason ?? "error");
+  }
+
+  /** Backstop fired when the router never reported a job done in time. */
+  private onJobDeadline(jobId: string): void {
+    if (this.active?.jobId !== jobId) return;
+    warn("engine", `job ${jobId.slice(0, 8)} exceeded deadline — force-failing`);
+    // Best-effort: tell the router to tear down in case it's a live zombie.
+    this.emit.cancelJob(jobId, "engine deadline");
+    this.finishActive(false, "router never reported completion");
+  }
+
+  /** Complete the active job — router-reported or engine-forced — and open the
+   *  cooldown before the next dispatch. Safe no-op when nothing is active. */
+  private finishActive(ok: boolean, reason: string): void {
+    const job = this.active;
+    if (!job) return;
+    clearTimeout(this.jobDeadline);
+    this.jobDeadline = undefined;
+    this.notify(job, {
+      state: ok ? "done" : "failed",
+      message: ok ? "Hijack complete." : `Hijack failed: ${reason}`,
+    });
+    this.jobCode.delete(job.jobId);
+    this.active = null;
+    this.activeRemaining = 0;
     // Cooldown before the next job inits.
     this.cooldownUntil = Date.now() + getSettings().cooldownSec * 1000;
     this.broadcast();
@@ -179,6 +216,12 @@ export class Engine {
     this.activeRemaining = job.durationSec;
     log("engine", `→dispatch ${job.jobId.slice(0, 8)} to router`);
     this.emit.dispatchJob(job);
+    // Arm the backstop: if the router never reports done, free the queue.
+    clearTimeout(this.jobDeadline);
+    this.jobDeadline = setTimeout(
+      () => this.onJobDeadline(job.jobId),
+      job.durationSec * 1000 + JOB_DEADLINE_GRACE_MS,
+    );
     // Update queued positions for everyone still waiting.
     this.queue.forEach((q, i) =>
       this.notify(q, { state: "queued", queuePosition: i + 1 }),
