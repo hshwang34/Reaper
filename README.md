@@ -195,6 +195,13 @@ Then, in a browser:
 For the real thing (AI restyle + OBS overlay + real tips), follow the
 credential + hardware setup in [`docs/PHASE0.md`](./docs/PHASE0.md).
 
+> **Diagnosing the AI hop?** With a Decart key set, open
+> **http://localhost:5173/decart-test** — an isolated camera → `lucy-2.5` →
+> output page with a connectivity preflight and full event log, no OBS or
+> loopback involved. If the restyle shows there, Decart works and any failure is
+> downstream (loopback/OBS). Append `?debug=1` to any page URL (including the OBS
+> viewer Browser Source) to surface the verbose pipeline trace in its console.
+
 ## Status
 
 MVP complete and verified: full tip → queue → timed-effect → revert loop, with

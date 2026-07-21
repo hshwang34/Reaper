@@ -13,6 +13,7 @@ import {
   models,
   type RealTimeClient,
 } from "@decartai/sdk";
+import { debugLog } from "../lib/debug.js";
 
 const OBS_CAMERA_RE = /obs\s*virtual\s*camera/i;
 
@@ -42,14 +43,19 @@ export async function acquireCamera(): Promise<{
   if (!obsId) return { stream: probe, usingObs: false };
 
   probe.getTracks().forEach((t) => t.stop());
+  // Ask for the virtual camera's full 1080p: Decart downscales to its 720p
+  // input anyway, and a sharper source measurably improves restyle quality.
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
       deviceId: { exact: obsId },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+      frameRate: { ideal: 30 },
     },
     audio: false,
   });
+  const s = stream.getVideoTracks()[0]?.getSettings();
+  debugLog("camera", `capturing ${s?.width}x${s?.height}@${s?.frameRate}`);
   return { stream, usingObs: true };
 }
 
@@ -82,8 +88,9 @@ export class DecartSession {
     // on teardown, and we want the preview camera to survive across jobs.
     this.publishStream = a.camera.clone();
     const inputTracks = this.publishStream.getVideoTracks();
-    console.warn(
-      "[decart] connecting… input video tracks:",
+    debugLog(
+      "decart",
+      "connecting… input video tracks:",
       inputTracks.length,
       inputTracks[0]?.readyState,
     );
@@ -96,10 +103,10 @@ export class DecartSession {
         prompt: { text: a.prompt, enhance: true },
         image: a.imageBlob ?? undefined,
       },
-      onConnectionChange: (state) => console.warn("[decart] conn=", state),
+      onConnectionChange: (state) => debugLog("decart", "conn=", state),
       onRemoteStream: (stream) => {
         const n = stream.getVideoTracks().length;
-        console.warn("[decart] onRemoteStream — video tracks:", n);
+        debugLog("decart", "onRemoteStream — video tracks:", n);
         if (n > 0) {
           a.onRemoteStream(stream);
         } else {
@@ -108,7 +115,7 @@ export class DecartSession {
           stream.onaddtrack = () => {
             if (stream.getVideoTracks().length > 0) {
               stream.onaddtrack = null;
-              console.warn("[decart] remote video track arrived (late)");
+              debugLog("decart", "remote video track arrived (late)");
               a.onRemoteStream(stream);
             }
           };
@@ -116,10 +123,10 @@ export class DecartSession {
       },
     });
     this.client.on("error", (e) =>
-      console.warn("[decart] error:", (e as { message?: string })?.message ?? e),
+      debugLog("decart", "error:", (e as { message?: string })?.message ?? e),
     );
     this.client.on("generationEnded", (g) =>
-      console.warn("[decart] generationEnded:", JSON.stringify(g)),
+      debugLog("decart", "generationEnded:", JSON.stringify(g)),
     );
   }
 

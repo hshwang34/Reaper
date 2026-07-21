@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { HubSocket } from "../lib/ws.js";
 import { LoopbackReceiver } from "../lib/loopback.js";
+import { debugLog } from "../lib/debug.js";
 
 const FRAMES_REQUIRED = 10; // consecutive decoded frames before we call it "up"
 const WIPE_MS = 420;
@@ -43,7 +44,7 @@ export default function ViewerPage() {
       const sendOk = (why: string) => {
         if (video.srcObject !== stream || sentOkForJob === jobId) return;
         sentOkForJob = jobId;
-        console.warn("[viewer] frames-ok →", why);
+        debugLog("viewer", "frames-ok →", why);
         hub.send({ t: "viewer:frames-ok", jobId });
       };
       const track = stream.getVideoTracks()[0];
@@ -90,7 +91,16 @@ export default function ViewerPage() {
         autoPlay
         muted
         playsInline
-        className="h-full w-full object-cover"
+        onLoadedMetadata={(e) => {
+          const v = e.currentTarget;
+          // Exact frame size — the OBS-side crop calibration depends on this.
+          debugLog("viewer", `frame ${v.videoWidth}x${v.videoHeight}`);
+        }}
+        // object-fill maps the frame 1:1 onto the 1280x720 page, so OBS-side
+        // pixel crops line up with frame pixels. (cover would re-crop/scale
+        // whenever the frame isn't exactly 16:9, silently shifting geometry.)
+        className="h-full w-full"
+        style={{ objectFit: "fill" }}
       />
       {/* Glitch wipe covers the cut in/out so the latency-jump reads as an
           intentional effect rather than a stutter. */}

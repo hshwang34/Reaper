@@ -1,14 +1,14 @@
 // Local WebRTC loopback between the router (sender) and viewer (receiver),
 // signaled through the hub. A fresh RTCPeerConnection per job keeps init/
-// teardown clean. No ICE servers needed — localhost host candidates connect
-// directly.
+// teardown clean. A STUN server is used so both peers gather server-reflexive
+// candidates — the reliable way to connect two browser contexts on the same
+// machine (Chrome tab ↔ OBS CEF), where mDNS host candidates often fail to
+// resolve.
 
 import type { RtcMsg, ServerMsg } from "@rh/shared";
 import type { HubSocket } from "./ws.js";
+import { debugLog } from "./debug.js";
 
-// A STUN server lets both peers gather server-reflexive candidates, which is
-// the reliable way to connect two browser contexts on the same machine (Chrome
-// tab ↔ OBS CEF) where mDNS host candidates often fail to resolve.
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
@@ -28,9 +28,9 @@ export class LoopbackSender {
     const pc = new RTCPeerConnection(RTC_CONFIG);
     this.pc = pc;
     pc.oniceconnectionstatechange = () =>
-      console.warn("[loopback:sender] ice=", pc.iceConnectionState);
+      debugLog("loopback:sender", "ice=", pc.iceConnectionState);
     pc.onconnectionstatechange = () =>
-      console.warn("[loopback:sender] conn=", pc.connectionState);
+      debugLog("loopback:sender", "conn=", pc.connectionState);
 
     for (const track of stream.getVideoTracks()) pc.addTrack(track, stream);
 
@@ -94,18 +94,18 @@ export class LoopbackReceiver {
   private async onMessage(m: ServerMsg): Promise<void> {
     const rtc = m as RtcMsg;
     if (rtc.t === "rtc:offer") {
-      console.warn("[loopback:viewer] offer received", rtc.jobId);
+      debugLog("loopback:viewer", "offer received", rtc.jobId);
       this.pc?.close();
       this.jobId = rtc.jobId;
       const pc = new RTCPeerConnection(RTC_CONFIG);
       this.pc = pc;
       pc.oniceconnectionstatechange = () =>
-        console.warn("[loopback:viewer] ice=", pc.iceConnectionState);
+        debugLog("loopback:viewer", "ice=", pc.iceConnectionState);
       pc.onconnectionstatechange = () =>
-        console.warn("[loopback:viewer] conn=", pc.connectionState);
+        debugLog("loopback:viewer", "conn=", pc.connectionState);
 
       pc.ontrack = (e) => {
-        console.warn("[loopback:viewer] ontrack — stream received");
+        debugLog("loopback:viewer", "ontrack — stream received");
         this.onStream(e.streams[0], rtc.jobId);
       };
       pc.onicecandidate = (e) => {
