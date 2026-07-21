@@ -119,4 +119,6 @@ billing a zombie session.
 
 - This is the **"Reaper"** repo on GitHub account `hshwang34`. Commit substantial changes with
   rich, reasoning-rich messages and well-commented code (portfolio visibility).
+- Default branch is `main` and there is **no `staging` branch** — worktrees branch from
+  `origin/HEAD` → `main` (an intentional exception to the global branch-off-staging rule).
 - Never commit `.env` or `sidecar/settings.json` (both gitignored).

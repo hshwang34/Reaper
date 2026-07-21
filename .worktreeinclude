@@ -1,0 +1,5 @@
+# Gitignored files copied into each new Claude Code worktree (gitignore syntax).
+# A worktree is a fresh checkout — without these, MOCK/dev mode has no config.
+.env
+.env.local
+sidecar/settings.json
