@@ -111,6 +111,12 @@ stream, from real footage:
   watch them react.
 - [Crowd Control](https://crowdcontrol.live/) is the paid-interaction loop this
   borrows — one surface over (their game vs. our scene).
+- The willingness-to-pay is already visible at the top of the market: Logan Paul
+  tells Adin Ross that streamers should be charging **more** for paid TTS —
+  viewers injecting content into a live stream is a proven, *underpriced* behavior,
+  which is exactly the demand Reality Hijack points a richer surface at.
+
+  [![Logan Paul tells Adin Ross streamers should get paid more for TTS](https://img.youtube.com/vi/3YsTQeaF6rE/hqdefault.jpg)](https://youtu.be/3YsTQeaF6rE)
 
 > Real before/after camera captures belong here, and will be added from an actual
 > live Decart session — deliberately **not** mocked up, so nothing in this README
