@@ -28,6 +28,7 @@ export default function RouterPage() {
   const machineRef = useRef<RouterMachine | null>(null);
   const hubRef = useRef<HubSocket | null>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
+  const aiPreviewRef = useRef<HTMLVideoElement>(null);
 
   const [state, setState] = useState<RouterState>("OFFLINE");
   const [remaining, setRemaining] = useState<number | undefined>();
@@ -49,6 +50,12 @@ export default function RouterPage() {
         setRemaining(rem);
       },
       log: pushLog,
+      onAiStream: (stream) => {
+        if (aiPreviewRef.current) {
+          aiPreviewRef.current.srcObject = stream;
+          if (stream) void aiPreviewRef.current.play().catch(() => {});
+        }
+      },
     });
     machineRef.current = machine;
 
@@ -143,13 +150,29 @@ export default function RouterPage() {
       <div className="grid gap-6 md:grid-cols-2">
         {/* Left: camera + status */}
         <section className="space-y-4">
-          <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
-            <video
-              ref={previewRef}
-              muted
-              playsInline
-              className="aspect-video w-full object-cover"
-            />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <p className="mb-1 text-xs text-zinc-500">Camera (input)</p>
+              <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
+                <video
+                  ref={previewRef}
+                  muted
+                  playsInline
+                  className="aspect-video w-full object-cover"
+                />
+              </div>
+            </div>
+            <div>
+              <p className="mb-1 text-xs text-zinc-500">AI output (Decart)</p>
+              <div className="overflow-hidden rounded-xl border border-fuchsia-900 bg-black">
+                <video
+                  ref={aiPreviewRef}
+                  muted
+                  playsInline
+                  className="aspect-video w-full object-cover"
+                />
+              </div>
+            </div>
           </div>
           {!machineRef.current?.hasCamera() && state === "OFFLINE" && (
             <button

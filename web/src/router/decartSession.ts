@@ -66,6 +66,9 @@ export interface StartArgs {
 export class DecartSession {
   private client: RealTimeClient | null = null;
   private mock = false;
+  /** A clone of the camera published to Decart, so disconnecting the session
+   *  never stops the original tracks that feed the router's live preview. */
+  private publishStream: MediaStream | null = null;
 
   async start(a: StartArgs): Promise<void> {
     if (a.token === "MOCK") {
@@ -75,16 +78,49 @@ export class DecartSession {
       return;
     }
 
+    // Publish a clone, not the original — LiveKit may stop the tracks it owns
+    // on teardown, and we want the preview camera to survive across jobs.
+    this.publishStream = a.camera.clone();
+    const inputTracks = this.publishStream.getVideoTracks();
+    console.warn(
+      "[decart] connecting… input video tracks:",
+      inputTracks.length,
+      inputTracks[0]?.readyState,
+    );
+
     const decart = createDecartClient({ apiKey: a.token });
-    this.client = await decart.realtime.connect(a.camera, {
+    this.client = await decart.realtime.connect(this.publishStream, {
       model: models.realtime("lucy-2.5"),
       resolution: "720p",
       initialState: {
         prompt: { text: a.prompt, enhance: true },
         image: a.imageBlob ?? undefined,
       },
-      onRemoteStream: (stream) => a.onRemoteStream(stream),
+      onConnectionChange: (state) => console.warn("[decart] conn=", state),
+      onRemoteStream: (stream) => {
+        const n = stream.getVideoTracks().length;
+        console.warn("[decart] onRemoteStream — video tracks:", n);
+        if (n > 0) {
+          a.onRemoteStream(stream);
+        } else {
+          // Some SDK paths hand back the stream object before the remote track
+          // is subscribed — wait for it rather than treating it as empty.
+          stream.onaddtrack = () => {
+            if (stream.getVideoTracks().length > 0) {
+              stream.onaddtrack = null;
+              console.warn("[decart] remote video track arrived (late)");
+              a.onRemoteStream(stream);
+            }
+          };
+        }
+      },
     });
+    this.client.on("error", (e) =>
+      console.warn("[decart] error:", (e as { message?: string })?.message ?? e),
+    );
+    this.client.on("generationEnded", (g) =>
+      console.warn("[decart] generationEnded:", JSON.stringify(g)),
+    );
   }
 
   disconnect(): void {
@@ -98,5 +134,8 @@ export class DecartSession {
       /* already gone */
     }
     this.client = null;
+    // Stop only the clone; the original camera keeps feeding the preview.
+    this.publishStream?.getTracks().forEach((t) => t.stop());
+    this.publishStream = null;
   }
 }

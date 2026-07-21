@@ -33,7 +33,26 @@ export default function ViewerPage() {
       void video.play().catch(() => {});
       flashWipe("in");
 
-      // Frame gate: count real decoded frames, then report once per job.
+      // Frame gate — must work while this source is HIDDEN in OBS. A hidden
+      // browser source is not rendered, so rendering-based signals
+      // (requestVideoFrameCallback / rAF) never fire and would deadlock the
+      // show-when-ready handshake. Instead gate on MEDIA ARRIVAL: a remote
+      // WebRTC video track starts `muted` and fires `onunmute` exactly when
+      // real video data flows — rendering not required, black screen still
+      // impossible.
+      const sendOk = (why: string) => {
+        if (video.srcObject !== stream || sentOkForJob === jobId) return;
+        sentOkForJob = jobId;
+        console.warn("[viewer] frames-ok →", why);
+        hub.send({ t: "viewer:frames-ok", jobId });
+      };
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        if (!track.muted) sendOk("track already unmuted");
+        else track.onunmute = () => sendOk("track unmuted (media flowing)");
+      }
+      // Belt-and-suspenders: if the tab IS rendering (e.g. previewed in a
+      // normal browser), decoded frames confirm too — whichever fires first.
       const anyVideo = video as HTMLVideoElement & {
         requestVideoFrameCallback?: (cb: () => void) => number;
       };
@@ -42,24 +61,10 @@ export default function ViewerPage() {
         const tick = () => {
           if (video.srcObject !== stream) return; // superseded by a new job
           seen += 1;
-          if (seen >= FRAMES_REQUIRED) {
-            if (sentOkForJob !== jobId) {
-              sentOkForJob = jobId;
-              hub.send({ t: "viewer:frames-ok", jobId });
-            }
-            return;
-          }
+          if (seen >= FRAMES_REQUIRED) return sendOk(`${seen} rendered frames`);
           anyVideo.requestVideoFrameCallback!(tick);
         };
         anyVideo.requestVideoFrameCallback(tick);
-      } else {
-        // Fallback for engines without rVFC: a short settle delay.
-        setTimeout(() => {
-          if (video.srcObject === stream && sentOkForJob !== jobId) {
-            sentOkForJob = jobId;
-            hub.send({ t: "viewer:frames-ok", jobId });
-          }
-        }, 600);
       }
     };
 

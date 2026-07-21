@@ -25,12 +25,14 @@ export async function mintClientToken(
   const client = createDecartClient({ apiKey: env.decartApiKey });
 
   try {
+    // NOTE: allowedOrigins was removed — Decart appears to reject the realtime
+    // WebSocket when the Origin check is set for a localhost origin, which
+    // surfaced as `wasConnected:false` / no remote video track. Re-add once the
+    // exact matching behavior is confirmed against a deployed origin.
+    void origin;
     const res = await client.tokens.create({
       expiresIn: 120,
       allowedModels: [MODEL],
-      // allowedOrigins is browser-enforced defense-in-depth; include the router
-      // origin so a leaked token can't be used from an arbitrary page.
-      allowedOrigins: origin ? [origin] : undefined,
       constraints: { realtime: { maxSessionDuration: durationSec + 15 } },
     });
     log("decart", `minted ek_ token, session cap ${durationSec + 15}s`);

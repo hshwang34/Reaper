@@ -27,6 +27,9 @@ export interface MachineCallbacks {
   /** UI + engine notification of a state change. */
   onState: (state: RouterState, remainingSec?: number) => void;
   log: (line: string) => void;
+  /** The Decart AI stream (or null on teardown) — for a direct local preview
+   *  so the streamer can see the restyle independent of the OBS loopback. */
+  onAiStream?: (stream: MediaStream | null) => void;
 }
 
 export class RouterMachine {
@@ -138,6 +141,16 @@ export class RouterMachine {
     clearTimeout(this.connectTimer);
     const job = this.job;
 
+    // Confirm the Decart stream actually carries a live video track, and mirror
+    // it into the router's local AI preview so it's visible without OBS.
+    const vt = stream.getVideoTracks()[0];
+    this.cb.log(
+      `decart stream received — video track: ${
+        vt ? `${vt.readyState}${vt.muted ? " (muted/no frames yet)" : " (live)"}` : "NONE"
+      }`,
+    );
+    this.cb.onAiStream?.(stream);
+
     // 3. BUFFERING — push to the viewer, wait for verified frames.
     this.setState("BUFFERING");
     await this.sender.start(job.jobId, stream);
@@ -219,6 +232,7 @@ export class RouterMachine {
 
     this.decart.disconnect();
     this.sender.stop();
+    this.cb.onAiStream?.(null);
 
     if (job) {
       this.hub.send({ t: "job:done", jobId: job.jobId, ok, reason });

@@ -6,6 +6,13 @@
 import type { RtcMsg, ServerMsg } from "@rh/shared";
 import type { HubSocket } from "./ws.js";
 
+// A STUN server lets both peers gather server-reflexive candidates, which is
+// the reliable way to connect two browser contexts on the same machine (Chrome
+// tab ↔ OBS CEF) where mDNS host candidates often fail to resolve.
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+};
+
 /** Router side: pushes the AI stream to the viewer. */
 export class LoopbackSender {
   private pc: RTCPeerConnection | null = null;
@@ -18,8 +25,12 @@ export class LoopbackSender {
   async start(jobId: string, stream: MediaStream): Promise<void> {
     this.stop();
     this.jobId = jobId;
-    const pc = new RTCPeerConnection();
+    const pc = new RTCPeerConnection(RTC_CONFIG);
     this.pc = pc;
+    pc.oniceconnectionstatechange = () =>
+      console.warn("[loopback:sender] ice=", pc.iceConnectionState);
+    pc.onconnectionstatechange = () =>
+      console.warn("[loopback:sender] conn=", pc.connectionState);
 
     for (const track of stream.getVideoTracks()) pc.addTrack(track, stream);
 
@@ -83,12 +94,20 @@ export class LoopbackReceiver {
   private async onMessage(m: ServerMsg): Promise<void> {
     const rtc = m as RtcMsg;
     if (rtc.t === "rtc:offer") {
+      console.warn("[loopback:viewer] offer received", rtc.jobId);
       this.pc?.close();
       this.jobId = rtc.jobId;
-      const pc = new RTCPeerConnection();
+      const pc = new RTCPeerConnection(RTC_CONFIG);
       this.pc = pc;
+      pc.oniceconnectionstatechange = () =>
+        console.warn("[loopback:viewer] ice=", pc.iceConnectionState);
+      pc.onconnectionstatechange = () =>
+        console.warn("[loopback:viewer] conn=", pc.connectionState);
 
-      pc.ontrack = (e) => this.onStream(e.streams[0], rtc.jobId);
+      pc.ontrack = (e) => {
+        console.warn("[loopback:viewer] ontrack — stream received");
+        this.onStream(e.streams[0], rtc.jobId);
+      };
       pc.onicecandidate = (e) => {
         if (e.candidate) {
           this.hub.send({
