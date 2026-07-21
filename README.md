@@ -1,7 +1,7 @@
 # Reality Hijack
 
-**Viewers pay to remix a streamer's reality in real time.** A viewer tips, types a
-prompt (or picks a preset) and optionally drops in a reference image — and the
+**Viewers pay to remix a streamer's reality in real time.** A viewer tips, writes
+their own prompt and optionally drops in a reference image — and the
 streamer's live webcam is restyled by a realtime AI video model for a number of
 seconds proportional to the tip (**$1 = 1 second**), then snaps back to normal.
 
@@ -72,28 +72,33 @@ here are the constraints *around* the model:
 | Constraint | Why it's hard | How the product solves it |
 |---|---|---|
 | **Per-second GPU cost** | The realtime model bills by the second; a hung session burns money. | Three independent cost caps: a countdown timer, a local watchdog, and a Decart **client token whose `maxSessionDuration` lets Decart's own servers kill the session** even if the streamer's machine freezes. Worst-case overrun is bounded to seconds. |
-| **Content safety** | Viewers control the prompt; the model has no built-in pre-generation filter. | Prompt text is **resolved server-side from a preset id** (viewers never send raw bytes for presets), and custom free-text runs through a moderation gate scored against **streamer-configurable** guardrails. Untrusted text is structurally contained. |
+| **Content safety** | Viewers write every prompt themselves, and the model has no built-in pre-generation filter. | Every prompt runs through a moderation gate scored against **streamer-configurable** guardrails before it can queue — the streamer sets the ceiling and untrusted text never reaches the model unchecked. |
 | **Monetization policy** | Twitch's Bits/Extensions rules *ban* free-text paid products and require review. | The trigger layer is **platform-agnostic** (`{source, amount, message, username}`). MVP uses Streamlabs tips (no review, works on any account); Twitch Channel Points/cheers are drop-in adapters. See the decision trail in `FEASIBILITY.md` §8. |
 | **Live-video latency** | The AI feed lags the raw cam; a naive cut looks broken. | A glitch-wipe covers each transition, and OBS is unhidden **only after the viewer page confirms real decoded frames** — never a black screen. |
 | **Hardware locks** | OBS already owns the webcam; browsers can't grab a locked device. | Capture the **OBS Virtual Camera** (output set to *Source* to avoid a feedback loop) from a real Chrome tab — because OBS's embedded browser blocks camera permission. |
 
-## What a hijack looks like — the effect catalog
+## What a hijack looks like
 
-Viewers never type raw prompts for presets; they tap a **card**, and the prompt
-is resolved server-side by id (the safety model — see *Architecture*). The MVP
-ships six cards, and the emoji below is the actual thumbnail the portal renders.
+There's no menu of canned effects. A viewer **writes the prompt themselves** —
+whatever they can imagine — and for as long as their tip pays for, the streamer's
+reality becomes that prompt. Think:
 
-| Card | What the viewer taps | The prompt it fires (server-side) | Intensity |
-|---|---|---|---|
-| 🌋 | **Lava Room** | *"…the entire room is flooded with molten lava, glowing orange cracks across the floor and walls, embers floating…"* | 4 / 5 |
-| 🌊 | **Underwater** | *"…the room is submerged deep underwater, shafts of blue light from above, drifting bubbles, caustic reflections…"* | 2 / 5 |
-| 📼 | **80s Anime** | *"…retro 1980s anime cel-shaded style, bold ink outlines, neon sunset gradients, film grain, VHS palette…"* | 3 / 5 |
-| 🌃 | **Cyberpunk City** | *"…neon cyberpunk cityscape backdrop, holographic signs, rain-slicked reflections, teal and magenta lighting…"* | 3 / 5 |
-| 👻 | **Haunted** | *"…eerie haunted scene, desaturated cold tones, creeping shadows, ghostly mist, flickering candlelight…"* | 4 / 5 |
-| ❄️ | **Winter Wonderland** | *"…a magical snowy winter wonderland, soft falling snow, frost on every surface, warm golden fairy lights…"* | 1 / 5 |
+- *"Make everyone in the room look like a monkey."*
+- *"Turn the streamer into a baby."*
+- *"Flood the room with molten lava."*
+- *"Cel-shade the whole scene like a 1980s anime."*
 
-Custom free-text is a separate, streamer-gated tier that runs through moderation
-(see *Architecture → guardrails*).
+The comedy is in the open-endedness — the hysterical, off-the-wall ones land
+hardest precisely because *a specific person wrote them*. So while the effect is
+live, it's **tagged on-screen with the tipper's handle**, like a reward credit:
+this hijack is *theirs*. That authorship — the ingenuity of the prompt, the
+visible ownership of having taken over someone else's stream in real time — is
+the whole product. It's why it's priced the way it is: **$1 = 1 second**. You're
+not buying a filter; you're buying the room.
+
+Custom free-text runs through a moderation gate scored against
+**streamer-configurable** guardrails (see *Architecture → guardrails*) — the
+streamer sets the ceiling, the viewers fill the space under it.
 
 **The closest things that exist today** — what a live hijack would read like on
 stream, from real footage:
@@ -167,7 +172,7 @@ idempotent, and runs on every exit path (timer, error, panic, page unload).
 ## Repository layout
 
 ```
-shared/     Types + WebSocket protocol + preset catalog (one source of truth)
+shared/     Domain types + WebSocket protocol (one source of truth)
 sidecar/    Node/Express + ws hub · engine (money logic) · triggers · Decart
             token minting · server-side OBS control · guardrails
 web/        Vite + React + Tailwind — three routes:
@@ -188,7 +193,7 @@ npm run dev               # sidecar :7712 + web :5173
 Then, in a browser:
 
 1. Open **http://localhost:5173/router** and click **Arm camera**.
-2. Open **http://localhost:5173/portal**, pick an effect (or write a prompt),
+2. Open **http://localhost:5173/portal**, write a prompt,
    optionally add an image, and click **Get my claim code**.
 3. Click **Send $N test tip** — watch the router run the job for N seconds.
 
@@ -220,7 +225,7 @@ it:
    of three browser tabs); move accounts, catalog, guardrails, queue, and billing
    to a cloud backend. Streamers sign in — they don't spin up a Node process.
 2. **A viewer surface that meets viewers where they already are.** A Twitch
-   Extension panel / overlay for the card picker and claim flow (the Bits-native
+   Extension panel / overlay for the prompt entry and claim flow (the Bits-native
    tier in `FEASIBILITY.md` §8), alongside the existing off-platform tip path for
    accounts that can't or won't gate behind Bits.
 3. **Pluggable triggers — already the seam.** The trigger layer is normalized to
