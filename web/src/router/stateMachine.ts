@@ -178,15 +178,29 @@ export class RouterMachine {
     if (!this.job) return;
     this.wentLive = true;
 
-    let remaining = job.durationSec;
-    this.setState("LIVE", remaining);
+    // Count down against an absolute wall-clock deadline, not a tick counter:
+    // a backgrounded/occluded router tab throttles setInterval, so decrementing
+    // once per tick would *stretch* the paid duration and over-bill the effect.
+    // Deriving `remaining` from `Date.now()` keeps the displayed countdown
+    // honest and tears down at the correct instant whenever a tick does fire.
+    // The 250ms cadence makes teardown crisp when the tab is active; the
+    // watchdog below bounds the worst case if ticks are starved entirely.
+    const endAt = Date.now() + job.durationSec * 1000;
+    let lastShown = job.durationSec;
+    this.setState("LIVE", job.durationSec);
     this.liveInterval = setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) void this.teardown(true, "completed");
-      else this.setState("LIVE", remaining);
-    }, 1000);
+      if (Date.now() >= endAt) {
+        void this.teardown(true, "completed");
+        return;
+      }
+      const remaining = Math.max(1, Math.ceil((endAt - Date.now()) / 1000));
+      if (remaining !== lastShown) {
+        lastShown = remaining;
+        this.setState("LIVE", remaining);
+      }
+    }, 250);
 
-    // Watchdog backstop in case the interval is starved (tab throttling, etc.).
+    // Watchdog backstop in case the interval is starved (heavy tab throttling).
     this.watchdog = setTimeout(
       () => this.teardown(true, "watchdog"),
       job.durationSec * 1000 + WATCHDOG_EXTRA_MS,
