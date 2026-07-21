@@ -28,6 +28,7 @@ import {
   nativeImage,
   powerSaveBlocker,
   session,
+  shell,
   systemPreferences,
   Tray,
 } from "electron";
@@ -50,6 +51,8 @@ import {
   saveCloudConfig,
   type CloudConfig,
 } from "./cloudLink.js";
+import { discoverObsWebsocket } from "./obsDiscovery.js";
+import { signInWithBrowser } from "./signIn.js";
 
 // Fixed local port (D2). Fallbacks keep the app alive on collision; the OBS
 // source URL is repaired to whatever port actually bound.
@@ -159,6 +162,66 @@ async function boot(): Promise<void> {
   ipcMain.handle("rh:relaunch", () => {
     app.relaunch();
     app.exit(0);
+  });
+
+  // ── Setup-wizard IPC ───────────────────────────────────────────────────
+  const cloudUrl =
+    process.env.RH_CLOUD_URL?.trim() || "http://127.0.0.1:8790";
+  ipcMain.handle("rh:setup-state", () => ({
+    cloudMode,
+    login: cloudCfg?.login ?? null,
+    cloudUrl,
+    obs: {
+      discovery: discoverObsWebsocket().status,
+      connected: local?.obs.isConnected() ?? false,
+    },
+    keys: keysStatus(),
+    port,
+    viewerUrl: viewerUrlGlobal,
+    portalUrl: link?.portalUrl ?? null,
+    autoLaunch: app.getLoginItemSettings().openAtLogin,
+  }));
+  ipcMain.handle("rh:sign-in", async () => {
+    const cfg = await signInWithBrowser(cloudUrl);
+    if (!cfg) return { ok: false };
+    // Rebuild the composition in cloud mode.
+    app.relaunch();
+    app.exit(0);
+    return { ok: true, login: cfg.login };
+  });
+  ipcMain.handle("rh:sign-out", () => {
+    saveCloudConfig(null);
+    app.relaunch();
+    app.exit(0);
+  });
+  ipcMain.handle("rh:provision-obs", async () => {
+    try {
+      const s = getSettings();
+      const result = await local!.obs.ensureBrowserSource(
+        s.obsScene,
+        s.obsSource,
+        viewerUrlGlobal,
+      );
+      refreshTray();
+      return { ok: true, detail: result };
+    } catch (e) {
+      return { ok: false, detail: (e as Error).message };
+    }
+  });
+  ipcMain.handle("rh:launch-obs", async () => {
+    if (process.platform === "darwin") {
+      await shell.openPath("/Applications/OBS.app");
+    }
+  });
+  ipcMain.handle("rh:test-hijack", async (_e, prompt: string, d: number) => {
+    if (link) return link.devHijack(prompt, d);
+    return local!.engine.manual(prompt, d);
+  });
+  ipcMain.handle("rh:auto-launch", (_e, enabled: boolean) => {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+  });
+  ipcMain.handle("rh:open-external", (_e, url: string) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
   });
 
   // ── Router window ──────────────────────────────────────────────────────

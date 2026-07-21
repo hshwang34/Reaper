@@ -177,6 +177,40 @@ export class CloudLink {
     throw new Error("cloud session expired — sign in again");
   }
 
+  /** Streamer-fired test hijack through the CLOUD engine (the wizard's
+   *  "send yourself a test hijack" in cloud mode). */
+  async devHijack(prompt: string, durationSec: number): Promise<string> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(
+        `${this.cfg.url}/api/c/${encodeURIComponent(this.cfg.channelId)}/dev/hijack`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.access}`,
+          },
+          body: JSON.stringify({ prompt, durationSec }),
+        },
+      );
+      if (res.status === 401 && attempt === 0) {
+        if (!(await this.refreshAccess())) break;
+        continue;
+      }
+      const body = (await res.json()) as { outcome?: string; error?: string };
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      return body.outcome ?? "queued";
+    }
+    throw new Error("cloud session expired — sign in again");
+  }
+
+  get login(): string {
+    return this.cfg.login;
+  }
+
+  get portalUrl(): string {
+    return `${this.cfg.url}/c/${encodeURIComponent(this.cfg.login)}`;
+  }
+
   private send(m: AnyMsg): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(m));

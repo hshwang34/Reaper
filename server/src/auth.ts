@@ -134,8 +134,15 @@ export function twitchAuthorizeUrl(stateToken: string): string {
   return u.toString();
 }
 
-/** Signed state → survives the round trip without server-side storage. */
-export async function signState(payload: { app?: boolean }): Promise<string> {
+/** Signed state → survives the round trip without server-side storage. The
+ *  nonce binds the state to the browser that STARTED the flow (double-submit
+ *  cookie): the callback only accepts a state whose nonce matches the
+ *  rh_oauth_nonce cookie, so an attacker can't splice their own authorization
+ *  response into a victim's session (login CSRF — security-review finding). */
+export async function signState(payload: {
+  app?: boolean;
+  nonce: string;
+}): Promise<string> {
   return new SignJWT(payload as Record<string, unknown>)
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("10m")
@@ -144,13 +151,17 @@ export async function signState(payload: { app?: boolean }): Promise<string> {
 
 export async function readState(
   state: string,
-): Promise<{ app?: boolean } | null> {
+): Promise<{ app?: boolean; nonce?: string } | null> {
   try {
     const { payload } = await jwtVerify(state, secret);
-    return payload as { app?: boolean };
+    return payload as { app?: boolean; nonce?: string };
   } catch {
     return null;
   }
+}
+
+export function newNonce(): string {
+  return randomBytes(16).toString("hex");
 }
 
 export async function exchangeTwitchCode(

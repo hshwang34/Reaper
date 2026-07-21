@@ -12,7 +12,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, resolve } from "node:path";
+import { resolve } from "node:path";
 import express from "express";
 import multer from "multer";
 import { WebSocketServer } from "ws";
@@ -25,6 +25,7 @@ import {
   APP_LOOPBACK_REDIRECT,
   exchangeTwitchCode,
   issueSession,
+  newNonce,
   readState,
   refreshSession,
   requireChannel,
@@ -45,30 +46,61 @@ app.get("/healthz", (_req, res) => {
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 
+/** Minimal cookie read (no cookie-parser dep for one value). */
+function cookieValue(req: express.Request, name: string): string | null {
+  const raw = req.headers.cookie ?? "";
+  for (const part of raw.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
+}
+
+/** Start an OAuth flow with a browser-bound nonce (login-CSRF defense). */
+async function startOauth(
+  res: express.Response,
+  payload: { app?: boolean },
+): Promise<void> {
+  const nonce = newNonce();
+  res
+    .cookie("rh_oauth_nonce", nonce, {
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 10 * 60 * 1000,
+    })
+    .redirect(twitchAuthorizeUrl(await signState({ ...payload, nonce })));
+}
+
 /** Browser sign-in (dashboard). */
-app.get("/auth/twitch", async (_req, res) => {
-  res.redirect(twitchAuthorizeUrl(await signState({})));
-});
+app.get("/auth/twitch", (_req, res) => void startOauth(res, {}));
 
 /** Desktop-app sign-in: same OAuth, loopback redirect at the end. */
-app.get("/auth/app", async (_req, res) => {
-  res.redirect(twitchAuthorizeUrl(await signState({ app: true })));
-});
+app.get("/auth/app", (_req, res) => void startOauth(res, { app: true }));
 
 app.get("/auth/twitch/callback", async (req, res) => {
   const state = await readState(String(req.query.state ?? ""));
   if (!state) return res.status(400).send("bad state");
+  // The state must carry the nonce this browser set when it STARTED the
+  // flow — otherwise this is a spliced (CSRF'd) authorization response.
+  const nonce = cookieValue(req, "rh_oauth_nonce");
+  if (!nonce || state.nonce !== nonce) {
+    return res.status(400).send("state/browser mismatch — restart sign-in");
+  }
+  res.clearCookie("rh_oauth_nonce");
   const user = await exchangeTwitchCode(String(req.query.code ?? ""));
   if (!user) return res.status(502).send("twitch exchange failed");
   upsertChannel(user.id, user.login, user.displayName);
   const tokens = await issueSession(user.id, user.login);
   if (state.app) {
-    // Hand the session to the app's loopback listener via fragment (never
-    // logged in server access logs the way query strings are).
+    // Hand the session to the app's loopback listener. Query params (not a
+    // fragment — fragments never reach an HTTP server) are safe here: the
+    // redirect target is the app's own 127.0.0.1 listener, no intermediary
+    // logs exist, and the refresh token is single-use anyway.
     const u = new URL(APP_LOOPBACK_REDIRECT);
-    res.redirect(
-      `${u}#access=${encodeURIComponent(tokens.access)}&refresh=${encodeURIComponent(tokens.refresh)}&channel=${tokens.channelId}&login=${tokens.login}`,
-    );
+    u.searchParams.set("refresh", tokens.refresh);
+    u.searchParams.set("channel", tokens.channelId);
+    u.searchParams.set("login", tokens.login);
+    res.redirect(u.toString());
     return;
   }
   res
@@ -127,8 +159,15 @@ app.get("/api/c/:channel/config", (req, res) => {
   });
 });
 
-// Per-channel upload dirs; same validation as the local rig.
-const ALLOWED_IMG = new Set(["image/jpeg", "image/png", "image/webp"]);
+// Per-channel upload dirs; same validation as the local rig. The stored
+// extension comes from the ALLOWED mimetype map, never from the client's
+// filename — otherwise an "image/png" upload named x.html becomes stored XSS
+// when served same-origin from /uploads (security-review finding).
+const ALLOWED_IMG = new Map<string, string>([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/webp", ".webp"],
+]);
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
@@ -138,7 +177,7 @@ const upload = multer({
       cb(null, dir);
     },
     filename: (_req, file, cb) => {
-      const ext = extname(file.originalname).toLowerCase() || ".jpg";
+      const ext = ALLOWED_IMG.get(file.mimetype) ?? ".jpg";
       cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
     },
   }),

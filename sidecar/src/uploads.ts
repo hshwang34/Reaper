@@ -4,10 +4,16 @@
 // host-provided: repo-local for the sidecar CLI, userData for the Electron app.
 
 import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { extname } from "node:path";
 import multer from "multer";
 
-const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp"]);
+// Extension derives from the ALLOWED mimetype map, never the client's
+// filename — a mismatched extension (x.html declared image/png) would be
+// served same-origin from /uploads as stored XSS (security-review finding).
+const ALLOWED = new Map<string, string>([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/webp", ".webp"],
+]);
 
 export function createUploads(uploadsDir: string) {
   if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
@@ -15,7 +21,7 @@ export function createUploads(uploadsDir: string) {
   const storage = multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, uploadsDir),
     filename: (_req, file, cb) => {
-      const ext = extname(file.originalname).toLowerCase() || ".jpg";
+      const ext = ALLOWED.get(file.mimetype) ?? ".jpg";
       cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
     },
   });
