@@ -1,28 +1,29 @@
-// Decart client-token minting. The permanent dct_ key never leaves this file.
-// We mint a short-lived ek_ token per job, capped at the job's paid duration
-// via constraints.realtime.maxSessionDuration — Decart's server then kills the
+// Decart client-token minting. The permanent dct_ key is passed in by the host
+// composition (server.ts) and never leaves this process. We mint a short-lived
+// ek_ token per job, capped at the job's paid duration via
+// constraints.realtime.maxSessionDuration — Decart's server then kills the
 // session even if the local machine hangs (the hardest cost backstop).
 
-import { decartEnabled, env } from "./config.js";
 import { log, err } from "./log.js";
 
 const MODEL = "lucy-2.5";
 
 /**
  * Mint an ek_ client token scoped to lucy-2.5, with a 45s validity window and a
- * server-side session cap of durationSec + 15s. Returns "MOCK" when no key is
- * set so the router can run a camera-passthrough demo without incurring cost.
+ * server-side session cap of durationSec + 15s. Returns "MOCK" when no real
+ * key is set so the router can run a camera-passthrough demo without cost.
  */
 export async function mintClientToken(
+  apiKey: string,
   durationSec: number,
   origin: string,
 ): Promise<string> {
-  if (!decartEnabled) return "MOCK";
+  if (!apiKey.startsWith("dct_")) return "MOCK";
 
-  // Lazy import: keeps the sidecar bootable without the SDK resolving any
+  // Lazy import: keeps the host bootable without the SDK resolving any
   // browser-only globals at module load, and isolates the one uncertain dep.
   const { createDecartClient } = await import("@decartai/sdk");
-  const client = createDecartClient({ apiKey: env.decartApiKey });
+  const client = createDecartClient({ apiKey });
 
   try {
     // allowedOrigins is intentionally omitted: on localhost, setting it made
