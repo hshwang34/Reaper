@@ -1,14 +1,11 @@
-// Reality Hijack marketing site — the small amount of script the page needs.
+// Reality Hijack marketing site — the script the page needs, and no more.
 //
-// 1. The hero monitor: a deterministic loop that plays the product's own
-//    state machine at copy level (idle → tip → live(N s) → revert), driven by
-//    CSS custom properties. With recorded clips present (public/clips/
-//    manifest.json) the monitor shows the real model output; without them it
-//    falls back to the CSS "looks", clearly labelled as simulated.
-// 2. The $1 = 1s calculator.
-// 3. Nav collapse and a scrolled state.
-//
-// No framework, no runtime dependencies. FAQ uses native <details>.
+// The hero "monitor" replays the product's own loop at copy level:
+//   raw feed → tip → 400 ms static → hijacked feed for $N = N s → static → raw.
+// With recorded clips (public/clips/manifest.json) the layers show the real
+// model output and the real camera; without them the raw feed is a standby
+// slate and the hijacked feed is a CSS look with a channel ident. Nothing
+// here ever calls the model.
 
 import "./style.css";
 
@@ -18,36 +15,36 @@ interface Cycle {
   who: string;
   amount: number;
   preset: string;
+  ch: string;
   label: string;
-  message: string;
 }
 
-// Fixed order, fixed amounts: reproducible for screenshots and QA. The first
-// cycle matches the headline ($8, lava).
+// Fixed order and amounts, so the replay is reproducible for screenshots.
 const CYCLES: Cycle[] = [
-  { who: "ferret_god_22", amount: 8, preset: "lava-room", label: "Lava Room", message: "lava. now." },
-  { who: "mossy_pond", amount: 5, preset: "underwater", label: "Underwater", message: "take a deep breath" },
-  { who: "vhs_ghost", amount: 6, preset: "80s-anime", label: "80s Anime", message: "make it 1987" },
-  { who: "neon_rat", amount: 7, preset: "cyberpunk", label: "Cyberpunk City", message: "night city arc" },
-  { who: "cellar_door", amount: 6, preset: "haunted", label: "Haunted", message: "boo" },
-  { who: "snowdayyy", amount: 4, preset: "winter-wonderland", label: "Winter Wonderland", message: "cozy pls" },
+  { who: "quartz_ok", amount: 11, preset: "lava-room", ch: "CH 01", label: "Lava Room" },
+  { who: "mossy_pond", amount: 6, preset: "underwater", ch: "CH 02", label: "Underwater" },
+  { who: "vhs_ghost", amount: 8, preset: "80s-anime", ch: "CH 03", label: "80s Anime" },
+  { who: "neon_rat", amount: 7, preset: "cyberpunk", ch: "CH 04", label: "Cyberpunk City" },
+  { who: "cellar_door", amount: 9, preset: "haunted", ch: "CH 05", label: "Haunted" },
+  { who: "snowdayyy", amount: 5, preset: "winter-wonderland", ch: "CH 06", label: "Winter Wonderland" },
 ];
 
 interface ClipEntry {
   preset: string;
-  /** Raw camera, time-aligned with `after`. Optional; the idle frame falls back to the CSS look. */
-  before?: string;
-  /** The model's output for this preset. */
+  /** The model's output. Required. */
   after: string;
+  /** Raw camera, time-aligned with `after`. Optional. */
+  before?: string;
+  poster?: string;
 }
 interface Manifest {
   clips: ClipEntry[];
 }
 
-const IDLE_MS = 1500;
-const TIP_MS = 700;
+const RAW_MS = 1600;
+const TIP_MS = 800;
 const WIPE_MS = 400;
-const REVERT_MS = 600;
+const RETURN_MS = 500;
 const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ---------- helpers ---------- */
@@ -59,22 +56,38 @@ const $ = <T extends HTMLElement>(id: string): T => {
 };
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/* ---------- hero monitor ---------- */
+async function loadManifest(): Promise<Map<string, ClipEntry>> {
+  const map = new Map<string, ClipEntry>();
+  try {
+    const res = await fetch("/clips/manifest.json", { cache: "no-cache" });
+    if (!res.ok) return map;
+    const m = (await res.json()) as Manifest;
+    for (const c of m.clips ?? []) if (c.after) map.set(c.preset, c);
+  } catch {
+    /* no clips */
+  }
+  return map;
+}
+
+/* ---------- the monitor ---------- */
 
 class Monitor {
   private screen = $("screen");
-  private cam = $("cam");
+  private rawLayer = $("rawLayer");
+  private rawVideo = $<HTMLVideoElement>("rawVideo");
+  private feed = $("feed");
+  private feedVideo = $<HTMLVideoElement>("feedVideo");
+  private pipVideo = $<HTMLVideoElement>("pipVideo");
+  private identCh = $("identCh");
+  private identName = $("identName");
   private wipe = $("wipe");
   private hudState = $("hudState");
-  private hudBy = $("hudBy");
-  private tipAlert = $("tipAlert");
-  private barFill = $("barFill");
-  private countNum = $("countNum");
-  private chat = $("chat");
-  private note = $("demoNote");
+  private hudTip = $("hudTip");
+  private hudCount = $("hudCount");
+  private hudBar = $("hudBar");
   private pauseBtn = $<HTMLButtonElement>("demoPause");
-  private before = $<HTMLVideoElement>("camBefore");
-  private after = $<HTMLVideoElement>("camAfter");
+  private note = $("demoNote");
+  private source = $("demoSource");
 
   private clips = new Map<string, ClipEntry>();
   private i = 0;
@@ -94,65 +107,50 @@ class Monitor {
       e.stopPropagation();
       this.paused ? this.play() : this.pause();
     });
-    this.pauseBtn.textContent = this.paused ? "play" : "pause";
-    this.pauseBtn.setAttribute("aria-label", this.paused ? "Play the demo" : "Pause the demo");
+    this.syncPauseButton();
   }
 
-  async loadClips(): Promise<void> {
-    try {
-      const res = await fetch("/clips/manifest.json", { cache: "no-cache" });
-      if (!res.ok) return;
-      const m = (await res.json()) as Manifest;
-      for (const c of m.clips ?? []) if (c.after) this.clips.set(c.preset, c);
-    } catch {
-      /* no clips: simulated mode */
+  setClips(clips: Map<string, ClipEntry>): void {
+    this.clips = clips;
+    if (clips.size > 0) {
+      this.source.textContent = "Real output from the model, recorded on the rig.";
+      const first = CYCLES.findIndex((c) => clips.has(c.preset));
+      if (first > 0) this.i = first;
     }
-    if (this.clips.size > 0) {
-      this.note.textContent = "Real output from the model, recorded on the rig. Click the screen to trigger the next tip.";
-      // Only cycle presets that have a clip, so the hero never shows a CSS
-      // stand-in next to real footage.
-      const firstWithClip = CYCLES.findIndex((c) => this.clips.has(c.preset));
-      if (firstWithClip > 0) this.i = firstWithClip;
-    } else {
-      this.note.textContent = REDUCED
-        ? "Simulated with CSS. Press play to step through a hijack."
-        : "Simulated with CSS. Click the screen to trigger the next tip.";
-    }
+    if (REDUCED) this.note.textContent = "Replay of the loop. Press play, or activate the screen to run one hijack.";
   }
 
   start(): void {
-    if (REDUCED) {
-      // Rest on a still, legible frame; the user can step through by hand.
-      this.showIdle();
+    this.showRaw();
+    if (!REDUCED) void this.loop();
+  }
+
+  /** Public: jump to the next tip (also wired to the "Watch a hijack" button). */
+  next(): void {
+    if (this.paused) {
+      void this.runOne(++this.gen);
       return;
     }
-    void this.loop();
+    this.skip?.();
   }
 
   private play(): void {
     this.paused = false;
-    this.pauseBtn.textContent = "pause";
-    this.pauseBtn.setAttribute("aria-label", "Pause the demo");
+    this.syncPauseButton();
     void this.loop();
   }
 
   private pause(): void {
     this.paused = true;
-    this.pauseBtn.textContent = "play";
-    this.pauseBtn.setAttribute("aria-label", "Play the demo");
+    this.syncPauseButton();
     this.gen++;
     this.skip = null;
-    this.showIdle();
+    this.showRaw();
   }
 
-  /** Jump straight to the next tip. */
-  private next(): void {
-    if (this.paused) {
-      // In paused / reduced-motion mode a click runs exactly one cycle.
-      void this.runOne(++this.gen);
-      return;
-    }
-    this.skip?.();
+  private syncPauseButton(): void {
+    this.pauseBtn.textContent = this.paused ? "play" : "pause";
+    this.pauseBtn.setAttribute("aria-label", this.paused ? "Play the replay" : "Pause the replay");
   }
 
   private async loop(): Promise<void> {
@@ -160,7 +158,7 @@ class Monitor {
     while (!this.paused && gen === this.gen) {
       await this.runOne(gen);
       if (gen !== this.gen) return;
-      await this.wait(IDLE_MS, gen);
+      await this.wait(RAW_MS, gen);
     }
   }
 
@@ -184,58 +182,45 @@ class Monitor {
     const clip = this.clips.get(cycle.preset);
     const liveMs = cycle.amount * 1000;
 
-    // tip
-    this.pushChat(cycle);
-    this.tipAlert.innerHTML = `<strong>+$${cycle.amount}</strong> → ${cycle.amount}s · ${escapeHtml(cycle.label)}`;
-    this.tipAlert.classList.add("is-on");
+    // The tip lands.
+    this.hudTip.innerHTML = `${escapeHtml(cycle.who)} · <b>$${cycle.amount}</b> · ${escapeHtml(cycle.label.toUpperCase())}`;
+    this.hudTip.classList.add("is-on");
     this.hudState.textContent = "AUTHORIZING";
     await sleep(TIP_MS);
-    if (gen !== this.gen) return this.showIdle();
+    if (gen !== this.gen) return this.showRaw();
 
-    // wipe → live
+    // The cut.
     await this.flash();
-    if (gen !== this.gen) return this.showIdle();
-    this.tipAlert.classList.remove("is-on");
+    if (gen !== this.gen) return this.showRaw();
+    this.setLook(cycle, clip);
+    this.feed.classList.add("is-on");
     this.screen.classList.add("is-live");
-    this.hudState.textContent = `LIVE — ${cycle.label}`;
-    this.hudBy.textContent = `hijacked by ${cycle.who}`;
-    if (clip) {
-      this.after.src = clip.after;
-      this.after.currentTime = 0;
-      void this.after.play().catch(() => {});
-      this.after.classList.add("is-showing");
-      this.before.classList.remove("is-showing");
-      this.cam.dataset.look = "normal";
-    } else {
-      this.cam.dataset.look = cycle.preset;
-    }
+    this.hudState.textContent = `LIVE · ${cycle.label.toUpperCase()}`;
 
-    // countdown
+    // The clock.
     const t0 = performance.now();
     let cut = false;
-    const skipNow = () => (cut = true);
-    this.skip = skipNow;
+    this.skip = () => (cut = true);
     while (!cut && gen === this.gen) {
       const left = Math.max(0, liveMs - (performance.now() - t0));
-      this.barFill.style.width = `${(left / liveMs) * 100}%`;
-      this.countNum.textContent = `${(left / 1000).toFixed(1)}s`;
+      this.hudBar.style.width = `${100 - (left / liveMs) * 100}%`;
+      this.hudCount.textContent = (left / 1000).toFixed(1);
       if (left <= 0) break;
       await new Promise((r) => requestAnimationFrame(r));
     }
     this.skip = null;
-    if (gen !== this.gen) return this.showIdle();
+    if (gen !== this.gen) return this.showRaw();
 
-    // revert
+    // The return.
     this.hudState.textContent = "TEARDOWN";
     await this.flash();
-    this.showIdle();
-    await sleep(REVERT_MS);
+    this.showRaw();
+    await sleep(RETURN_MS);
     this.i = (this.i + 1) % CYCLES.length;
   }
 
   private pickCycle(): Cycle {
     if (this.clips.size === 0) return CYCLES[this.i]!;
-    // Advance to the next cycle that has a real clip.
     for (let k = 0; k < CYCLES.length; k++) {
       const c = CYCLES[(this.i + k) % CYCLES.length]!;
       if (this.clips.has(c.preset)) {
@@ -246,6 +231,40 @@ class Monitor {
     return CYCLES[this.i]!;
   }
 
+  private setLook(cycle: Cycle, clip: ClipEntry | undefined): void {
+    this.feed.dataset.look = cycle.preset;
+    this.identCh.textContent = cycle.ch;
+    this.identName.textContent = cycle.label;
+    if (clip) {
+      this.feed.classList.add("has-video");
+      this.feedVideo.hidden = false;
+      if (this.feedVideo.getAttribute("src") !== clip.after) this.feedVideo.src = clip.after;
+      this.feedVideo.currentTime = 0;
+      void this.feedVideo.play().catch(() => {});
+      this.setRawClip(clip.before);
+    } else {
+      this.feed.classList.remove("has-video");
+      this.feedVideo.hidden = true;
+      this.feedVideo.pause();
+      this.setRawClip(undefined);
+    }
+  }
+
+  private setRawClip(src: string | undefined): void {
+    for (const v of [this.rawVideo, this.pipVideo]) {
+      if (src) {
+        if (v.getAttribute("src") !== src) v.src = src;
+        v.hidden = false;
+        void v.play().catch(() => {});
+      } else {
+        v.hidden = true;
+        v.pause();
+      }
+    }
+    this.rawLayer.classList.toggle("has-video", Boolean(src));
+    this.screen.classList.toggle("no-before", Boolean(this.clips.size) && !src);
+  }
+
   private async flash(): Promise<void> {
     if (REDUCED) return;
     this.wipe.classList.remove("is-on");
@@ -254,33 +273,17 @@ class Monitor {
     await sleep(WIPE_MS);
   }
 
-  private showIdle(): void {
+  private showRaw(): void {
     this.screen.classList.remove("is-live");
-    this.tipAlert.classList.remove("is-on");
-    this.hudState.textContent = "NORMAL";
-    this.hudBy.textContent = "";
-    this.barFill.style.width = "0%";
-    this.countNum.textContent = "0.0s";
-    this.cam.dataset.look = "normal";
-    this.after.classList.remove("is-showing");
-    this.after.pause();
-    const idleClip = this.clips.get(CYCLES[this.i]!.preset)?.before;
-    if (idleClip) {
-      if (this.before.getAttribute("src") !== idleClip) this.before.src = idleClip;
-      void this.before.play().catch(() => {});
-      this.before.classList.add("is-showing");
-    } else {
-      this.before.classList.remove("is-showing");
-    }
-  }
-
-  private pushChat(c: Cycle): void {
-    for (const old of this.chat.querySelectorAll(".chat-line")) old.classList.add("is-old");
-    const line = document.createElement("div");
-    line.className = "chat-line";
-    line.innerHTML = `<span class="who">${escapeHtml(c.who)}</span><span class="amt">$${c.amount}</span><span>${escapeHtml(c.message)}</span>`;
-    this.chat.append(line);
-    while (this.chat.children.length > 3) this.chat.firstElementChild?.remove();
+    this.feed.classList.remove("is-on");
+    this.feedVideo.pause();
+    this.hudTip.classList.remove("is-on");
+    this.hudState.textContent = "RAW FEED";
+    this.hudBar.style.width = "0%";
+    this.hudCount.textContent = "0.0";
+    // Keep the raw clip of the upcoming cycle playing under the slate state.
+    const upcoming = this.clips.get(CYCLES[this.i]!.preset);
+    this.setRawClip(upcoming?.before);
   }
 }
 
@@ -288,34 +291,26 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 }
 
-/* ---------- showcase clips ---------- */
+/* ---------- channel grid clips ---------- */
 
-// When a preset has a recorded clip, lay a muted looping video over its CSS
-// thumbnail and only play it while it's on screen.
-async function hydrateLookGrid(): Promise<void> {
-  let manifest: Manifest | null = null;
-  try {
-    const res = await fetch("/clips/manifest.json", { cache: "no-cache" });
-    if (res.ok) manifest = (await res.json()) as Manifest;
-  } catch {
-    return;
-  }
-  if (!manifest) return;
-  const byPreset = new Map(manifest.clips.map((c) => [c.preset, c]));
+// When a preset has a recorded clip, lay a muted loop over its CSS look and
+// only play it while it is on screen.
+function hydrateChannels(clips: Map<string, ClipEntry>): void {
   const videos: HTMLVideoElement[] = [];
-  for (const li of document.querySelectorAll<HTMLLIElement>(".look[data-preset]")) {
-    const clip = byPreset.get(li.dataset.preset ?? "");
-    const cam = li.querySelector<HTMLElement>(".cam");
-    if (!clip || !cam) continue;
+  for (const li of document.querySelectorAll<HTMLLIElement>(".channel[data-preset]")) {
+    const clip = clips.get(li.dataset.preset ?? "");
+    const feed = li.querySelector<HTMLElement>(".feed");
+    if (!clip || !feed) continue;
     const v = document.createElement("video");
     v.muted = true;
     v.loop = true;
     v.playsInline = true;
     v.preload = "none";
     v.src = clip.after;
-    v.className = "is-showing";
+    if (clip.poster) v.poster = clip.poster;
     v.setAttribute("aria-hidden", "true");
-    cam.prepend(v);
+    feed.classList.add("has-video");
+    feed.prepend(v);
     videos.push(v);
   }
   if (videos.length === 0 || REDUCED) return;
@@ -330,29 +325,6 @@ async function hydrateLookGrid(): Promise<void> {
     { threshold: 0.4 },
   );
   videos.forEach((v) => io.observe(v));
-}
-
-/* ---------- $1 = 1s calculator ---------- */
-
-const GPU_PER_SEC = 0.02; // Decart lucy-2.5 published rate (README, FEASIBILITY §4)
-
-function initCalc(): void {
-  const range = $<HTMLInputElement>("tipRange");
-  const dollars = $("calcDollars");
-  const seconds = $("calcSeconds");
-  const keep = $("calcKeep");
-  const gpu = $("calcGpu");
-  const share = $("calcShare");
-  const render = () => {
-    const n = Number(range.value);
-    dollars.textContent = String(n);
-    seconds.textContent = String(n);
-    keep.textContent = n.toFixed(2);
-    gpu.textContent = (n * GPU_PER_SEC).toFixed(2);
-    share.textContent = String(Math.round(GPU_PER_SEC * 100));
-  };
-  range.addEventListener("input", render);
-  render();
 }
 
 /* ---------- nav ---------- */
@@ -379,8 +351,16 @@ function initNav(): void {
 /* ---------- boot ---------- */
 
 initNav();
-initCalc();
 $("year").textContent = String(new Date().getFullYear());
+
 const monitor = new Monitor();
-void monitor.loadClips().then(() => monitor.start());
-void hydrateLookGrid();
+$("watchBtn").addEventListener("click", () => {
+  $("screen").scrollIntoView({ block: "nearest", behavior: REDUCED ? "auto" : "smooth" });
+  monitor.next();
+});
+
+void loadManifest().then((clips) => {
+  monitor.setClips(clips);
+  monitor.start();
+  hydrateChannels(clips);
+});
