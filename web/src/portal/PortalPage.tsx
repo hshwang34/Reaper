@@ -1,7 +1,9 @@
-// The viewer-facing page. A viewer composes a hijack (preset or custom prompt +
-// optional reference image), submits it, and receives a short CLAIM CODE to put
-// in their tip message. The tip itself happens off-page (Streamlabs); for the
-// demo, a dev "Simulate tip" control fires the same path via /api/dev/fake-tip.
+// The viewer-facing page. A viewer composes a hijack — preset or custom prompt,
+// optional reference image, and Decart's "enhance prompt" switch (together,
+// the full per-session surface lucy-2.5 exposes over the realtime API) —
+// submits it, and receives a short CLAIM CODE to put in their tip message. The
+// tip itself happens off-page (Streamlabs); for the demo, a dev "Simulate tip"
+// control fires the same path via /api/dev/fake-tip.
 //
 // Product-design note: prompt text is resolved server-side from a preset id, or
 // moderated when custom — the viewer never controls raw prompt bytes that reach
@@ -13,6 +15,11 @@ import { api, type PublicConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
 import { channelSlug } from "../lib/channel.js";
 import { downscaleImage } from "../lib/image.js";
+
+/** Hard client-side ceiling on the raw file before downscaling (Decart's own
+ *  reference-image limit is 10 MB post-encode; we shrink to 720p so any
+ *  sensible photo fits — this only stops multi-hundred-MB mistakes). */
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 export default function PortalPage() {
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
@@ -32,6 +39,9 @@ export default function PortalPage() {
   useEffect(() => () => {
     if (previewRef.current) URL.revokeObjectURL(previewRef.current);
   }, []);
+  // Decart prompt enhancement. Default ON (Decart's default, and what the
+  // preset catalog is written for); OFF = literal prompt, for precise edits.
+  const [enhance, setEnhance] = useState(true);
   const [tipAmount, setTipAmount] = useState(8);
 
   const [submitting, setSubmitting] = useState(false);
@@ -74,6 +84,8 @@ export default function PortalPage() {
   const secsLeft =
     expiresAt != null ? Math.max(0, Math.round((expiresAt - now) / 1000)) : null;
 
+  const selectedPreset = cfg?.presets.find((p) => p.id === presetId) ?? null;
+
   function pickPreset(id: string) {
     setPresetId(id);
     setCustomPrompt(""); // preset and custom are mutually exclusive
@@ -81,8 +93,24 @@ export default function PortalPage() {
 
   async function onImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
+    setError(null);
+    if (file && file.size > MAX_UPLOAD_BYTES) {
+      // Decart's own ceiling is 10 MB; we downscale to 720p before upload so
+      // anything under this cap is fine. Bigger files just stall the submit.
+      setError("That image is over 25 MB — please pick a smaller one.");
+      e.target.value = "";
+      return;
+    }
     setImageFile(file);
     replacePreview(file ? URL.createObjectURL(file) : null);
+  }
+
+  function clearImage() {
+    setImageFile(null);
+    replacePreview(null);
+    if (fileRef.current) fileRef.current.value = "";
+    // A photo-only preset can't run without its photo.
+    if (selectedPreset?.needsImage) setPresetId(null);
   }
 
   async function submit() {
@@ -92,12 +120,19 @@ export default function PortalPage() {
       setError("Pick a preset or write a custom prompt.");
       return;
     }
+    if (selectedPreset?.needsImage && !imageFile) {
+      setError(`"${selectedPreset.label}" needs a reference photo — add one below.`);
+      return;
+    }
     setSubmitting(true);
     try {
       const form = new FormData();
       if (presetId) form.set("presetId", presetId);
       else form.set("prompt", customPrompt.trim());
       if (tipperName.trim()) form.set("tipperName", tipperName.trim());
+      // Sent as "1"/"0": multipart fields are strings, and the server treats
+      // an absent field as Decart's default (on) for older clients.
+      form.set("enhance", enhance ? "1" : "0");
       if (imageFile) {
         const blob = await downscaleImage(imageFile);
         form.set("image", blob, "reference.jpg");
@@ -128,6 +163,7 @@ export default function PortalPage() {
     setCustomPrompt("");
     setImageFile(null);
     replacePreview(null);
+    setEnhance(true);
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -168,7 +204,7 @@ export default function PortalPage() {
                 <button
                   key={p.id}
                   onClick={() => pickPreset(p.id)}
-                  className={`rounded-xl border p-3 text-left transition ${
+                  className={`relative rounded-xl border p-3 text-left transition ${
                     presetId === p.id
                       ? "border-fuchsia-500 bg-fuchsia-500/10"
                       : "border-zinc-800 bg-zinc-900 hover:border-zinc-600"
@@ -176,9 +212,26 @@ export default function PortalPage() {
                 >
                   <div className="text-2xl">{p.emoji}</div>
                   <div className="mt-1 text-sm font-semibold">{p.label}</div>
+                  {p.needsImage && (
+                    <span
+                      className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        imageFile
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : "bg-zinc-800 text-zinc-400"
+                      }`}
+                    >
+                      {imageFile ? "photo ✓" : "needs photo"}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
+            {selectedPreset?.needsImage && !imageFile && (
+              <p className="mt-2 text-xs text-amber-300">
+                This effect puts the person from your photo on camera — attach a
+                reference image below to use it.
+              </p>
+            )}
           </section>
 
           {/* Custom prompt */}
@@ -204,10 +257,15 @@ export default function PortalPage() {
             </section>
           )}
 
-          {/* Reference image */}
+          {/* Reference image — lucy-2.5 uses it as a character/style anchor.
+              Same File → downscale → multipart path as before; only the copy
+              and the remove affordance are new. */}
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
-              Reference image <span className="text-zinc-600">(optional)</span>
+              Reference photo{" "}
+              <span className="text-zinc-600">
+                {selectedPreset?.needsImage ? "(required for this effect)" : "(optional)"}
+              </span>
             </h2>
             <div className="flex items-center gap-3">
               <input
@@ -215,16 +273,53 @@ export default function PortalPage() {
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 onChange={onImage}
-                className="text-sm text-zinc-400 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200"
+                className="min-w-0 flex-1 text-sm text-zinc-400 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200"
               />
               {imagePreview && (
-                <img
-                  src={imagePreview}
-                  alt="reference"
-                  className="h-12 w-12 rounded-lg object-cover"
-                />
+                <div className="relative shrink-0">
+                  <img
+                    src={imagePreview}
+                    alt="reference"
+                    className="h-14 w-14 rounded-lg object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={clearImage}
+                    aria-label="Remove reference photo"
+                    className="absolute -right-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-zinc-700 text-xs text-zinc-200 hover:bg-red-500"
+                  >
+                    ×
+                  </button>
+                </div>
               )}
             </div>
+            <p className="mt-1 text-xs text-zinc-600">
+              The AI uses this as a character or style anchor — a clear,
+              well-lit photo of a face or outfit works best. Mention it in a
+              custom prompt (“the person in the reference image…”). JPEG, PNG
+              or WebP; resized to 720p before upload.
+            </p>
+          </section>
+
+          {/* Decart prompt enhancement — the last per-session knob lucy-2.5
+              exposes. On = Decart rewrites/expands the prompt (its default);
+              off = literal prompt for precise edits. */}
+          <section>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+              <input
+                type="checkbox"
+                checked={enhance}
+                onChange={(e) => setEnhance(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-fuchsia-500"
+              />
+              <span className="text-sm">
+                <span className="font-semibold text-zinc-200">Enhance prompt</span>
+                <span className="block text-xs text-zinc-500">
+                  Let the AI expand your prompt for richer results. Turn off for
+                  a literal, precise edit (e.g. “make the wall light blue”).
+                </span>
+              </span>
+            </label>
           </section>
 
           {/* Identity + amount */}

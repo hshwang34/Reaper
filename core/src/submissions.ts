@@ -17,6 +17,8 @@ export interface SubmissionInput {
   presetId?: unknown;
   prompt?: unknown;
   tipperName?: unknown;
+  /** Decart "enhance prompt" form field ("1"/"0"); absent = Decart default (on). */
+  enhance?: unknown;
   /** Public URL of the already-stored reference image, if any. */
   imageUrl: string | null;
 }
@@ -42,6 +44,19 @@ const MAX_NAME_CHARS = 64;
  *  store without bound. Far above any real channel's unclaimed backlog. */
 export const MAX_PENDING_SUBMISSIONS = 1000;
 
+/**
+ * Decart "enhance prompt" flag from a multipart form field.
+ *
+ * Multipart fields arrive as strings (or are absent). The Decart default is ON,
+ * and older portal builds never send the field at all — so absence means true.
+ * Only an explicit off value ("0", "false", "off", "no") disables it.
+ */
+export function parseEnhance(raw: unknown): boolean {
+  if (raw == null) return true;
+  const v = String(raw).trim().toLowerCase();
+  return !(v === "0" || v === "false" || v === "off" || v === "no");
+}
+
 function str(v: unknown, max: number): string {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
 }
@@ -63,6 +78,10 @@ export function createSubmission(
     if (!preset) return { ok: false, status: 400, error: "unknown preset" };
     if (!s.enabledPresetIds.includes(presetId)) {
       return { ok: false, status: 403, error: "preset not enabled by streamer" };
+    }
+    // lucy-2.5 character substitution with no reference image is a paid no-op.
+    if (preset.needsImage && !input.imageUrl) {
+      return { ok: false, status: 400, error: "this effect needs a reference image" };
     }
     prompt = preset.prompt;
     finalPresetId = preset.id;
@@ -86,6 +105,7 @@ export function createSubmission(
     presetId: finalPresetId,
     tipperName,
     imageUrl: input.imageUrl,
+    enhance: parseEnhance(input.enhance),
   });
   return { ok: true, code: sub.code, expiresAt: sub.expiresAt, presetId: finalPresetId };
 }

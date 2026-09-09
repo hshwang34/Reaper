@@ -15,6 +15,7 @@ export { CorrelationStore, type MatchResult, type MatchOptions } from "./correla
 export { checkPrompt, type ModerationResult } from "./moderation.js";
 export {
   createSubmission,
+  parseEnhance,
   type SubmissionInput,
   type SubmissionOutcome,
 } from "./submissions.js";

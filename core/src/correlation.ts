@@ -57,6 +57,8 @@ export class CorrelationStore {
     presetId: string | null;
     tipperName: string | null;
     imageUrl: string | null;
+    /** Decart prompt enhancement; defaults to Decart's own default (on). */
+    enhance?: boolean;
   }): Submission {
     const now = Date.now();
     const sub: Submission = {
@@ -65,6 +67,7 @@ export class CorrelationStore {
       presetId: input.presetId,
       tipperName: input.tipperName,
       imageUrl: input.imageUrl,
+      enhance: input.enhance ?? true,
       createdAt: now,
       expiresAt: now + this.ttlMs,
     };

@@ -23,6 +23,7 @@ function job(patch: Partial<HijackJob> = {}): HijackJob {
     prompt: "lava",
     presetId: null,
     imageUrl: null,
+    enhance: true,
     durationSec: 1,
     tip: { source: "fake", amount: 1, message: "", username: "v" },
     matchedBy: "default-preset",
@@ -253,4 +254,23 @@ test("duplicate frames-ok (two viewer pages) goes LIVE once, and its timers can'
   assert.equal(h.machine.getState(), "LIVE", "job-2 still running");
   const done = h.sent.filter((m): m is JobDoneMsg => m.t === "job:done");
   assert.deepEqual(done.map((d) => d.jobId), ["job-1"]);
+});
+
+test("the viewer's enhance choice and reference image reach the Decart session", async () => {
+  let seen: { enhance?: boolean; image?: Blob | null } = {};
+  const img = new Blob(["x"], { type: "image/jpeg" });
+  const h = harness({
+    fetchImage: async () => img,
+    decart: {
+      start: async (a) => {
+        seen = { enhance: a.enhance, image: a.imageBlob };
+      },
+    },
+  });
+  void h.machine.runJob(job({ enhance: false, imageUrl: "http://cloud/uploads/c/x.jpg" }));
+  await tick();
+  assert.equal(seen.enhance, false);
+  assert.equal(seen.image, img);
+  h.machine.cancel("job-1", "test");
+  await tick();
 });

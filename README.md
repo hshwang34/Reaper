@@ -1,8 +1,8 @@
 # Reality Hijack
 
 **Viewers pay to remix a streamer's reality in real time.** A viewer tips, writes
-their own prompt and optionally drops in a reference image — and the
-streamer's live webcam is restyled by a realtime AI video model for a number of
+their own prompt (or picks a preset), optionally drops in a reference photo and
+chooses whether the AI may enhance the prompt — and the streamer's live webcam is restyled by a realtime AI video model for a number of
 seconds proportional to the tip (**$1 = 1 second**), then snaps back to normal.
 
 This repo is a working MVP **and** a case study in designing an AI product
