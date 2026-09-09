@@ -2,18 +2,36 @@
 // viewer frame-gate message between router and viewer, and fans out status /
 // submission updates. Knows nothing about the money logic — it just moves
 // messages and reports router presence to the injected handlers.
+//
+// Trust model: the wire is untrusted. `hello.role` is validated against the
+// known roles before it touches any table, and every control message is
+// gated on the role the socket registered as — a public portal socket must
+// never be able to forge `router:state` (which can fail a paid live job) or
+// `viewer:frames-ok` (which would unhide OBS on a black frame).
 
+import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import type {
   AnyMsg,
+  HijackJob,
   Role,
+  RouterState,
   ServerMsg,
   StatusSnapshot,
   SubmissionStatus,
 } from "@rh/shared";
-import { isRtcMsg } from "@rh/shared";
+import { isLocalPlaneMsg, isRtcMsg } from "@rh/shared";
 import { log, warn } from "./log.js";
+
+/** Constant-time compare for the install token: `!==` short-circuits on the
+ *  first differing byte. Not practically exploitable on loopback, but free. */
+function tokenMatches(provided: unknown, expected: string): boolean {
+  if (typeof provided !== "string") return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 interface SocketMeta {
   role: Role;
@@ -21,11 +39,7 @@ interface SocketMeta {
 }
 
 export interface HubHandlers {
-  onRouterState(
-    state: import("@rh/shared").RouterState,
-    jobId?: string,
-    remainingSec?: number,
-  ): void;
+  onRouterState(state: RouterState, jobId?: string, remainingSec?: number): void;
   onJobDone(jobId: string, ok: boolean, reason?: string): void;
   onRouterDisconnected(): void;
   getStatus(): StatusSnapshot;
@@ -45,7 +59,12 @@ export interface HubOptions {
   rejectLocalPlane?: boolean;
 }
 
+const ROLES: ReadonlySet<string> = new Set<Role>(["portal", "router", "viewer"]);
 const PRIVILEGED_ROLES: ReadonlySet<Role> = new Set(["router", "viewer"]);
+
+function isRole(v: unknown): v is Role {
+  return typeof v === "string" && ROLES.has(v);
+}
 
 export class Hub {
   private wss: WebSocketServer | null = null;
@@ -79,21 +98,15 @@ export class Hub {
   /** Adopted-mode entry: attach a socket whose hello the front door already
    *  read and authenticated. Processes the hello as if it arrived here. */
   adopt(ws: WebSocket, hello: AnyMsg): void {
-    ws.on("message", (raw) => {
-      let msg: AnyMsg;
-      try {
-        msg = JSON.parse(raw.toString());
-      } catch {
-        return;
-      }
-      this.onMessage(ws, msg);
-    });
-    ws.on("close", () => this.onClose(ws));
-    ws.on("error", () => this.onClose(ws));
+    this.attach(ws);
     this.onMessage(ws, hello);
   }
 
   private onConnection(ws: WebSocket, _req: IncomingMessage): void {
+    this.attach(ws);
+  }
+
+  private attach(ws: WebSocket): void {
     ws.on("message", (raw) => {
       let msg: AnyMsg;
       try {
@@ -101,28 +114,45 @@ export class Hub {
       } catch {
         return;
       }
-      this.onMessage(ws, msg);
+      // A handler throwing must never take the process down with it — this
+      // listener runs for unauthenticated, internet-facing traffic on the
+      // hosted plane.
+      try {
+        this.onMessage(ws, msg);
+      } catch (e) {
+        warn("hub", `message handler threw: ${(e as Error).message}`);
+      }
     });
     ws.on("close", () => this.onClose(ws));
     ws.on("error", () => this.onClose(ws));
   }
 
   private onMessage(ws: WebSocket, msg: AnyMsg): void {
+    if (!msg || typeof msg !== "object" || typeof msg.t !== "string") return;
+
     // Registration must come first.
     if (msg.t === "hello") {
+      if (!isRole(msg.role)) {
+        warn("hub", `rejected hello with unknown role ${JSON.stringify(msg.role)}`);
+        ws.close(4400, "unknown role");
+        return;
+      }
       if (
         this.opts.authToken &&
         PRIVILEGED_ROLES.has(msg.role) &&
-        msg.auth !== this.opts.authToken
+        !tokenMatches(msg.auth, this.opts.authToken)
       ) {
         warn("hub", `rejected unauthenticated ${msg.role} hello`);
         ws.close(4401, "auth required");
         return;
       }
-      const meta: SocketMeta = { role: msg.role, code: msg.code };
+      const meta: SocketMeta = {
+        role: msg.role,
+        code: typeof msg.code === "string" ? msg.code : undefined,
+      };
       this.meta.set(ws, meta);
       this.byRole[msg.role].add(ws);
-      log("hub", `+${msg.role}${msg.code ? ` (code ${msg.code})` : ""}`);
+      log("hub", `+${msg.role}${meta.code ? ` (code ${meta.code})` : ""}`);
       this.sendTo(ws, { t: "welcome", role: msg.role });
       this.sendTo(ws, { t: "status", status: this.handlers.getStatus() });
       return;
@@ -131,32 +161,42 @@ export class Hub {
     const meta = this.meta.get(ws);
     if (!meta) return; // ignore pre-hello traffic
 
-    // Relay RTC signaling + the frame-gate straight to the target role.
-    if (isRtcMsg(msg) || msg.t === "viewer:frames-ok") {
+    // ── Local plane: RTC signaling + the frame gate, relayed by role ──────
+    if (isLocalPlaneMsg(msg)) {
       if (this.opts.rejectLocalPlane) {
         warn("hub", `dropped local-plane ${msg.t} on hosted hub`);
         return;
       }
+      if (meta.role === "portal") {
+        warn("hub", `dropped local-plane ${msg.t} from portal`);
+        return;
+      }
       if (isRtcMsg(msg)) {
-        this.forwardToRole(msg.target, {
-          ...msg,
-          from: meta.role,
-        } as ServerMsg);
-      } else {
+        // Signaling only ever flows router ↔ viewer; a peer may not target
+        // its own role (the type says PeerRole, the wire says anything), and
+        // the recorded `from` is what we know, not what the sender claimed.
+        const target: unknown = msg.target;
+        if (target !== "router" && target !== "viewer") return;
+        if (target === meta.role) return;
+        this.forwardToRole(target, { ...msg, from: meta.role });
+      } else if (meta.role === "viewer") {
         // Router listens for this to close the buffering gate.
-        this.forwardToRole("router", msg as unknown as ServerMsg);
+        this.forwardToRole("router", msg);
       }
       return;
     }
 
-    // Control messages from the router.
-    if (msg.t === "router:state") {
-      this.handlers.onRouterState(msg.state, msg.jobId, msg.remainingSec);
-      return;
-    }
-    if (msg.t === "job:done") {
-      this.handlers.onJobDone(msg.jobId, msg.ok, msg.reason);
-      return;
+    // ── Control plane: lifecycle reports, router only ─────────────────────
+    if (msg.t === "router:state" || msg.t === "job:done") {
+      if (meta.role !== "router") {
+        warn("hub", `dropped ${msg.t} from ${meta.role}`);
+        return;
+      }
+      if (msg.t === "router:state") {
+        this.handlers.onRouterState(msg.state, msg.jobId, msg.remainingSec);
+      } else {
+        this.handlers.onJobDone(msg.jobId, msg.ok, msg.reason);
+      }
     }
   }
 
@@ -185,7 +225,7 @@ export class Hub {
     for (const ws of set) this.sendTo(ws, msg);
   }
 
-  dispatchJob(job: import("@rh/shared").HijackJob): void {
+  dispatchJob(job: HijackJob): void {
     this.forwardToRole("router", { t: "job:start", job });
   }
 
@@ -208,5 +248,28 @@ export class Hub {
       const meta = this.meta.get(ws);
       if (meta?.code === code) this.sendTo(ws, msg);
     }
+  }
+
+  /** Whether at least one router is registered right now. */
+  get routerOnline(): boolean {
+    return this.byRole.router.size > 0;
+  }
+
+  /** Close every registered socket (clients reconnect on their own) and the
+   *  owned server, if any. Idempotent. Adopted-mode hubs close only the
+   *  sockets they were handed — the front door's server is not theirs. */
+  close(code = 1012, reason = "hub closing"): void {
+    for (const role of Object.keys(this.byRole) as Role[]) {
+      for (const ws of this.byRole[role]) {
+        try {
+          ws.close(code, reason);
+        } catch {
+          /* already closed */
+        }
+      }
+      this.byRole[role].clear();
+    }
+    this.wss?.close();
+    this.wss = null;
   }
 }

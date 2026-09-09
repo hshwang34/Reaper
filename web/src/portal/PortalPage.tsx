@@ -8,7 +8,7 @@
 // the model unchecked. That guardrail is the heart of the project.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { SubmissionStatus } from "@rh/shared";
+import { computeDurationSec, type SubmissionStatus } from "@rh/shared";
 import { api, type PublicConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
 import { channelSlug } from "../lib/channel.js";
@@ -53,13 +53,12 @@ export default function PortalPage() {
     };
   }, [code]);
 
-  const durationPreview = useMemo(() => {
-    if (!cfg) return 0;
-    return Math.min(
-      Math.max(1, Math.floor(tipAmount * cfg.secondsPerUSD)),
-      cfg.maxDurationSec,
-    );
-  }, [cfg, tipAmount]);
+  // Same formula the engine bills with (shared/settings.ts) — the preview a
+  // viewer sees is exactly the duration they will get.
+  const durationPreview = useMemo(
+    () => (cfg ? computeDurationSec(tipAmount, cfg) : 0),
+    [cfg, tipAmount],
+  );
 
   const secsLeft =
     expiresAt != null ? Math.max(0, Math.round((expiresAt - now) / 1000)) : null;

@@ -145,7 +145,7 @@ and (iv) a **subsequent** tip still runs (the queue recovered).
 4. Fire 3 rapid fake tips → FIFO with cooldown gaps.
 5. Panic mid-hijack → instant teardown; resume → queue drains.
 6. Wi-Fi off mid-hijack → clean local teardown; Decart session dead by the cap.
-7. `npm run typecheck` clean; console quiet without `?debug=1`.
+7. `npm run check` clean (typecheck + tests); console quiet without `?debug=1`.
 
 All seven pass **twice** + a clean 3-hour soak + footage/numbers committed =
 ready to start commercialization.

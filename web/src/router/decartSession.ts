@@ -103,8 +103,14 @@ export class DecartSession {
   /** A clone of the camera published to Decart, so disconnecting the session
    *  never stops the original tracks that feed the router's live preview. */
   private publishStream: MediaStream | null = null;
+  /** Bumped by every start() and disconnect(). A connect that resolves after
+   *  disconnect() was called (the router's connect-timeout abort races the
+   *  SDK) must be killed on arrival — otherwise it becomes a zombie session
+   *  that bills until Decart's maxSessionDuration cap fires. */
+  private gen = 0;
 
   async start(a: StartArgs): Promise<void> {
+    const g = ++this.gen;
     if (a.token === "MOCK") {
       // No Decart: hand the raw camera straight through as the "AI" stream.
       this.mock = true;
@@ -124,7 +130,8 @@ export class DecartSession {
     );
 
     const decart = createDecartClient({ apiKey: a.token });
-    this.client = await decart.realtime.connect(this.publishStream, {
+    const publish = this.publishStream;
+    const client = await decart.realtime.connect(publish, {
       model: models.realtime("lucy-2.5"),
       resolution: "720p",
       initialState: {
@@ -135,6 +142,7 @@ export class DecartSession {
       onRemoteStream: (stream) => {
         const n = stream.getVideoTracks().length;
         debugLog("decart", "onRemoteStream — video tracks:", n);
+        if (g !== this.gen) return; // stale session — see `gen`
         if (n > 0) {
           a.onRemoteStream(stream);
         } else {
@@ -143,6 +151,7 @@ export class DecartSession {
           stream.onaddtrack = () => {
             if (stream.getVideoTracks().length > 0) {
               stream.onaddtrack = null;
+              if (g !== this.gen) return;
               debugLog("decart", "remote video track arrived (late)");
               a.onRemoteStream(stream);
             }
@@ -150,15 +159,29 @@ export class DecartSession {
         }
       },
     });
-    this.client.on("error", (e) =>
+    if (g !== this.gen) {
+      // disconnect() ran while we were connecting: the session came up for a
+      // job that no longer exists. Kill it immediately rather than leaking it.
+      debugLog("decart", "connected after disconnect — closing zombie session");
+      try {
+        client.disconnect();
+      } catch {
+        /* already gone */
+      }
+      publish.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    this.client = client;
+    client.on("error", (e) =>
       debugLog("decart", "error:", (e as { message?: string })?.message ?? e),
     );
-    this.client.on("generationEnded", (g) =>
-      debugLog("decart", "generationEnded:", JSON.stringify(g)),
+    client.on("generationEnded", (ev) =>
+      debugLog("decart", "generationEnded:", JSON.stringify(ev)),
     );
   }
 
   disconnect(): void {
+    this.gen += 1;
     if (this.mock) {
       this.mock = false;
       return;

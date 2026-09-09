@@ -7,11 +7,13 @@
 //     ?auth=<token>; we lift it from the query string.
 //   · CLI demo rig — no token configured server-side; everything passes.
 // The token is cached in sessionStorage so SPA navigation (which drops query
-// params) keeps it for the page's lifetime.
+// params) keeps it for the page's lifetime. The API client (lib/apiClient.ts)
+// turns it into the x-rh-auth header; the hub socket sends it in `hello`.
 
 const KEY = "rhAuthToken";
 
-function resolve(): string | undefined {
+/** The privilege token for this page, if any. */
+export function authToken(): string | undefined {
   const w = window as { rhAuth?: string };
   if (typeof w.rhAuth === "string" && w.rhAuth) return w.rhAuth;
   try {
@@ -24,15 +26,4 @@ function resolve(): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** The privilege token for this page, if any. */
-export function authToken(): string | undefined {
-  return resolve();
-}
-
-/** fetch() headers carrying the token (empty when none). */
-export function authHeaders(): Record<string, string> {
-  const t = resolve();
-  return t ? { "x-rh-auth": t } : {};
 }

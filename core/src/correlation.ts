@@ -5,7 +5,9 @@
 // their tip message. On a tip, match in priority order:
 //   1. code found in the tip message
 //   2. tipperName the viewer declared == tip username
-//   3. exactly one unexpired pending submission (single-viewer demo path)
+//   3. exactly one unexpired pending submission (single-viewer demo path;
+//      opt-out via `allowSolePendingMatch` because on a busy channel it hands
+//      a stranger's tip to whoever submitted last)
 //   4. no match → caller fires the streamer's default preset
 // Matched submissions are consumed immediately; unmatched ones expire on a TTL.
 
@@ -15,15 +17,22 @@ import { log } from "./log.js";
 
 // Unambiguous alphabet: no O/0, I/1.
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CODE_LEN = 4;
 
 export interface MatchResult {
   submission: Submission | null;
   matchedBy: HijackJob["matchedBy"];
 }
 
+export interface MatchOptions {
+  /** Rule 3 above. Default true (the demo rig). Hosted channels with real
+   *  traffic should turn it off. */
+  allowSolePendingMatch?: boolean;
+}
+
 export class CorrelationStore {
   private pending = new Map<string, Submission>();
-  private sweepTimer: NodeJS.Timeout;
+  private sweepTimer: NodeJS.Timeout | null;
 
   /** Called when a submission expires without a tip (to notify its portal). */
   onExpire: (code: string) => void = () => {};
@@ -37,7 +46,7 @@ export class CorrelationStore {
   private genCode(): string {
     let code = "";
     do {
-      const bytes = randomBytes(4);
+      const bytes = randomBytes(CODE_LEN);
       code = Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join("");
     } while (this.pending.has(code));
     return code;
@@ -65,11 +74,14 @@ export class CorrelationStore {
   }
 
   /** Match a tip to a submission, consuming it if found. */
-  match(tip: TipEvent): MatchResult {
-    // 1. code in message
-    const upper = tip.message.toUpperCase();
+  match(tip: TipEvent, opts: MatchOptions = {}): MatchResult {
+    // 1. code in message — as a whole token, so an ordinary word in the tip
+    //    message ("MATE", "GAME") can't accidentally claim someone's code.
+    const tokens = new Set(
+      tip.message.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean),
+    );
     for (const sub of this.pending.values()) {
-      if (upper.includes(sub.code)) {
+      if (tokens.has(sub.code)) {
         this.pending.delete(sub.code);
         return { submission: sub, matchedBy: "code" };
       }
@@ -85,7 +97,7 @@ export class CorrelationStore {
       }
     }
     // 3. sole pending submission
-    if (this.pending.size === 1) {
+    if ((opts.allowSolePendingMatch ?? true) && this.pending.size === 1) {
       const sub = [...this.pending.values()][0];
       this.pending.delete(sub.code);
       return { submission: sub, matchedBy: "sole-pending" };
@@ -98,6 +110,10 @@ export class CorrelationStore {
     return this.pending.get(code);
   }
 
+  get size(): number {
+    return this.pending.size;
+  }
+
   private sweep(): void {
     const now = Date.now();
     for (const [code, sub] of this.pending) {
@@ -107,5 +123,12 @@ export class CorrelationStore {
         this.onExpire(code);
       }
     }
+  }
+
+  /** Stop the sweep and drop pending submissions (they'd never match again). */
+  dispose(): void {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    this.sweepTimer = null;
+    this.pending.clear();
   }
 }
