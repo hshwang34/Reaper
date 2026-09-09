@@ -24,9 +24,11 @@ import { devAuthEnabled, env, repoRoot } from "./env.js";
 import {
   APP_LOOPBACK_REDIRECT,
   exchangeTwitchCode,
+  issueExchangeCode,
   issueSession,
   newNonce,
   readState,
+  redeemExchangeCode,
   refreshSession,
   requireChannel,
   signState,
@@ -110,13 +112,19 @@ app.get("/auth/twitch/callback", async (req, res) => {
     res.redirect(u.toString());
     return;
   }
-  res
-    .cookie("rh_session", tokens.access, {
-      httpOnly: true,
-      sameSite: "lax",
-      maxAge: 15 * 60 * 1000,
-    })
-    .redirect(`/dashboard#refresh=${encodeURIComponent(tokens.refresh)}`);
+  // Browser sign-in: hand the SPA a single-use, ~60s exchange code rather
+  // than the 30-day refresh token itself — a fragment lands in browser
+  // history and is readable by page JS, so the long-lived credential must
+  // never be what's written there (security-review finding).
+  res.redirect(`/dashboard#code=${encodeURIComponent(issueExchangeCode(tokens))}`);
+});
+
+/** Redeem a sign-in exchange code for the session it was minted for (once). */
+app.post("/auth/exchange", (req, res) => {
+  const code = typeof req.body?.code === "string" ? req.body.code : "";
+  const tokens = code ? redeemExchangeCode(code) : null;
+  if (!tokens) return res.status(401).json({ error: "invalid or expired code" });
+  res.json(tokens);
 });
 
 app.post("/auth/refresh", async (req, res) => {

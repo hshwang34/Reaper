@@ -10,6 +10,7 @@ import { api, type RouterConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
 import { LoopbackSender } from "../lib/loopback.js";
 import { RouterMachine } from "./stateMachine.js";
+import { browserPorts } from "./ports.js";
 import { acquireCamera, listCameras } from "./decartSession.js";
 
 const STATE_COLOR: Record<RouterState, string> = {
@@ -47,7 +48,7 @@ export default function RouterPage() {
     const hub = new HubSocket("router").connect();
     hubRef.current = hub;
     const sender = new LoopbackSender(hub);
-    const machine = new RouterMachine(hub, sender, {
+    const machine = new RouterMachine(browserPorts(hub, sender), {
       onState: (s, rem) => {
         setState(s);
         setRemaining(rem);
@@ -88,14 +89,14 @@ export default function RouterPage() {
       if (e.key === "Escape") void panic();
     };
     window.addEventListener("keydown", onKey);
-    const onUnload = () => machine.dispose();
+    const onUnload = () => void machine.dispose();
     window.addEventListener("pagehide", onUnload);
 
     return () => {
       off();
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pagehide", onUnload);
-      machine.dispose();
+      void machine.dispose();
       sender.dispose();
       hub.close();
     };

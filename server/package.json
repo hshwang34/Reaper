@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "RH_DATABASE_PATH=/tmp/rh-server-test.sqlite RH_JWT_SECRET=test-secret node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@rh/core": "*",

@@ -1,8 +1,10 @@
 // Streamer dashboard v0 (hosted) — plan M4: per-channel settings + tip
 // connect + the hijack ledger. Session model: the OAuth callback redirects
-// here with #refresh=…; we rotate it immediately (refresh tokens are
-// single-use) and keep the access token in memory, the new refresh in
-// localStorage. No cookie auth — everything is explicit Bearer calls.
+// here with #code=… (a single-use, ~60s exchange code — never the refresh
+// token itself, which would sit in browser history); we redeem it once for a
+// session, keep the access token in memory and the refresh in localStorage,
+// and rotate the refresh on every later load (refresh tokens are
+// single-use). No cookie auth — everything is explicit Bearer calls.
 
 import { useCallback, useEffect, useState } from "react";
 import type { Settings } from "@rh/shared";
@@ -29,17 +31,27 @@ interface LedgerRow {
 
 const REFRESH_KEY = "rhDashRefresh";
 
-async function rotate(refresh: string): Promise<Session | null> {
-  const res = await fetch("/auth/refresh", {
+/** POST to an /auth endpoint and, on success, persist the new refresh token.
+ *  On refusal the stored refresh is dropped: it is either burned (rotation is
+ *  single-use), expired, or revoked, and retrying it on every page load would
+ *  just be a silent 401 loop until the user happens to sign in again. */
+async function obtainSession(path: string, body: object): Promise<Session | null> {
+  const res = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ refresh }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    localStorage.removeItem(REFRESH_KEY);
+    return null;
+  }
   const s = (await res.json()) as Session;
   localStorage.setItem(REFRESH_KEY, s.refresh);
   return s;
 }
+
+const rotate = (refresh: string) => obtainSession("/auth/refresh", { refresh });
+const redeem = (code: string) => obtainSession("/auth/exchange", { code });
 
 export default function DashboardPage() {
   const [session, setSession] = useState<Session | null>(null);
@@ -47,12 +59,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void (async () => {
-      // 1. fresh sign-in lands with #refresh=…
+      // 1. A fresh sign-in lands with #code=… — redeem it once. Clear the
+      //    hash first so a reload never re-presents a burned code.
       const hash = new URLSearchParams(location.hash.slice(1));
-      const fromHash = hash.get("refresh");
-      if (fromHash) history.replaceState(null, "", location.pathname);
-      const refresh = fromHash ?? localStorage.getItem(REFRESH_KEY);
-      if (refresh) setSession(await rotate(refresh));
+      const code = hash.get("code");
+      if (code) history.replaceState(null, "", location.pathname);
+      if (code) {
+        setSession(await redeem(code));
+      } else {
+        // 2. Returning visit: rotate the stored refresh token.
+        const refresh = localStorage.getItem(REFRESH_KEY);
+        if (refresh) setSession(await rotate(refresh));
+      }
       setChecked(true);
     })();
   }, []);

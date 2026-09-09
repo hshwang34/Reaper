@@ -16,17 +16,12 @@
 // idempotent — a late callback from a job that was cancelled mid-await can't
 // re-enter the machine, flap router:state, or (worst) unhide OBS after the
 // session it belonged to was already torn down.
+//
+// Side effects go through MachinePorts (ports.ts) so all of the above is
+// asserted by web/test/stateMachine.test.ts rather than promised in prose.
 
 import type { HijackJob, RouterState } from "@rh/shared";
-import { api } from "../lib/api.js";
-import type { HubSocket } from "../lib/ws.js";
-import { LoopbackSender } from "../lib/loopback.js";
-import { DecartSession } from "./decartSession.js";
-
-const CONNECT_TIMEOUT_MS = 10_000;
-const BUFFER_TIMEOUT_MS = 8_000;
-const WATCHDOG_EXTRA_MS = 10_000; // beyond paid duration
-const WIPE_MS = 420; // glitch-wipe cover for the cut
+import { DEFAULT_TIMEOUTS, type MachinePorts, type MachineTimeouts } from "./ports.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -43,12 +38,12 @@ export class RouterMachine {
   private state: RouterState = "OFFLINE";
   private job: HijackJob | null = null;
   private camera: MediaStream | null = null;
-  private decart = new DecartSession();
   private tearingDown = false;
   private wentLive = false;
   private gotStream = false;
   /** Bumped on every job start and every teardown; see header comment. */
   private gen = 0;
+  private t: MachineTimeouts;
 
   private liveInterval?: ReturnType<typeof setInterval>;
   private watchdog?: ReturnType<typeof setTimeout>;
@@ -56,10 +51,12 @@ export class RouterMachine {
   private connectTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
-    private hub: HubSocket,
-    private sender: LoopbackSender,
+    private ports: MachinePorts,
     private cb: MachineCallbacks,
-  ) {}
+    timeouts: Partial<MachineTimeouts> = {},
+  ) {
+    this.t = { ...DEFAULT_TIMEOUTS, ...timeouts };
+  }
 
   getState(): RouterState {
     return this.state;
@@ -77,7 +74,7 @@ export class RouterMachine {
 
   private setState(state: RouterState, remainingSec?: number): void {
     this.state = state;
-    this.hub.send({
+    this.ports.send({
       t: "router:state",
       state,
       jobId: this.job?.jobId,
@@ -103,7 +100,7 @@ export class RouterMachine {
       // cooldown), but if it ever happens, fail it back explicitly rather
       // than leaving the engine to wait out its deadline backstop.
       this.cb.log("busy — rejecting overlapping job");
-      this.hub.send({ t: "job:done", jobId: job.jobId, ok: false, reason: "router busy" });
+      this.ports.send({ t: "job:done", jobId: job.jobId, ok: false, reason: "router busy" });
       return;
     }
     const g = ++this.gen;
@@ -119,7 +116,7 @@ export class RouterMachine {
     this.setState("AUTHORIZING");
     let token: string;
     try {
-      token = (await api.mintToken(job.durationSec)).token;
+      token = await this.ports.mintToken(job.durationSec);
     } catch (e) {
       if (this.stale(g)) return;
       return this.abort(`token mint failed: ${(e as Error).message}`);
@@ -130,20 +127,14 @@ export class RouterMachine {
     this.setState("CONNECTING");
     let imageBlob: Blob | null = null;
     if (job.imageUrl) {
-      try {
-        imageBlob = await fetch(job.imageUrl).then((r) => r.blob());
-      } catch {
-        this.cb.log("reference image fetch failed — continuing without it");
-      }
+      imageBlob = await this.ports.fetchImage(job.imageUrl);
+      if (!imageBlob) this.cb.log("reference image fetch failed — continuing without it");
       if (this.stale(g)) return;
     }
 
-    this.connectTimer = setTimeout(
-      () => this.abort("connect timeout"),
-      CONNECT_TIMEOUT_MS,
-    );
+    this.connectTimer = setTimeout(() => this.abort("connect timeout"), this.t.connectMs);
     try {
-      await this.decart.start({
+      await this.ports.decart.start({
         token,
         prompt: job.prompt,
         imageBlob,
@@ -180,12 +171,9 @@ export class RouterMachine {
 
     // 3. BUFFERING — push to the viewer, wait for verified frames.
     this.setState("BUFFERING");
-    await this.sender.start(job.jobId, stream);
+    await this.ports.sender.start(job.jobId, stream);
     if (this.stale(g)) return;
-    this.bufferTimer = setTimeout(
-      () => this.abort("no verified frames"),
-      BUFFER_TIMEOUT_MS,
-    );
+    this.bufferTimer = setTimeout(() => this.abort("no verified frames"), this.t.bufferMs);
   }
 
   /** Called by RouterPage when the viewer confirms N decoded frames. */
@@ -200,7 +188,7 @@ export class RouterMachine {
     const g = this.gen;
     // 4. LIVE — unhide OBS, start the strict countdown.
     try {
-      await api.obsToggle(true);
+      await this.ports.setObsVisible(true);
     } catch (e) {
       if (this.stale(g)) return;
       return this.abort(`obs toggle failed: ${(e as Error).message}`);
@@ -209,7 +197,7 @@ export class RouterMachine {
       // Panic/cancel landed while the unhide request was in flight. Teardown
       // already ran with wentLive=false (so it did NOT hide OBS) — re-hide
       // now or the overlay stays up on a source with no stream behind it.
-      void api.obsToggle(false).catch(() => {});
+      void this.ports.setObsVisible(false).catch(() => {});
       return;
     }
     this.wentLive = true;
@@ -239,7 +227,7 @@ export class RouterMachine {
     // Watchdog backstop in case the interval is starved (heavy tab throttling).
     this.watchdog = setTimeout(
       () => this.teardown(true, "watchdog"),
-      job.durationSec * 1000 + WATCHDOG_EXTRA_MS,
+      job.durationSec * 1000 + this.t.watchdogExtraMs,
     );
   }
 
@@ -275,20 +263,20 @@ export class RouterMachine {
     // actually on screen (i.e. we reached LIVE). Hide OBS BEFORE dropping the
     // Decart session so the source never shows a dead stream.
     if (this.wentLive) {
-      this.sender.sendReset();
-      await sleep(WIPE_MS);
+      this.ports.sender.sendReset();
+      await sleep(this.t.wipeMs);
       try {
-        await api.obsToggle(false);
+        await this.ports.setObsVisible(false);
       } catch {
         /* best effort — never block teardown on OBS */
       }
     }
 
-    this.decart.disconnect();
-    this.sender.stop();
+    this.ports.decart.disconnect();
+    this.ports.sender.stop();
     this.cb.onAiStream?.(null);
 
-    this.hub.send({ t: "job:done", jobId: job.jobId, ok, reason });
+    this.ports.send({ t: "job:done", jobId: job.jobId, ok, reason });
     this.cb.log(`teardown (${ok ? "ok" : "failed"}: ${reason})`);
 
     this.job = null;
@@ -301,19 +289,20 @@ export class RouterMachine {
     this.setState(this.camera ? "IDLE" : "OFFLINE");
   }
 
-  /** Full stop: release the camera (page unload / disarm). */
-  dispose(): void {
+  /** Full stop: release the camera (page unload / disarm). Resolves once the
+   *  hide→disconnect sequence has finished. */
+  dispose(): Promise<void> {
     const camera = this.camera;
     this.camera = null;
     if (this.job) {
       // teardown() ends in OFFLINE (camera is already null). Release the
       // camera only once the hide→disconnect sequence has finished.
-      void this.teardown(false, "disposed").finally(() => {
+      return this.teardown(false, "disposed").finally(() => {
         camera?.getTracks().forEach((t) => t.stop());
       });
-      return;
     }
     camera?.getTracks().forEach((t) => t.stop());
     this.setState("OFFLINE");
+    return Promise.resolve();
   }
 }
