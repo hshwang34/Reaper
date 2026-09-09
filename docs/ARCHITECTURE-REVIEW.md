@@ -68,10 +68,13 @@ the app's authed cloud calls once in `CloudLink.authedPost`.
 ## Test gate
 
 There was no runner. There is now `npm test` (`node --test` via `tsx`, no new
-production deps) with 30 tests over the pure units — Engine, CorrelationStore,
-createSubmission, Hub role gating (adopted mode with fake sockets), and the
-settings/pricing helpers. `npm run check` = typecheck + test. The router state
-machine is not yet under test; see step 6 below for the seam it needs.
+production deps) with 46 tests: `core/test` (Engine, CorrelationStore,
+createSubmission, gatedMint, Hub role gating against fake sockets, the
+settings/pricing helpers), `web/test` (the router state machine against fake
+ports — every invariant in the "must not change" list below is an assertion),
+and `server/test` (exchange codes, constant-time compare). `npm run check` =
+typecheck + test. A live smoke of the demo rig in MOCK mode exercising every
+shared route was run after each host-touching step.
 
 ## The target shape
 
@@ -108,39 +111,35 @@ web/       lib/apiClient (one credential model) · lib/hub · lib/desktop
            router/{machine, ports}  — machine takes { mintToken, setObsVisible, fetchImage, clock }
 ```
 
-### Remaining migration, in order (each step typecheck-green)
+### Migration — complete (2026-09-09, one commit per step, gate green throughout)
 
-Steps 1–3 of the original plan are done in this pass (settings helpers,
-shared submission intake, lifecycle + `dispose()`, money authority port).
+| Step | What landed | Where |
+|---|---|---|
+| 1–3 | Settings helpers, shared submission intake, `dispose()` everywhere, money-authority port | `shared/settings.ts`, `core/submissions.ts`, `LocalServerHost.moneyProxy` |
+| 4 | `createRuntime({ getSettings, server, hub, hooks })` — the engine↔hub bind built once; ledger rows and cloud mirroring are hooks | `core/runtime.ts`; sidecar + `server/channels.ts` call it |
+| 5 | `buildApiRouter({ context, requireAuth, upload })` — config · presets · submissions · settings · token · panic · dev/* as one Express router; `gatedMint` + `MintLedger` as the single mint policy | `core/http/apiRouter.ts`, `core/mintPolicy.ts`; mounted at `/api` and `/api/c/:channel` |
+| 6 | `RouterMachine` behind `MachinePorts` with injectable timeouts; the invariants are tests | `web/src/router/ports.ts`, `web/test/stateMachine.test.ts` |
+| 7 | Protocol split into control plane and `LocalPlaneMsg`; typed `sdp`/`candidate`; dead `ARMING`/`ERROR` removed; no casts left in hub or loopback | `shared/src/protocol.ts` |
+| 8 | OBS scene/source moved from `Settings` to host wiring (`.env` / keys.json); `loadSettings()` validates persisted files on read | `shared/src/{types,settings}.ts`, `sidecar/config.ts`, `app/config.ts` |
+| 9 | `createApiClient` with install / session / none credentials; `GuardrailsEditor`; `DesktopBridge` typed once | `web/src/lib/apiClient.ts`, `web/src/features/*`, `shared/src/desktopBridge.ts` |
+| 10 | One-time OAuth exchange code instead of the refresh token in a fragment; constant-time compares | `server/src/auth.ts` (`/auth/exchange`), `core/src/hub.ts` |
 
-4. **`core/runtime.ts`.** Move the engine↔hub late-bind out of
-   `sidecar/server.ts` and `server/channels.ts` into one factory that returns
-   `{ engine, hub, correlation, dispose }`. Both hosts call it. ~60 duplicated
-   lines gone; the ledger hooks become an optional `Ledger` port.
-5. **`core/http/buildApiRouter`.** The route bodies in the two hosts are now
-   thin enough to be the same Express router parameterised by
-   `(runtime, host)`. The hosted plane wraps it with channel resolution +
-   JWT middleware; the local plane with the install-token check.
-6. **`RouterMachine` ports.** Inject `{ mintToken, setObsVisible, fetchImage }`
-   instead of importing the `api` singleton, and take a clock. Then the two
-   invariants the machine promises — teardown idempotency and
-   hide-before-disconnect on every exit path — become assertions on a fake,
-   not prose.
-7. **Protocol split.** `LocalPlaneMsg` (`rtc:*`, `viewer:frames-ok`) vs
-   `ControlPlaneMsg`; typed `auth: { kind: "install" | "session" }`; minimal
-   structural `sdp`/`candidate` types so `loopback.ts` stops casting; delete
-   the `as unknown as ServerMsg` in the hub and the never-emitted `ARMING` /
-   `ERROR` states.
-8. **Settings vs wiring.** `obsScene`/`obsSource` are machine wiring, not
-   streamer policy; move them to the host's config and stop the `.env` override
-   fork between the sidecar and the app.
-9. **Web consolidation.** One `apiClient` with pluggable credential (install
-   token / session JWT) replacing the three hand-rolled auth paths (`lib/auth`,
-   `DashboardPage.authed`, `CloudLink`); one `GuardrailsEditor` for the router
-   panel and the dashboard; the preload contract typed once in `shared/`.
-10. **Hosted auth polish.** Refresh token currently rides a URL fragment after
-    OAuth (`/dashboard#refresh=…`); exchange it for a one-time code redeemed by
-    POST. Constant-time compares for the install token and refresh hash.
+The one item from the original list that was deliberately *not* done:
+typing `HelloMsg.auth` as `{ kind: "install" | "session" }`. Both credentials
+are opaque bearer strings whose meaning is decided by the host that receives
+them (the local hub compares, the hosted front door verifies a JWT); a tagged
+union would move that decision into the wire format without removing any
+check. The comment on `HelloMsg.auth` says so.
+
+### What a future pass could still do
+
+- `core/domain` vs `core/node` split so the engine and correlation have zero
+  `node:` imports (they take `node:crypto` for ids today). Only matters if the
+  money path ever needs to run in a browser or edge runtime.
+- Per-channel log tags on the hosted plane: the logger sink is process-global,
+  so `engine:<login>` tags are built and then ignored inside core.
+- The hosted `ChannelRuntime` map is in-memory; a second server instance means
+  a second engine per channel. Fine for the single-machine alpha it is.
 
 ### Must not change (the hard-won constraints)
 

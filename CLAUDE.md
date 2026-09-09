@@ -25,7 +25,8 @@ npm install
 cp .env.example .env      # leave keys blank → MOCK mode (camera passthrough, no cost)
 npm run dev               # demo rig: concurrently sidecar :7712 + web :5173
 npm run typecheck         # tsc --noEmit across all SIX workspaces
-npm test                  # node --test over core/test (engine, correlation, hub, submissions, settings)
+npm test                  # node --test: core/test (engine, correlation, hub, mint policy, submissions,
+                          #   settings), web/test (router state machine), server/test (auth)
 npm run check             # typecheck + test — the gate to run after edits
 npm run build             # builds the web app only
 npm run start             # production demo rig: build, then ONE process on :7712
@@ -39,10 +40,13 @@ Cloud-mode dev loop: run `dev:server`, then launch the app with
 Package the app: `npm run package --workspace app` (unsigned `--dir`) or `dist` (dmg;
 signing/notarization gated on Apple secrets, see `.github/workflows/release.yml`).
 
-Per-workspace dev: `npm run dev:sidecar`, `npm run dev:web`. There is **no linter**. Tests
-cover the pure units in `core/` (`core/test/*.test.ts`, plain `node:test` + `tsx`, no
-framework); `npm run check` is the check to run after edits. `docs/ARCHITECTURE-REVIEW.md`
-records the 2026-09 review, what it fixed, and the remaining migration to the target layout.
+Per-workspace dev: `npm run dev:sidecar`, `npm run dev:web`. There is **no linter**. Tests are
+plain `node:test` run through `tsx` (no framework) in `core/test`, `web/test`, `server/test`;
+`npm run check` is the check to run after edits. Run workspace scripts from the workspace dir
+(or via `npm run … --workspace`): `tsx` applies that workspace's `tsconfig.json` `paths`, which
+is what resolves `@rh/*` to source — from the repo root it would fall back to the hoisted
+`node_modules` symlinks instead. `docs/ARCHITECTURE-REVIEW.md` records the 2026-09 review, what
+it fixed, and the migration to the target layout.
 
 ### Demoing the loop without credentials
 1. Open `http://localhost:5173/router`, click **Arm camera** (needs a real Chrome tab).
@@ -58,24 +62,33 @@ hosts — the sidecar demo rig, the Electron app's local bridge, and the hosted 
 plane's per-channel runtimes — which is the whole point of the extraction.
 
 - **`shared/`** (`@rh/shared`) — the single source of truth: domain `types.ts`, the WS
-  `protocol.ts` (discriminated union on `t`; `HelloMsg` carries `auth`/`channel`), and the
-  `presets.ts` catalog. Everything imports it; the web consumes it *as source* via a Vite alias.
-- **`core/`** (`@rh/core`) — the portable money path: `engine.ts` (tip→job→queue),
-  `correlation.ts` (tip↔submission matching), `moderation.ts`, `hub.ts` (WS relay, with a
-  local mode that owns a `WebSocketServer` and an adopted mode the hosted front door drives),
-  `decart.ts` (ek_ minting), and the trigger adapters. Host-agnostic by construction: `Engine`
-  takes an injected `getSettings`, the log sink is swappable (`setLogger`).
+  `protocol.ts` (discriminated union on `t`, split into a control plane and a local plane;
+  `HelloMsg` carries `auth`/`channel`), `settings.ts` (`DEFAULT_SETTINGS`, the pricing
+  formula `computeDurationSec`, `sanitizeSettingsPatch` / `loadSettings`), and the `presets.ts`
+  catalog. Everything imports it; the web consumes it *as source* via a Vite alias.
+- **`core/`** (`@rh/core`) — the portable money path. Policy: `engine.ts` (tip→job→queue),
+  `correlation.ts` (tip↔submission matching), `submissions.ts` (intake: preset resolution,
+  enablement, moderation), `moderation.ts`, `mintPolicy.ts` (`gatedMint`: job-gated, one token
+  per job, budget-capped). Composition: `runtime.ts` (`createRuntime` — the engine↔hub wiring
+  + hooks + `dispose()`, built once for every host), `http/apiRouter.ts` (`buildApiRouter` —
+  the channel API every host mounts), `hub.ts` (WS relay with role gating; local mode owns a
+  `WebSocketServer`, adopted mode is driven by the hosted front door), `decart.ts` (ek_
+  minting), and the trigger adapters. Host-agnostic by construction: hosts inject
+  `getSettings`, the auth gate, upload storage, and a mint ledger; the log sink is swappable.
 - **`sidecar/`** (`@rh/sidecar`, tsx) — the demo-rig composition root. `server.ts` is a
-  `createLocalServer(host)` factory (routes + hub + minting + OBS + static serving) that both
-  the CLI (`index.ts`, config from `.env`) and the Electron app embed. `obs.ts` also does
-  `ensureBrowserSource()` auto-provisioning. In production mode (`npm run start`) it serves the
-  built web app — one process, one port.
+  `createLocalServer(host)` factory (`createRuntime` + `buildApiRouter` + OBS control + static
+  serving + the install-token gate) that both the CLI (`index.ts`, config from `.env`) and the
+  Electron app embed. OBS scene/source names are host wiring (`.env` / the app's keys.json),
+  not `Settings`. `obs.ts` also does `ensureBrowserSource()` auto-provisioning. In production
+  mode (`npm run start`) it serves the built web app — one process, one port.
 - **`app/`** (`@rh/app`, Electron) — the "single download" for streamers. Main process embeds
   the sidecar composition as a local bridge (127.0.0.1:17712), auto-provisions the OBS Browser
   Source, holds a per-install auth token, tray + ⌘⇧H panic, and — when signed in — a
   `cloudLink.ts` to the control plane (**cloud mode**: no Decart key on the machine; the local
-  bridge keeps only OBS control + signaling + page serving). Renderer runs the existing
-  `/router` page in bundled Chromium. `local mode` (pasted keys) is the permanent offline demo.
+  bridge keeps only OBS control + signaling + page serving, and panic/status go to the cloud
+  engine through the bridge's `moneyProxy` — the local engine never holds the job in cloud
+  mode). Renderer runs the existing `/router` page in bundled Chromium. `local mode` (pasted
+  keys) is the permanent offline demo.
 - **`server/`** (`@rh/server`, tsx) — the hosted control plane. Twitch OAuth → our JWTs,
   per-channel in-memory `ChannelRuntime` (one `@rh/core` engine each), server-side job-gated +
   budget-capped minting, the hijack ledger (SQLite/Drizzle), and the hosted portal at
