@@ -80,6 +80,12 @@ plane's per-channel runtimes — which is the whole point of the extraction.
   hosted at `/c/:channel`), `/router` (streamer capture + state machine), `/viewer` (OBS
   Browser Source display), `/setup` (desktop onboarding wizard), `/dashboard` (hosted streamer
   dashboard). `lib/auth.ts` + `lib/channel.ts` make the same pages work local and hosted.
+- **`site/`** — the public marketing site. Deliberately **not** a workspace: a standalone Vite
+  project (`cd site && npm install && npm run dev`) so Vercel installs nothing but Vite. No
+  framework, no runtime deps. The hero is a CSS simulation of the tip→hijack→revert loop
+  until recorded clips of the real model output exist in `site/public/clips/` (`site/CLIPS.md`
+  explains the one-off recording via `/decart-test` and `site/tools/encode-clips.sh`). The
+  site never calls Decart. Vercel project `reality-hijack` on the personal account.
 
 Browser pages talk to whichever host serves them, same-origin (Vite proxy in dev). Secrets
 never reach a page. The **local plane** (rtc signaling + `viewer:frames-ok`) never leaves the

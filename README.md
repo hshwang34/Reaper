@@ -185,6 +185,9 @@ web/        Vite + React + Tailwind — three routes:
               /portal   viewer UI (prompt, image, claim code, live status)
               /router   streamer capture + state machine + guardrail settings
               /viewer   dumb display page loaded inside an OBS Browser Source
+site/       Marketing site (standalone Vite, no framework) — deployed to Vercel
+            from this folder; hero plays recorded clips of the real effect
+            (see site/CLIPS.md) and never calls the model itself
 FEASIBILITY.md   The research + product assessment that drove the design
 ```
 
