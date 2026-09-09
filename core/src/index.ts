@@ -10,10 +10,20 @@
 // settings.json, OBS, Decart keys, or HTTP routes stays in the host.
 
 export { Engine, type EngineEmit } from "./engine.js";
-export { CorrelationStore, type MatchResult } from "./correlation.js";
+export { CorrelationStore, type MatchResult, type MatchOptions } from "./correlation.js";
 export { checkPrompt, type ModerationResult } from "./moderation.js";
+export {
+  createSubmission,
+  type SubmissionInput,
+  type SubmissionOutcome,
+} from "./submissions.js";
 export { Hub, type HubHandlers, type HubOptions } from "./hub.js";
-export { mintClientToken, decartModel } from "./decart.js";
+export {
+  mintClientToken,
+  decartModel,
+  SESSION_CAP_EXTRA_SEC,
+  TOKEN_TTL_SEC,
+} from "./decart.js";
 export { setLogger, log, warn, err, type Logger } from "./log.js";
 export { type TriggerAdapter } from "./triggers/types.js";
 export { parseFakeTip } from "./triggers/fake.js";

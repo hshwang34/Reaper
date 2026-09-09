@@ -17,9 +17,16 @@ const RTC_CONFIG: RTCConfiguration = {
 export class LoopbackSender {
   private pc: RTCPeerConnection | null = null;
   private jobId = "";
+  private unsubscribe: () => void;
 
   constructor(private hub: HubSocket) {
-    hub.on((m) => this.onMessage(m));
+    this.unsubscribe = hub.on((m) => void this.onMessage(m).catch(() => {}));
+  }
+
+  /** Close the peer and stop listening to the hub. */
+  dispose(): void {
+    this.stop();
+    this.unsubscribe();
   }
 
   async start(jobId: string, stream: MediaStream): Promise<void> {
@@ -82,13 +89,21 @@ export class LoopbackSender {
 export class LoopbackReceiver {
   private pc: RTCPeerConnection | null = null;
   private jobId = "";
+  private unsubscribe: () => void;
 
   constructor(
     private hub: HubSocket,
     private onStream: (stream: MediaStream, jobId: string) => void,
     private onReset: (jobId: string) => void,
   ) {
-    hub.on((m) => this.onMessage(m));
+    this.unsubscribe = hub.on((m) => void this.onMessage(m).catch(() => {}));
+  }
+
+  /** Close the peer and stop listening to the hub (page unmount). */
+  dispose(): void {
+    this.pc?.close();
+    this.pc = null;
+    this.unsubscribe();
   }
 
   private async onMessage(m: ServerMsg): Promise<void> {

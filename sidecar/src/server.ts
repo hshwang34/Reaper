@@ -13,13 +13,19 @@ import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import express from "express";
-import { getPreset, PRESETS, type Settings } from "@rh/shared";
+import {
+  PRESETS,
+  sanitizeSettingsPatch,
+  type Settings,
+  type StatusSnapshot,
+} from "@rh/shared";
 import {
   CorrelationStore,
   Engine,
   Hub,
-  checkPrompt,
+  SESSION_CAP_EXTRA_SEC,
   createStreamlabsAdapter,
+  createSubmission,
   mintClientToken,
   parseFakeTip,
   log,
@@ -64,6 +70,14 @@ export interface LocalServerHost {
    *  job-gates and budget-caps it). When set, /api/token never touches a
    *  local key — there is none. */
   mintProxy?: (durationSec: number) => Promise<string>;
+  /** Cloud mode (Electron): the money authority is remote, so panic and the
+   *  status the tray/updater read must come from the control plane — the
+   *  local engine never holds the active job in cloud mode, and pausing it
+   *  would be a no-op that *looks* like a panic. */
+  moneyProxy?: {
+    togglePause(): Promise<boolean>;
+    status(): StatusSnapshot;
+  };
 }
 
 export interface LocalServer {
@@ -73,9 +87,14 @@ export interface LocalServer {
   obs: ObsController;
   /** True when a real dct_ key is present (otherwise tokens mint as "MOCK"). */
   decartEnabled: boolean;
+  /** Panic toggle against whichever engine owns the money path (local or
+   *  cloud). Every panic surface — HTTP, hotkey, tray — goes through here. */
+  togglePause(): Promise<boolean>;
+  /** Status from whichever engine owns the money path. */
+  status(): StatusSnapshot;
   /** Start listening + best-effort OBS connect + trigger adapters. */
   start(port: number): void;
-  /** Stop triggers and close the HTTP server (Electron quit path). */
+  /** Stop triggers, dispose the engine, drop sockets, close the HTTP server. */
   stop(): Promise<void>;
 }
 
@@ -105,6 +124,10 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     submissionUpdate: (code, status) => hub.sendSubmissionUpdate(code, status),
   };
   const engine = new Engine(correlation, engineEmit, host.getSettings);
+
+  const togglePause = () =>
+    host.moneyProxy ? host.moneyProxy.togglePause() : Promise.resolve(engine.togglePause());
+  const status = () => host.moneyProxy?.status() ?? engine.snapshot();
 
   /** Gate for privileged endpoints. Public surface stays: health, config,
    *  presets, submissions, uploads, static pages. */
@@ -159,9 +182,24 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     }
     const origin = String(req.body?.origin ?? "");
     try {
-      const token = host.mintProxy
-        ? await host.mintProxy(durationSec)
-        : await mintClientToken(host.decartApiKey, durationSec, origin);
+      let token: string;
+      if (host.mintProxy) {
+        token = await host.mintProxy(durationSec); // control plane gates it
+      } else {
+        // Job-gated locally too, same rule as the hosted plane: a token can
+        // only be minted for the job the engine actually dispatched, for at
+        // most that job's paid time. Anything holding the auth token (or, on
+        // the ungated CLI rig, any local page) otherwise gets a mint-anything
+        // endpoint that bypasses the $1 = 1s contract.
+        const active = engine.snapshot().activeJob;
+        if (!active) {
+          return res.status(403).json({ error: "no active job — minting is job-gated" });
+        }
+        if (durationSec > active.remainingSec + SESSION_CAP_EXTRA_SEC) {
+          return res.status(403).json({ error: "requested duration exceeds the active job" });
+        }
+        token = await mintClientToken(host.decartApiKey, durationSec, origin);
+      }
       res.json({ token });
     } catch (e) {
       res.status(502).json({ error: (e as Error).message });
@@ -184,7 +222,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   app.get("/api/settings", requireAuth, (_req, res) => res.json(host.getSettings()));
 
   app.post("/api/settings", requireAuth, (req, res) => {
-    const next = host.updateSettings(req.body ?? {});
+    const next = host.updateSettings(sanitizeSettingsPatch(req.body));
     engineEmit.status(engine.snapshot()); // reflect any wiring changes
     res.json(next);
   });
@@ -193,53 +231,27 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
 
   /** Viewer submission: prompt + optional image, before tipping. */
   app.post("/api/submissions", upload.single("image"), (req, res) => {
-    const s = host.getSettings();
-    const presetId = String(req.body.presetId ?? "").trim() || null;
-    const customPrompt = String(req.body.prompt ?? "").trim();
-    const tipperName = String(req.body.tipperName ?? "").trim() || null;
     const imageUrl = req.file ? publicUploadUrl(req.file.filename) : null;
-
-    const fail = (code: number, reason: string) => {
-      deleteUpload(imageUrl);
-      res.status(code).json({ error: reason });
-    };
-
-    let finalPrompt: string;
-    let finalPresetId: string | null;
-
-    if (presetId) {
-      const preset = getPreset(presetId);
-      if (!preset) return fail(400, "unknown preset");
-      if (!s.enabledPresetIds.includes(presetId)) {
-        return fail(403, "preset not enabled by streamer");
-      }
-      finalPrompt = preset.prompt; // resolved server-side; client can't spoof it
-      finalPresetId = preset.id;
-    } else if (customPrompt) {
-      if (!s.allowCustomPrompts) {
-        return fail(403, "custom prompts are disabled by the streamer");
-      }
-      const mod = checkPrompt(customPrompt, s.blocklistExtra);
-      if (!mod.ok) return fail(422, mod.reason ?? "prompt rejected");
-      finalPrompt = customPrompt;
-      finalPresetId = null;
-    } else {
-      return fail(400, "provide a preset or a custom prompt");
-    }
-
-    const sub = correlation.add({
-      prompt: finalPrompt,
-      presetId: finalPresetId,
-      tipperName,
+    // Policy (preset resolution, enablement, moderation) lives in core —
+    // this handler only owns the upload and the HTTP shape.
+    const out = createSubmission(correlation, host.getSettings(), {
+      ...req.body,
       imageUrl,
     });
-    res.json({ code: sub.code, expiresAt: sub.expiresAt });
+    if (!out.ok) {
+      deleteUpload(imageUrl);
+      return res.status(out.status).json({ error: out.error });
+    }
+    res.json({ code: out.code, expiresAt: out.expiresAt });
   });
 
   /** Streamer panic toggle (also bound to a hotkey on the router page). */
-  app.post("/api/panic", requireAuth, (_req, res) => {
-    const paused = engine.togglePause();
-    res.json({ paused });
+  app.post("/api/panic", requireAuth, async (_req, res) => {
+    try {
+      res.json({ paused: await togglePause() });
+    } catch (e) {
+      res.status(502).json({ error: (e as Error).message });
+    }
   });
 
   /** Streamer console trigger — fire a hijack directly from the router page.
@@ -324,6 +336,8 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     hub,
     obs,
     decartEnabled,
+    togglePause,
+    status,
     start(port: number) {
       for (const t of triggers) {
         t.start((tip) => {
@@ -348,6 +362,11 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     },
     async stop() {
       for (const t of triggers) t.stop();
+      // Order matters: the engine's cancel reaches the router through the hub,
+      // so dispose the engine (which fails the active job and cancels it on
+      // the router) before dropping sockets.
+      engine.dispose("server stopping");
+      hub.close();
       await new Promise<void>((done) => server.close(() => done()));
     },
   };

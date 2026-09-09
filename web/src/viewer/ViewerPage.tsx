@@ -77,9 +77,12 @@ export default function ViewerPage() {
       }, WIPE_MS);
     };
 
-    new LoopbackReceiver(hub, onStream, onReset);
+    const receiver = new LoopbackReceiver(hub, onStream, onReset);
 
     return () => {
+      // StrictMode double-mounts effects in dev: without this the first
+      // receiver would keep its peer + hub listener alive alongside the second.
+      receiver.dispose();
       hub.close();
     };
   }, []);

@@ -10,15 +10,15 @@
 //   /c/:login                                — hosted viewer portal (SPA)
 //   /uploads/:channel/*                      — reference images
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import express from "express";
 import multer from "multer";
 import { WebSocketServer } from "ws";
 import { eq } from "drizzle-orm";
-import { getPreset, PRESETS, type HelloMsg } from "@rh/shared";
-import { checkPrompt, log, parseFakeTip, warn } from "@rh/core";
+import { PRESETS, sanitizeSettingsPatch, type HelloMsg } from "@rh/shared";
+import { createSubmission, log, parseFakeTip, warn } from "@rh/core";
 import { channels, db, hijacks, submissionsLog } from "./db.js";
 import { devAuthEnabled, env, repoRoot } from "./env.js";
 import {
@@ -196,50 +196,26 @@ app.post("/api/c/:channel/submissions", upload.single("image"), (req, res) => {
   const id = resolveChannelId(String(req.params.channel));
   const rt = id && getRuntime(id);
   if (!rt) return res.status(404).json({ error: "unknown channel" });
-  const s = rt.getSettings();
-  const presetId = String(req.body.presetId ?? "").trim() || null;
-  const customPrompt = String(req.body.prompt ?? "").trim();
-  const tipperName = String(req.body.tipperName ?? "").trim() || null;
   const imageUrl = req.file ? `/uploads/${id}/${req.file.filename}` : null;
-
-  let finalPrompt: string;
-  let finalPresetId: string | null;
-  if (presetId) {
-    const preset = getPreset(presetId);
-    if (!preset) return res.status(400).json({ error: "unknown preset" });
-    if (!s.enabledPresetIds.includes(presetId)) {
-      return res.status(403).json({ error: "preset not enabled" });
-    }
-    finalPrompt = preset.prompt;
-    finalPresetId = preset.id;
-  } else if (customPrompt) {
-    if (!s.allowCustomPrompts) {
-      return res.status(403).json({ error: "custom prompts disabled" });
-    }
-    const mod = checkPrompt(customPrompt, s.blocklistExtra);
-    if (!mod.ok) return res.status(422).json({ error: mod.reason });
-    finalPrompt = customPrompt;
-    finalPresetId = null;
-  } else {
-    return res.status(400).json({ error: "provide a preset or a prompt" });
-  }
-
-  const sub = rt.correlation.add({
-    prompt: finalPrompt,
-    presetId: finalPresetId,
-    tipperName,
+  // Identical policy to the local rig — it's the same core function.
+  const out = createSubmission(rt.correlation, rt.getSettings(), {
+    ...req.body,
     imageUrl,
   });
+  if (!out.ok) {
+    if (req.file) rmSync(req.file.path, { force: true });
+    return res.status(out.status).json({ error: out.error });
+  }
   db.insert(submissionsLog)
     .values({
       channelId: id,
-      code: sub.code,
-      presetId: finalPresetId,
+      code: out.code,
+      presetId: out.presetId,
       hasImage: imageUrl ? 1 : 0,
       createdAt: Date.now(),
     })
     .run();
-  res.json({ code: sub.code, expiresAt: sub.expiresAt });
+  res.json({ code: out.code, expiresAt: out.expiresAt });
 });
 
 // ── Per-channel authed API (streamer dashboard / desktop app) ─────────────
@@ -253,19 +229,17 @@ app.get("/api/c/:channel/settings", requireChannel, (req, res) => {
 app.post("/api/c/:channel/settings", requireChannel, (req, res) => {
   const rt = getRuntime(String(req.params.channel));
   if (!rt) return res.status(404).json({ error: "unknown channel" });
-  res.json(rt.updateSettings(req.body ?? {}));
+  res.json(rt.updateSettings(sanitizeSettingsPatch(req.body)));
 });
 
-/** Streamlabs pasted-token connect (OAuth flow lands when the app is approved). */
+/** Streamlabs pasted-token connect (OAuth flow lands when the app is approved).
+ *  Swapped in place: rebuilding the runtime would orphan the router socket
+ *  already adopted into its hub. */
 app.post("/api/c/:channel/trigger/streamlabs", requireChannel, (req, res) => {
+  const rt = getRuntime(String(req.params.channel));
+  if (!rt) return res.status(404).json({ error: "unknown channel" });
   const token = String(req.body?.token ?? "").trim();
-  db.update(channels)
-    .set({ streamlabsToken: token })
-    .where(eq(channels.id, String(req.params.channel)))
-    .run();
-  // Restart the runtime so the trigger picks the token up.
-  getRuntime(String(req.params.channel))?.stop();
-  getRuntime(String(req.params.channel));
+  rt.setStreamlabsToken(token);
   res.json({ ok: true, connected: Boolean(token) });
 });
 
@@ -388,6 +362,11 @@ wss.on("connection", (ws) => {
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────
+// One process hosts every channel's runtime: an unhandled error anywhere
+// must never take all of them down. Log and carry on.
+process.on("uncaughtException", (e) => warn("process", `uncaught: ${(e as Error).stack ?? e}`));
+process.on("unhandledRejection", (e) => warn("process", `unhandled rejection: ${String(e)}`));
+
 server.listen(env.port, () => {
   log("server", `control plane on ${env.publicUrl} (port ${env.port})`);
   log("server", `decart: ${env.decartApiKey ? "LIVE" : "MOCK"}`);

@@ -192,6 +192,18 @@ function Dashboard({ session }: { session: Session }) {
               />
               <span className="text-zinc-300">Custom prompts</span>
             </label>
+            <label className="mt-2 flex items-center gap-2">
+              <input
+                type="checkbox"
+                defaultChecked={settings.allowSolePendingMatch}
+                onChange={(e) =>
+                  void save({ allowSolePendingMatch: e.target.checked })
+                }
+              />
+              <span className="text-zinc-300">
+                Match unlabeled tips to the only pending request
+              </span>
+            </label>
           </div>
           <div className="mt-3">
             <span className="text-xs text-zinc-500">Enabled presets</span>

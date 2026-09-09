@@ -96,6 +96,7 @@ export default function RouterPage() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pagehide", onUnload);
       machine.dispose();
+      sender.dispose();
       hub.close();
     };
   }, []);
@@ -504,6 +505,16 @@ function SettingsPanel({ onSaved }: { onSaved: (s: Settings) => void }) {
           onChange={(e) => patch({ allowCustomPrompts: e.target.checked })}
         />
         <span className="text-zinc-300">Allow custom free-text prompts</span>
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={s.allowSolePendingMatch}
+          onChange={(e) => patch({ allowSolePendingMatch: e.target.checked })}
+        />
+        <span className="text-zinc-300">
+          Match unlabeled tips to the only pending request (single-viewer demo)
+        </span>
       </label>
 
       <div className="mt-3">

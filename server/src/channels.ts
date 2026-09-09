@@ -7,10 +7,15 @@
 //   · ledger hooks (hijacks/token_mints rows) + the monthly GPU mint cap
 //
 // The mint path is the money-critical seam: job-gated (only an active
-// dispatched job for this channel can mint) and capped (sum of this month's
-// capped seconds must stay under the channel's budget) — both enforced HERE,
-// server-side, because the client is the streamer's machine and the key is
-// ours.
+// dispatched job for this channel can mint, and only ONCE per job) and capped
+// (sum of this month's capped seconds must stay under the channel's budget)
+// — both enforced HERE, server-side, because the client is the streamer's
+// machine and the key is ours.
+//
+// Lifecycle: a runtime lives as long as the process unless the channel is
+// suspended or explicitly stopped. Trigger credentials are swapped IN PLACE
+// (`setStreamlabsToken`) — rebuilding the runtime would orphan the router
+// socket the front door already adopted into the old hub.
 
 import { and, eq, gte, sql } from "drizzle-orm";
 import { DEFAULT_SETTINGS, type Settings, type TipEvent } from "@rh/shared";
@@ -18,6 +23,7 @@ import {
   CorrelationStore,
   Engine,
   Hub,
+  SESSION_CAP_EXTRA_SEC,
   createStreamlabsAdapter,
   log,
   mintClientToken,
@@ -38,6 +44,9 @@ export interface ChannelRuntime {
   onTip(tip: TipEvent): string;
   /** Job-gated, budget-capped ek_ mint. Throws with a user-facing message. */
   mint(durationSec: number): Promise<string>;
+  /** Swap the Streamlabs credential without tearing the runtime down. */
+  setStreamlabsToken(token: string): void;
+  /** Tear everything down: triggers, engine timers, sockets. */
   stop(): void;
 }
 
@@ -125,15 +134,19 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
   );
 
   // ── Triggers ────────────────────────────────────────────────────────────
-  const triggers: TriggerAdapter[] = [];
-  if (row.streamlabsToken) {
-    const sl = createStreamlabsAdapter(row.streamlabsToken);
+  let streamlabs: TriggerAdapter | null = null;
+  const startStreamlabs = (token: string) => {
+    streamlabs?.stop();
+    streamlabs = null;
+    if (!token) return;
+    const sl = createStreamlabsAdapter(token);
     sl.start((tip) => {
       const outcome = engine.onTip(tip);
       log(tag, `streamlabs $${tip.amount} from ${tip.username} → ${outcome}`);
     });
-    triggers.push(sl);
-  }
+    streamlabs = sl;
+  };
+  startStreamlabs(row.streamlabsToken ?? "");
 
   const runtime: ChannelRuntime = {
     channelId,
@@ -157,11 +170,21 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
       if (!snap.activeJob) {
         throw new Error("no active job — token minting is job-gated");
       }
-      if (durationSec > snap.activeJob.remainingSec + 10) {
+      if (durationSec > snap.activeJob.remainingSec + SESSION_CAP_EXTRA_SEC) {
         throw new Error("requested duration exceeds the active job");
       }
-      // Gate 2 — monthly budget: hard stop, checked against the audit table
-      // (not a counter that can drift).
+      // Gate 2 — one token per job. Each ek_ token can open its own Decart
+      // session, so a router that re-minted on every retry could run N
+      // parallel sessions off one paid job — every one billed to us.
+      const already = db
+        .select({ id: tokenMints.id })
+        .from(tokenMints)
+        .where(eq(tokenMints.jobId, snap.activeJob.jobId))
+        .get();
+      if (already) throw new Error("a token was already minted for this job");
+      // Gate 3 — monthly budget: hard stop, checked against the audit table
+      // (not a counter that can drift). The cap counts what a token can bill
+      // at most — paid duration plus the session-cap headroom.
       const monthStart = new Date();
       monthStart.setUTCDate(1);
       monthStart.setUTCHours(0, 0, 0, 0);
@@ -177,11 +200,14 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
           )
           .get()?.total ?? 0;
       const cap = row.monthlyGpuSecondsCap;
-      const cappedSec = durationSec + 15; // mirrors maxSessionDuration
+      const cappedSec = durationSec + SESSION_CAP_EXTRA_SEC;
       if (used + cappedSec > cap) {
         warn(tag, `monthly GPU cap hit (${used}/${cap}s)`);
         throw new Error("channel GPU budget exhausted for this month");
       }
+      // Debit the ledger only once Decart actually issued the token — a
+      // failed mint must not eat into the month's budget.
+      const token = await mintClientToken(env.decartApiKey, durationSec, "");
       db.insert(tokenMints)
         .values({
           channelId,
@@ -191,11 +217,23 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
           createdAt: Date.now(),
         })
         .run();
-      return mintClientToken(env.decartApiKey, durationSec, "");
+      return token;
+    },
+    setStreamlabsToken(token: string) {
+      db.update(channels)
+        .set({ streamlabsToken: token })
+        .where(eq(channels.id, channelId))
+        .run();
+      startStreamlabs(token);
+      log(tag, token ? "streamlabs trigger (re)connected" : "streamlabs trigger removed");
     },
     stop() {
-      for (const t of triggers) t.stop();
+      streamlabs?.stop();
+      streamlabs = null;
+      engine.dispose("channel runtime stopped"); // cancels the active job via the hub
+      hub.close();
       runtimes.delete(channelId);
+      log(tag, "runtime stopped");
     },
   };
 

@@ -24,7 +24,9 @@ same `core/` money path.
 npm install
 cp .env.example .env      # leave keys blank → MOCK mode (camera passthrough, no cost)
 npm run dev               # demo rig: concurrently sidecar :7712 + web :5173
-npm run typecheck         # tsc --noEmit across all SIX workspaces — the only test gate
+npm run typecheck         # tsc --noEmit across all SIX workspaces
+npm test                  # node --test over core/test (engine, correlation, hub, submissions, settings)
+npm run check             # typecheck + test — the gate to run after edits
 npm run build             # builds the web app only
 npm run start             # production demo rig: build, then ONE process on :7712
 
@@ -37,8 +39,10 @@ Cloud-mode dev loop: run `dev:server`, then launch the app with
 Package the app: `npm run package --workspace app` (unsigned `--dir`) or `dist` (dmg;
 signing/notarization gated on Apple secrets, see `.github/workflows/release.yml`).
 
-Per-workspace dev: `npm run dev:sidecar`, `npm run dev:web`. There is **no test runner and no
-linter** — `npm run typecheck` is the check to run after edits.
+Per-workspace dev: `npm run dev:sidecar`, `npm run dev:web`. There is **no linter**. Tests
+cover the pure units in `core/` (`core/test/*.test.ts`, plain `node:test` + `tsx`, no
+framework); `npm run check` is the check to run after edits. `docs/ARCHITECTURE-REVIEW.md`
+records the 2026-09 review, what it fixed, and the remaining migration to the target layout.
 
 ### Demoing the loop without credentials
 1. Open `http://localhost:5173/router`, click **Arm camera** (needs a real Chrome tab).
@@ -107,7 +111,8 @@ every job gets a clean init/teardown.
 ### Request flow of one hijack
 
 1. Viewer `POST /api/submissions` (prompt/preset + optional image) → gets a short **claim code**.
-   Preset prompts are resolved **server-side from the id** (`sidecar/src/index.ts`) so a client
+   Preset prompts are resolved **server-side from the id** (`core/src/submissions.ts`, called by
+   both hosts' routes) so a client
    can't spoof preset text; custom free-text runs through `moderation.ts` against
    streamer-configurable guardrails.
 2. Viewer tips with the code in the message. A trigger adapter (`triggers/streamlabs.ts`, or

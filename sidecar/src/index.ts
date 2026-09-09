@@ -4,7 +4,14 @@
 // settings.json persistence, repo-relative uploads dir and web/dist.
 
 import { resolve } from "node:path";
+import { err } from "@rh/core";
 import { createLocalServer } from "./server.js";
+
+// Defense in depth: a thrown handler or a rejected promise nobody awaited
+// must log, not kill the rig mid-stream. The hub already guards its own
+// listeners; this catches everything else (OBS websocket, Streamlabs socket).
+process.on("uncaughtException", (e) => err("process", "uncaught:", e));
+process.on("unhandledRejection", (e) => err("process", "unhandled rejection:", e));
 import {
   env,
   getSettings,

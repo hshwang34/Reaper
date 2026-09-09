@@ -68,6 +68,11 @@ export interface Settings {
   enabledPresetIds: string[];
   /** Whether viewers may submit custom free-text prompts at all. */
   allowCustomPrompts: boolean;
+  /** Match an unlabeled tip to the only pending submission (correlation rule
+   *  3). Convenient on a one-viewer demo rig; on a real channel it hands a
+   *  stranger's tip to whoever submitted last, so hosted streamers should
+   *  turn it off. */
+  allowSolePendingMatch: boolean;
   /** Extra words to reject on top of the built-in blocklist. */
   blocklistExtra: string[];
   obsScene: string;
