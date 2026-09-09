@@ -1,16 +1,14 @@
 // Per-channel runtime: the SAME @rh/core money path the demo rig runs, one
 // instance per streamer, lazily created and held in memory (single-machine
-// alpha — see db.ts). Each runtime owns:
-//   · Engine + CorrelationStore (tip→job→queue)
-//   · an adopted-mode Hub (the front door in index.ts routes sockets here)
-//   · the channel's trigger adapters (Streamlabs socket per pasted token)
-//   · ledger hooks (hijacks/token_mints rows) + the monthly GPU mint cap
+// alpha — see db.ts). Each runtime is a core `createRuntime` plus what only
+// the hosted plane has: a persistent ledger (hijack rows, token mints, the
+// monthly GPU cap) and the channel's trigger credentials.
 //
-// The mint path is the money-critical seam: job-gated (only an active
-// dispatched job for this channel can mint, and only ONCE per job) and capped
-// (sum of this month's capped seconds must stay under the channel's budget)
-// — both enforced HERE, server-side, because the client is the streamer's
-// machine and the key is ours.
+// The mint path is the money-critical seam. Policy lives in core
+// (`gatedMint`: job-gated, one per job, budget-capped, debit-after-success);
+// this file supplies the SQLite-backed ledger it reads and writes. Enforced
+// here, server-side, because the client is the streamer's machine and the
+// key is ours.
 //
 // Lifecycle: a runtime lives as long as the process unless the channel is
 // suspended or explicitly stopped. Trigger credentials are swapped IN PLACE
@@ -20,29 +18,24 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { DEFAULT_SETTINGS, type Settings, type TipEvent } from "@rh/shared";
 import {
-  CorrelationStore,
-  Engine,
-  Hub,
-  SESSION_CAP_EXTRA_SEC,
+  createRuntime,
   createStreamlabsAdapter,
+  gatedMint,
   log,
   mintClientToken,
   warn,
-  type EngineEmit,
+  type MintLedger,
+  type Runtime,
   type TriggerAdapter,
 } from "@rh/core";
 import { channels, db, hijacks, tokenMints } from "./db.js";
 import { env } from "./env.js";
 
-export interface ChannelRuntime {
+export interface ChannelRuntime extends Runtime {
   channelId: string;
-  engine: Engine;
-  hub: Hub;
-  correlation: CorrelationStore;
-  getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;
   onTip(tip: TipEvent): string;
-  /** Job-gated, budget-capped ek_ mint. Throws with a user-facing message. */
+  /** Job-gated, one-per-job, budget-capped ek_ mint. Throws MintError. */
   mint(durationSec: number): Promise<string>;
   /** Swap the Streamlabs credential without tearing the runtime down. */
   setStreamlabsToken(token: string): void;
@@ -56,6 +49,35 @@ export function channelExists(channelId: string): boolean {
   return Boolean(
     db.select().from(channels).where(eq(channels.id, channelId)).get(),
   );
+}
+
+/** The month-to-date GPU ledger for one channel, read from the audit table
+ *  (not a counter that can drift). */
+function dbLedger(channelId: string, capSec: number): MintLedger {
+  const monthStart = () => {
+    const d = new Date();
+    d.setUTCDate(1);
+    d.setUTCHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  return {
+    hasMintFor: (jobId) =>
+      Boolean(
+        db.select({ id: tokenMints.id }).from(tokenMints).where(eq(tokenMints.jobId, jobId)).get(),
+      ),
+    usedSec: () =>
+      db
+        .select({ total: sql<number>`coalesce(sum(capped_sec), 0)` })
+        .from(tokenMints)
+        .where(and(eq(tokenMints.channelId, channelId), gte(tokenMints.createdAt, monthStart())))
+        .get()?.total ?? 0,
+    capSec: () => capSec,
+    record: ({ jobId, durationSec, cappedSec }) => {
+      db.insert(tokenMints)
+        .values({ channelId, jobId, durationSec, cappedSec, createdAt: Date.now() })
+        .run();
+    },
+  };
 }
 
 export function getRuntime(channelId: string): ChannelRuntime | null {
@@ -84,54 +106,38 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
     }
   };
 
-  // Engine ↔ Hub wiring, same late-bind pattern as the local composition.
-  let hub: Hub;
-  const correlation = new CorrelationStore();
-  const emit: EngineEmit = {
-    dispatchJob: (job) => {
+  const core = createRuntime({
+    getSettings,
+    server: null, // adopted mode — the front door owns the WebSocketServer
+    // Local-plane traffic (rtc:*, frames-ok) never traverses the cloud —
+    // the Electron bridge relays it on the streamer's machine.
+    hub: { rejectLocalPlane: true },
+    tag,
+    hooks: {
       // Ledger: one row per dispatched job, updated on completion.
-      db.insert(hijacks)
-        .values({
-          channelId,
-          jobId: job.jobId,
-          source: job.tip.source,
-          username: job.tip.username,
-          amountUsd: job.tip.amount,
-          durationSec: job.durationSec,
-          prompt: job.prompt.slice(0, 300),
-          createdAt: Date.now(),
-        })
-        .run();
-      hub.dispatchJob(job);
-    },
-    cancelJob: (jobId, reason) => hub.cancelJob(jobId, reason),
-    status: (snap) => hub.broadcastStatus(snap),
-    submissionUpdate: (code, status) => hub.sendSubmissionUpdate(code, status),
-  };
-  const engine = new Engine(correlation, emit, getSettings);
-
-  hub = new Hub(
-    null, // adopted mode — the front door owns the WebSocketServer
-    {
-      onRouterState: (state, jobId, rem) =>
-        engine.setRouterState(state, jobId, rem),
+      onDispatch: (job) => {
+        db.insert(hijacks)
+          .values({
+            channelId,
+            jobId: job.jobId,
+            source: job.tip.source,
+            username: job.tip.username,
+            amountUsd: job.tip.amount,
+            durationSec: job.durationSec,
+            prompt: job.prompt.slice(0, 300),
+            createdAt: Date.now(),
+          })
+          .run();
+      },
       onJobDone: (jobId, ok, reason) => {
         db.update(hijacks)
           .set({ outcome: ok ? "completed" : "failed", reason: reason ?? null })
           .where(eq(hijacks.jobId, jobId))
           .run();
-        engine.onJobDone(jobId, ok, reason);
       },
-      onRouterDisconnected: () => {
-        warn(tag, "router (app link) disconnected");
-        engine.setRouterState("OFFLINE");
-      },
-      getStatus: () => engine.snapshot(),
     },
-    // Local-plane traffic (rtc:*, frames-ok) never traverses the cloud —
-    // the Electron bridge relays it on the streamer's machine.
-    { rejectLocalPlane: true },
-  );
+  });
+  const ledger = dbLedger(channelId, row.monthlyGpuSecondsCap);
 
   // ── Triggers ────────────────────────────────────────────────────────────
   let streamlabs: TriggerAdapter | null = null;
@@ -141,7 +147,7 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
     if (!token) return;
     const sl = createStreamlabsAdapter(token);
     sl.start((tip) => {
-      const outcome = engine.onTip(tip);
+      const outcome = core.engine.onTip(tip);
       log(tag, `streamlabs $${tip.amount} from ${tip.username} → ${outcome}`);
     });
     streamlabs = sl;
@@ -149,11 +155,8 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
   startStreamlabs(row.streamlabsToken ?? "");
 
   const runtime: ChannelRuntime = {
+    ...core,
     channelId,
-    engine,
-    hub,
-    correlation,
-    getSettings,
     updateSettings(patch) {
       const next = { ...getSettings(), ...patch };
       db.update(channels)
@@ -162,63 +165,14 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
         .run();
       return next;
     },
-    onTip: (tip) => engine.onTip(tip),
-    async mint(durationSec: number): Promise<string> {
-      // Gate 1 — job-gated: minting is only legal while a dispatched job for
-      // this channel is active, for (at most) that job's remaining time.
-      const snap = engine.snapshot();
-      if (!snap.activeJob) {
-        throw new Error("no active job — token minting is job-gated");
-      }
-      if (durationSec > snap.activeJob.remainingSec + SESSION_CAP_EXTRA_SEC) {
-        throw new Error("requested duration exceeds the active job");
-      }
-      // Gate 2 — one token per job. Each ek_ token can open its own Decart
-      // session, so a router that re-minted on every retry could run N
-      // parallel sessions off one paid job — every one billed to us.
-      const already = db
-        .select({ id: tokenMints.id })
-        .from(tokenMints)
-        .where(eq(tokenMints.jobId, snap.activeJob.jobId))
-        .get();
-      if (already) throw new Error("a token was already minted for this job");
-      // Gate 3 — monthly budget: hard stop, checked against the audit table
-      // (not a counter that can drift). The cap counts what a token can bill
-      // at most — paid duration plus the session-cap headroom.
-      const monthStart = new Date();
-      monthStart.setUTCDate(1);
-      monthStart.setUTCHours(0, 0, 0, 0);
-      const used =
-        db
-          .select({ total: sql<number>`coalesce(sum(capped_sec), 0)` })
-          .from(tokenMints)
-          .where(
-            and(
-              eq(tokenMints.channelId, channelId),
-              gte(tokenMints.createdAt, monthStart.getTime()),
-            ),
-          )
-          .get()?.total ?? 0;
-      const cap = row.monthlyGpuSecondsCap;
-      const cappedSec = durationSec + SESSION_CAP_EXTRA_SEC;
-      if (used + cappedSec > cap) {
-        warn(tag, `monthly GPU cap hit (${used}/${cap}s)`);
-        throw new Error("channel GPU budget exhausted for this month");
-      }
-      // Debit the ledger only once Decart actually issued the token — a
-      // failed mint must not eat into the month's budget.
-      const token = await mintClientToken(env.decartApiKey, durationSec, "");
-      db.insert(tokenMints)
-        .values({
-          channelId,
-          jobId: snap.activeJob.jobId,
-          durationSec,
-          cappedSec,
-          createdAt: Date.now(),
-        })
-        .run();
-      return token;
-    },
+    onTip: (tip) => core.engine.onTip(tip),
+    mint: (durationSec) =>
+      gatedMint(
+        core.engine,
+        durationSec,
+        (d) => mintClientToken(env.decartApiKey, d, ""),
+        ledger,
+      ),
     setStreamlabsToken(token: string) {
       db.update(channels)
         .set({ streamlabsToken: token })
@@ -230,12 +184,12 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
     stop() {
       streamlabs?.stop();
       streamlabs = null;
-      engine.dispose("channel runtime stopped"); // cancels the active job via the hub
-      hub.close();
+      core.dispose("channel runtime stopped"); // cancels the active job via the hub
       runtimes.delete(channelId);
       log(tag, "runtime stopped");
     },
   };
+  if (!env.decartApiKey) warn(tag, "no Decart key — tokens mint as MOCK");
 
   runtimes.set(channelId, runtime);
   log(tag, "runtime created");

@@ -15,10 +15,12 @@
   "dependencies": {
     "@decartai/sdk": "^0.1.14",
     "@rh/shared": "*",
+    "express": "^5.2.1",
     "socket.io-client": "^2.5.0",
     "ws": "^8.21.1"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.1.1",
     "@types/ws": "^8.18.1",
     "tsx": "^4.23.1",

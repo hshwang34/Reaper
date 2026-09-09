@@ -17,8 +17,8 @@ import express from "express";
 import multer from "multer";
 import { WebSocketServer } from "ws";
 import { eq } from "drizzle-orm";
-import { PRESETS, sanitizeSettingsPatch, type HelloMsg } from "@rh/shared";
-import { createSubmission, log, parseFakeTip, warn } from "@rh/core";
+import type { HelloMsg } from "@rh/shared";
+import { buildApiRouter, log, warn } from "@rh/core";
 import { channels, db, hijacks, submissionsLog } from "./db.js";
 import { devAuthEnabled, env, repoRoot } from "./env.js";
 import {
@@ -151,21 +151,6 @@ function resolveChannelId(param: string): string | null {
   return byLogin?.id ?? null;
 }
 
-app.get("/api/c/:channel/config", (req, res) => {
-  const id = resolveChannelId(String(req.params.channel));
-  const rt = id && getRuntime(id);
-  if (!rt) return res.status(404).json({ error: "unknown channel" });
-  const s = rt.getSettings();
-  res.json({
-    presets: PRESETS.filter((p) => s.enabledPresetIds.includes(p.id)),
-    allowCustomPrompts: s.allowCustomPrompts,
-    minTipUSD: s.minTipUSD,
-    maxDurationSec: s.maxDurationSec,
-    secondsPerUSD: s.secondsPerUSD,
-    decartEnabled: Boolean(env.decartApiKey),
-  });
-});
-
 // Per-channel upload dirs; same validation as the local rig. The stored
 // extension comes from the ALLOWED mimetype map, never from the client's
 // filename — otherwise an "image/png" upload named x.html becomes stored XSS
@@ -192,45 +177,38 @@ const upload = multer({
   fileFilter: (_req, file, cb) => cb(null, ALLOWED_IMG.has(file.mimetype)),
 });
 
-app.post("/api/c/:channel/submissions", upload.single("image"), (req, res) => {
-  const id = resolveChannelId(String(req.params.channel));
-  const rt = id && getRuntime(id);
-  if (!rt) return res.status(404).json({ error: "unknown channel" });
-  const imageUrl = req.file ? `/uploads/${id}/${req.file.filename}` : null;
-  // Identical policy to the local rig — it's the same core function.
-  const out = createSubmission(rt.correlation, rt.getSettings(), {
-    ...req.body,
-    imageUrl,
-  });
-  if (!out.ok) {
-    if (req.file) rmSync(req.file.path, { force: true });
-    return res.status(out.status).json({ error: out.error });
-  }
-  db.insert(submissionsLog)
-    .values({
-      channelId: id,
-      code: out.code,
-      presetId: out.presetId,
-      hasImage: imageUrl ? 1 : 0,
-      createdAt: Date.now(),
-    })
-    .run();
-  res.json({ code: out.code, expiresAt: out.expiresAt });
-});
+// ── The channel API (shared with the local rig) ──────────────────────────
+// config · presets · submissions (public) · settings · token · panic · dev/*
+// (Bearer JWT). The router resolves :channel as id or login; the auth gate
+// requires the JWT's subject to equal the id.
+app.use(
+  "/api/c/:channel",
+  buildApiRouter({
+    context: (req) => {
+      const id = resolveChannelId(String(req.params.channel));
+      const rt = id && getRuntime(id);
+      if (!rt) return null;
+      return {
+        runtime: rt,
+        updateSettings: rt.updateSettings,
+        decartEnabled: Boolean(env.decartApiKey),
+        mint: (durationSec) => rt.mint(durationSec),
+        togglePause: () => Promise.resolve(rt.engine.togglePause()),
+        imageUrl: (f) => `/uploads/${id}/${f.filename}`,
+        discardUpload: (f) => rmSync(f.path, { force: true }),
+        onSubmission: ({ code, presetId, hasImage }) => {
+          db.insert(submissionsLog)
+            .values({ channelId: id, code, presetId, hasImage: hasImage ? 1 : 0, createdAt: Date.now() })
+            .run();
+        },
+      };
+    },
+    requireAuth: requireChannel,
+    upload: upload.single("image"),
+  }),
+);
 
-// ── Per-channel authed API (streamer dashboard / desktop app) ─────────────
-
-app.get("/api/c/:channel/settings", requireChannel, (req, res) => {
-  const rt = getRuntime(String(req.params.channel));
-  if (!rt) return res.status(404).json({ error: "unknown channel" });
-  res.json(rt.getSettings());
-});
-
-app.post("/api/c/:channel/settings", requireChannel, (req, res) => {
-  const rt = getRuntime(String(req.params.channel));
-  if (!rt) return res.status(404).json({ error: "unknown channel" });
-  res.json(rt.updateSettings(sanitizeSettingsPatch(req.body)));
-});
+// ── Hosted-only streamer routes ───────────────────────────────────────────
 
 /** Streamlabs pasted-token connect (OAuth flow lands when the app is approved).
  *  Swapped in place: rebuilding the runtime would orphan the router socket
@@ -241,43 +219,6 @@ app.post("/api/c/:channel/trigger/streamlabs", requireChannel, (req, res) => {
   const token = String(req.body?.token ?? "").trim();
   rt.setStreamlabsToken(token);
   res.json({ ok: true, connected: Boolean(token) });
-});
-
-app.post("/api/c/:channel/token", requireChannel, async (req, res) => {
-  const rt = getRuntime(String(req.params.channel));
-  if (!rt) return res.status(404).json({ error: "unknown channel" });
-  const durationSec = Number(req.body?.durationSec);
-  if (!Number.isFinite(durationSec) || durationSec <= 0) {
-    return res.status(400).json({ error: "durationSec required" });
-  }
-  try {
-    res.json({ token: await rt.mint(durationSec) });
-  } catch (e) {
-    res.status(403).json({ error: (e as Error).message });
-  }
-});
-
-app.post("/api/c/:channel/panic", requireChannel, (req, res) => {
-  const rt = getRuntime(String(req.params.channel));
-  if (!rt) return res.status(404).json({ error: "unknown channel" });
-  res.json({ paused: rt.engine.togglePause() });
-});
-
-app.post("/api/c/:channel/dev/fake-tip", requireChannel, (req, res) => {
-  const rt = getRuntime(String(req.params.channel));
-  if (!rt) return res.status(404).json({ error: "unknown channel" });
-  const parsed = parseFakeTip(req.body);
-  if ("error" in parsed) return res.status(400).json(parsed);
-  res.json({ ok: true, outcome: rt.onTip(parsed) });
-});
-
-app.post("/api/c/:channel/dev/hijack", requireChannel, (req, res) => {
-  const rt = getRuntime(String(req.params.channel));
-  if (!rt) return res.status(404).json({ error: "unknown channel" });
-  const prompt = String(req.body?.prompt ?? "").trim();
-  const durationSec = Number(req.body?.durationSec ?? 15);
-  if (!prompt) return res.status(400).json({ error: "prompt required" });
-  res.json({ ok: true, outcome: rt.engine.manual(prompt, durationSec) });
 });
 
 /** Ledger view for the dashboard. */
