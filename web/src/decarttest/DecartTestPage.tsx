@@ -5,11 +5,38 @@
 
 import { useRef, useState } from "react";
 import { createDecartClient, models } from "@decartai/sdk";
+import { PRESETS } from "@rh/shared";
 import { api } from "../lib/api.js";
 import { acquireCamera } from "../router/decartSession.js";
 
 const DEFAULT_PROMPT =
   "Transform the person into an ancient Egyptian mummy wrapped head to toe in tattered beige linen bandages, dusty and weathered, dim golden tomb lighting";
+
+/** Save a Blob through a temporary anchor (the browser's download folder). */
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** Record a MediaStream for `sec` seconds and resolve with the WebM blob. */
+function recordFor(stream: MediaStream, sec: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+      ? "video/webm;codecs=vp9"
+      : "video/webm";
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    rec.onerror = () => reject(new Error("MediaRecorder error"));
+    rec.onstop = () => resolve(new Blob(chunks, { type: mime }));
+    rec.start(250);
+    setTimeout(() => rec.state !== "inactive" && rec.stop(), sec * 1000);
+  });
+}
 
 export default function DecartTestPage() {
   const inRef = useRef<HTMLVideoElement>(null);
@@ -18,11 +45,93 @@ export default function DecartTestPage() {
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [log, setLog] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
+  const [clipPreset, setClipPreset] = useState(PRESETS[0]!.id);
+  const [clipSec, setClipSec] = useState(10);
+  const [recording, setRecording] = useState(false);
 
   const push = (s: string) => {
     console.warn("[decart-test]", s); // mirrored to the Vite terminal
     setLog((p) => [`${new Date().toLocaleTimeString()}  ${s}`, ...p].slice(0, 80));
   };
+
+  /**
+   * Record a real clip of one preset for the marketing site (site/CLIPS.md):
+   * camera → lucy-2.5 for `clipSec` seconds, raw and styled feeds captured in
+   * parallel so they stay time-aligned, then disconnect. Token is capped to
+   * the clip length, so the cost is bounded to clipSec × $0.02 (+ headroom).
+   */
+  async function recordClip() {
+    const preset = PRESETS.find((p) => p.id === clipPreset);
+    if (!preset) return;
+    setRecording(true);
+    let rt: { disconnect: () => void } | null = null;
+    let camera: MediaStream | null = null;
+    try {
+      push(`clip: acquiring camera for "${preset.label}"…`);
+      const { stream } = await acquireCamera();
+      camera = stream;
+      if (inRef.current) {
+        inRef.current.srcObject = stream;
+        await inRef.current.play().catch(() => {});
+      }
+      push(`clip: minting ${clipSec}s token…`);
+      const { token } = await api.mintToken(clipSec);
+      const client = createDecartClient({ apiKey: token });
+
+      // Resolve once the styled stream has a live, unmuted video track: that is
+      // the first real frame, and the point the recording should start from.
+      const styled = new Promise<MediaStream>((resolve) => {
+        const arm = (out: MediaStream) => {
+          const t = out.getVideoTracks()[0];
+          if (!t) return false;
+          if (!t.muted) resolve(out);
+          else t.onunmute = () => resolve(out);
+          return true;
+        };
+        void client.realtime
+          .connect(stream, {
+            model: models.realtime("lucy-2.5"),
+            resolution: "720p",
+            initialState: { prompt: { text: preset.prompt, enhance: true } },
+            onConnectionChange: (st) => push("clip: conn = " + st),
+            onRemoteStream: (out) => {
+              if (outRef.current) {
+                outRef.current.srcObject = out;
+                void outRef.current.play().catch(() => {});
+              }
+              if (!arm(out)) out.onaddtrack = () => arm(out);
+            },
+          })
+          .then((c) => {
+            rt = c;
+          })
+          .catch((e) => push("clip: connect FAILED: " + (e as Error).message));
+      });
+      const out = await styled;
+      push(`clip: first frame — recording ${clipSec}s (before + after)…`);
+      const [before, after] = await Promise.all([
+        recordFor(stream, clipSec),
+        recordFor(out, clipSec),
+      ]);
+      download(before, `${preset.id}-before.webm`);
+      download(after, `${preset.id}-after.webm`);
+      push(
+        `clip: saved ${preset.id}-before.webm (${(before.size / 1e6).toFixed(1)} MB) and ` +
+          `${preset.id}-after.webm (${(after.size / 1e6).toFixed(1)} MB) → run site/tools/encode-clips.sh`,
+      );
+    } catch (e) {
+      push("clip FAILED: " + (e as Error).message);
+    } finally {
+      try {
+        (rt as { disconnect: () => void } | null)?.disconnect();
+      } catch {
+        /* already gone */
+      }
+      camera?.getTracks().forEach((t) => t.stop());
+      setRecording(false);
+      push("clip: disconnected");
+    }
+  }
 
   async function run() {
     setRunning(true);
@@ -121,6 +230,44 @@ export default function DecartTestPage() {
         >
           Stop
         </button>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-sm">
+        <span className="text-zinc-400">Record clip for the site:</span>
+        <select
+          value={clipPreset}
+          onChange={(e) => setClipPreset(e.target.value)}
+          disabled={recording || running}
+          className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1"
+        >
+          {PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.emoji} {p.label}
+            </option>
+          ))}
+        </select>
+        <label className="flex items-center gap-1 text-zinc-400">
+          <input
+            type="number"
+            min={3}
+            max={20}
+            value={clipSec}
+            onChange={(e) => setClipSec(Math.max(3, Math.min(20, Number(e.target.value) || 10)))}
+            disabled={recording || running}
+            className="w-16 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono"
+          />
+          s
+        </label>
+        <button
+          onClick={recordClip}
+          disabled={recording || running}
+          className="rounded-md bg-fuchsia-600 px-3 py-1 font-semibold hover:bg-fuchsia-500 disabled:opacity-50"
+        >
+          {recording ? "Recording…" : "Record"}
+        </button>
+        <span className="text-xs text-zinc-500">
+          ≈ ${(clipSec * 0.02).toFixed(2)} of compute · downloads before/after .webm
+        </span>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3">

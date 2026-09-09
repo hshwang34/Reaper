@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reality Hijack</title>
+    <meta
+      name="description"
+      content="Viewers tip to restyle a streamer's webcam live with a realtime AI video model. $1 buys 1 second, then it snaps back. One desktop app, sign in with Twitch, runs through OBS."
+    />
+    <meta property="og:title" content="Reality Hijack" />
+    <meta property="og:description" content="Viewers pay to remix a streamer's reality in real time. $1 = 1 second." />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#0c0a10" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1'%3E%3Cstop offset='0' stop-color='%23e879f9'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M0 6h32v2H0zM0 12h32v2H0zM0 18h32v2H0zM0 24h32v2H0z' fill='%23000' opacity='.35'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="nav" id="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top" aria-label="Reality Hijack home">
+          <span class="brand-mark" aria-hidden="true"></span>
+          Reality Hijack
+        </a>
+        <nav class="nav-links" aria-label="Sections">
+          <a href="#how">How it works</a>
+          <a href="#price">$1 = 1s</a>
+          <a href="#looks">The looks</a>
+          <a href="#safety">Safety</a>
+          <a href="#alpha">Alpha</a>
+          <a href="#faq">FAQ</a>
+          <a class="btn btn-primary nav-menu-cta" href="#alpha">Request alpha access</a>
+        </nav>
+        <div class="nav-cta">
+          <a class="btn btn-ghost" href="https://github.com/hshwang34/Reaper">GitHub</a>
+          <a class="btn btn-primary" href="#alpha">Request alpha access</a>
+          <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="nav" aria-label="Open menu">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 4h14M2 9h14M2 14h14"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- ===== Hero ===== -->
+      <section class="wrap hero">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <h1>Someone tipped $8. Your camera is lava for eight seconds.</h1>
+            <p class="lede">
+              Reality Hijack lets viewers pay to restyle a streamer's webcam with a realtime AI video model,
+              for exactly as long as they paid. One dollar buys one second. Then it snaps back.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="#alpha">Request alpha access</a>
+              <a class="btn btn-secondary" href="#how">See how it works</a>
+            </div>
+            <ul class="hero-facts">
+              <li>One desktop app. Sign in with Twitch.</li>
+              <li>Runs through the OBS you already have.</li>
+              <li>Three independent cost caps. A stuck session cannot keep billing.</li>
+            </ul>
+          </div>
+
+          <div class="hero-demo">
+            <div class="monitor" id="monitor">
+              <div class="screen" id="screen" role="button" tabindex="0" aria-label="Demo of a hijack. Activate to trigger the next tip.">
+                <div class="cam" id="cam" data-look="normal">
+                  <video id="camBefore" muted playsinline loop preload="metadata" aria-hidden="true"></video>
+                  <video id="camAfter" muted playsinline preload="metadata" aria-hidden="true"></video>
+                  <svg class="silhouette" id="silhouette" viewBox="0 0 200 140" aria-hidden="true">
+                    <path d="M100 14a31 31 0 1 1 0 62a31 31 0 1 1 0-62zM34 140c0-38 28-62 66-62s66 24 66 62z" />
+                  </svg>
+                  <div class="atmos" aria-hidden="true"></div>
+                </div>
+                <div class="wipe" id="wipe" aria-hidden="true"></div>
+                <div class="hud-top">
+                  <span class="hud-pill hud-state"><span class="hud-dot" aria-hidden="true"></span><span id="hudState" aria-live="polite">NORMAL</span></span>
+                  <span class="hud-pill hud-viewers" id="hudViewers">1,284 watching</span>
+                </div>
+                <div class="tip-alert" id="tipAlert" aria-hidden="true"></div>
+                <div class="hud-by" id="hudBy"></div>
+                <div class="screen-controls">
+                  <button type="button" id="demoPause" aria-label="Pause the demo">pause</button>
+                </div>
+              </div>
+              <div class="countdown" aria-hidden="true">
+                <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+                <span class="countdown-num" id="countNum">0.0s</span>
+              </div>
+              <div class="chat" id="chat" aria-hidden="true"></div>
+              <p class="demo-note" id="demoNote">Simulated. Real clips of the model output drop in here once recorded.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== How it works ===== -->
+      <section class="wrap section" id="how">
+        <div class="section-head">
+          <h2>Four steps, and the fourth one matters most.</h2>
+          <p class="lede">A hijack is a paid, timed takeover. It always ends, and it always ends clean.</p>
+        </div>
+        <ol class="steps">
+          <li>
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 7h22v14H14l-6 5v-5H5z"/><path d="M10 12h12M10 16h7"/></svg>
+            <h3>A viewer picks a look, or writes one</h3>
+            <p>From the streamer's own menu of presets, or a custom prompt if the streamer allows it. An optional reference image can ride along.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 5h20v22l-3-2-3 2-3-2-3 2-3-2-3 2-2-2z"/><path d="M11 11h10M11 15h10M11 19h6"/></svg>
+            <h3>They tip with a short claim code</h3>
+            <p>The code pairs the tip with the request. The amount sets the duration: $1 is 1 second, $12 is 12 seconds.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 7h9M18 7h9v18h-9M5 25h9M5 7v18"/><path d="M13 12l8 4-8 4z" fill="currentColor" stroke="none"/></svg>
+            <h3>The stream is hijacked, live</h3>
+            <p>The webcam feed runs through the model and takes over the scene in OBS. A short wipe covers the switch, and the tipper's name sits on screen.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M26 16a10 10 0 1 1-3-7.1"/><path d="M26 5v6h-6"/></svg>
+            <h3>It snaps back, on the second</h3>
+            <p>When the paid seconds are up the scene reverts, the AI session closes, and the next tip in the queue gets its turn.</p>
+          </li>
+        </ol>
+        <p class="readout" aria-label="The router state machine">
+          <span data-state="IDLE">IDLE</span>→<span data-state="AUTHORIZING">AUTHORIZING</span>→<span data-state="CONNECTING">CONNECTING</span>→<span data-state="BUFFERING">BUFFERING</span>→<span data-state="LIVE">LIVE</span>→<span data-state="TEARDOWN">TEARDOWN</span>→<span data-state="IDLE">IDLE</span>
+        </p>
+      </section>
+
+      <!-- ===== $1 = 1s ===== -->
+      <section class="wrap section" id="price">
+        <div class="section-head">
+          <h2>One dollar, one second. The math is on the screen.</h2>
+          <p class="lede">No coins, no bits-to-dollars table. Viewers see exactly what a tip buys, and streamers see exactly what it costs.</p>
+        </div>
+        <div class="math">
+          <div class="calc">
+            <div class="calc-big">
+              <span class="money">$<span id="calcDollars">8</span></span>
+              <span class="eq">buys</span>
+              <span><span id="calcSeconds">8</span>s</span>
+            </div>
+            <div>
+              <label for="tipRange" class="mono" style="display:block;font-size:12px;color:var(--ink-3);margin-bottom:8px">Drag the tip</label>
+              <input type="range" id="tipRange" min="1" max="60" value="8" step="1" />
+              <div class="calc-scale"><span>$1</span><span>$30</span><span>$60</span></div>
+            </div>
+            <hr />
+            <div class="calc-row"><span class="label">The streamer keeps</span><span class="value money">$<span id="calcKeep">8.00</span></span></div>
+            <div class="calc-row"><span class="label">Model compute for those seconds</span><span class="value">$<span id="calcGpu">0.16</span></span></div>
+            <div class="calc-row"><span class="label">Compute as a share of the tip</span><span class="value"><span id="calcShare">2</span>%</span></div>
+            <small>Compute at the model's published rate of $0.02 per second of realtime video. Tips flow through the streamer's own tipping rail, so Reality Hijack never touches them.</small>
+          </div>
+          <div class="math-copy">
+            <p><strong>Realtime AI video is cheap enough to be interactive, and too expensive to leave running.</strong> At about $72 an hour, nobody would keep a filter on as decoration.</p>
+            <p>So the model never runs on the streamer's dime or on a timer. Every hijack is triggered and paid for by a viewer, billed by the second, and lasts only as long as the payment bought. Compute scales with revenue, not with airtime.</p>
+            <p>That inversion is the whole product. Viewers already pay to affect streamers, through bits, tip-to-speech and game-chaos tools. This points the same loop at a surface those tools can't reach: the camera.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== The looks ===== -->
+      <section class="wrap section" id="looks">
+        <div class="section-head">
+          <h2>Six realities to start. The streamer decides which are on the menu.</h2>
+          <p class="lede">Presets are resolved on the server from their id, so a viewer never controls the prompt text. Custom prompts are a separate, streamer-gated path.</p>
+        </div>
+        <ul class="looks" id="lookGrid">
+          <li class="look" data-preset="lava-room">
+            <div class="cam" data-look="lava-room"><svg class="silhouette" viewBox="0 0 200 140" aria-hidden="true"><path d="M100 14a31 31 0 1 1 0 62a31 31 0 1 1 0-62zM34 140c0-38 28-62 66-62s66 24 66 62z"/></svg><div class="atmos"></div></div>
+            <div class="look-body">
+              <div class="look-title"><h3>Lava Room</h3><span class="intensity" aria-label="Intensity 4 of 5"><b>●●●●</b>○</span></div>
+              <p>Molten floor, glowing cracks, embers in the air.</p>
+            </div>
+          </li>
+          <li class="look" data-preset="underwater">
+            <div class="cam" data-look="underwater"><svg class="silhouette" viewBox="0 0 200 140" aria-hidden="true"><path d="M100 14a31 31 0 1 1 0 62a31 31 0 1 1 0-62zM34 140c0-38 28-62 66-62s66 24 66 62z"/></svg><div class="atmos"></div></div>
+            <div class="look-body">
+              <div class="look-title"><h3>Underwater</h3><span class="intensity" aria-label="Intensity 2 of 5"><b>●●</b>○○○</span></div>
+              <p>Submerged, shafts of blue light, drifting bubbles.</p>
+            </div>
+          </li>
+          <li class="look" data-preset="80s-anime">
+            <div class="cam" data-look="80s-anime"><svg class="silhouette" viewBox="0 0 200 140" aria-hidden="true"><path d="M100 14a31 31 0 1 1 0 62a31 31 0 1 1 0-62zM34 140c0-38 28-62 66-62s66 24 66 62z"/></svg><div class="atmos"></div></div>
+            <div class="look-body">
+              <div class="look-title"><h3>80s Anime</h3><span class="intensity" aria-label="Intensity 3 of 5"><b>●●●</b>○○</span></div>
+              <p>Cel shading, neon sunset, VHS grain.</p>
+            </div>
+          </li>
+          <li class="look" data-preset="cyberpunk">
+            <div class="cam" data-look="cyberpunk"><svg class="silhouette" viewBox="0 0 200 140" aria-hidden="true"><path d="M100 14a31 31 0 1 1 0 62a31 31 0 1 1 0-62zM34 140c0-38 28-62 66-62s66 24 66 62z"/></svg><div class="atmos"></div></div>
+            <div class="look-body">
+              <div class="look-title"><h3>Cyberpunk City</h3><span class="intensity" aria-label="Intensity 3 of 5"><b>●●●</b>○○</span></div>
+              <p>Holographic signs, rain-slick reflections, teal and magenta.</p>
+            </div>
+          </li>
+          <li class="look" data-preset="haunted">
+            <div class="cam" data-look="haunted"><svg class="silhouette" viewBox="0 0 200 140" aria-hidden="true"><path d="M100 14a31 31 0 1 1 0 62a31 31 0 1 1 0-62zM34 140c0-38 28-62 66-62s66 24 66 62z"/></svg><div class="atmos"></div></div>
+            <div class="look-body">
+              <div class="look-title"><h3>Haunted</h3><span class="intensity" aria-label="Intensity 4 of 5"><b>●●●●</b>○</span></div>
+              <p>Cold tones, creeping shadows, flickering candlelight.</p>
+            </div>
+          </li>
+          <li class="look" data-preset="winter-wonderland">
+            <div class="cam" data-look="winter-wonderland"><svg class="silhouette" viewBox="0 0 200 140" aria-hidden="true"><path d="M100 14a31 31 0 1 1 0 62a31 31 0 1 1 0-62zM34 140c0-38 28-62 66-62s66 24 66 62z"/></svg><div class="atmos"></div></div>
+            <div class="look-body">
+              <div class="look-title"><h3>Winter Wonderland</h3><span class="intensity" aria-label="Intensity 1 of 5"><b>●</b>○○○○</span></div>
+              <p>Soft snow, frost on every surface, warm fairy lights.</p>
+            </div>
+          </li>
+        </ul>
+        <p class="looks-note">
+          Each preset carries a category and an intensity from 1 to 5. Streamers switch categories on or off, set an intensity ceiling, and add a cooldown between hijacks. Nothing plays that they haven't allowed.
+        </p>
+      </section>
+
+      <!-- ===== For streamers ===== -->
+      <section class="wrap section" id="streamers">
+        <div class="section-head">
+          <h2>A new reason to tip that isn't a longer text-to-speech queue.</h2>
+          <p class="lede">Built for streamers who already run viewer-interaction tools and want a moment worth clipping.</p>
+        </div>
+        <div class="props">
+          <div class="prop">
+            <span class="big money">100%</span>
+            <h3>Of every tip stays with the streamer</h3>
+            <p>Tips go through the tipping rail the channel already uses. Reality Hijack reads the event; it never holds the money.</p>
+          </div>
+          <div class="prop">
+            <span class="big">1</span>
+            <h3>Download, then sign in with Twitch</h3>
+            <p>The app finds OBS and wires its own source. No API keys to paste, no config files, no second broadcast tool.</p>
+          </div>
+          <div class="prop">
+            <span class="big">⌘⇧H</span>
+            <h3>The ceiling is always the streamer's</h3>
+            <p>Category toggles, an intensity cap, cooldowns, a queue depth, and a panic hotkey that ends any session instantly.</p>
+          </div>
+        </div>
+        <div class="viewer-strip">
+          <h3>For viewers: you're not donating. You're taking over.</h3>
+          <p>Pick a look, or write one where the streamer allows it. For as long as your tip buys, it's on their screen, and your name is on it.</p>
+        </div>
+      </section>
+
+      <!-- ===== Safety ===== -->
+      <section class="wrap section" id="safety">
+        <div class="section-head">
+          <h2>A stuck session can never turn into a stuck bill.</h2>
+          <p class="lede">The model bills by the second, so overrun is bounded three independent ways. Each cap works even if the two before it fail.</p>
+        </div>
+        <ol class="fuses">
+          <li class="fuse">
+            <span class="where">on the streamer's machine</span>
+            <h3>The countdown</h3>
+            <p>The job's own timer ends the effect on the second the tip paid for, hides the source in OBS, then closes the AI session. In that order.</p>
+          </li>
+          <li class="fuse">
+            <span class="where">on the streamer's machine, independently</span>
+            <h3>The watchdog</h3>
+            <p>A second timer force-ends the session ten seconds after the paid duration if the first one ever fails to fire.</p>
+          </li>
+          <li class="fuse">
+            <span class="where">on the model provider's servers</span>
+            <h3>The token itself</h3>
+            <p>Every session is opened with a short-lived token that carries a hard maximum duration. If the whole computer freezes, the provider ends the session anyway.</p>
+          </li>
+        </ol>
+        <div class="guard">
+          <div>
+            <h3>Untrusted text never runs unchecked</h3>
+            <p>Preset prompts live on the server and travel by id, so a viewer never types into the model. Custom prompts are off by default; when a streamer turns them on, every one is checked against that streamer's guardrails before it can run.</p>
+          </div>
+          <div>
+            <h3>One key ends everything</h3>
+            <p class="panic"><span class="dot" aria-hidden="true"></span><span>Press <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>H</kbd> or the tray button. The effect hides first, then the session drops, whatever state it was in.</span></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Setup ===== -->
+      <section class="wrap section" id="setup">
+        <div class="setup">
+          <div class="section-head" style="margin-bottom:0">
+            <h2>Five steps. No config files.</h2>
+            <div class="setup-copy" style="margin-top:16px">
+              <p>Reality Hijack is a companion to OBS, not a replacement. The app talks to OBS over its built-in websocket, adds a browser source for the AI feed, and keeps it hidden until real frames are flowing.</p>
+              <p>In cloud mode the model key never touches the streamer's disk. The desktop app only handles OBS, the camera, and the local video loop; the money logic runs on our side.</p>
+            </div>
+          </div>
+          <ol>
+            <li><div>Download the app<span>macOS today. One file.</span></div></li>
+            <li><div>Sign in with Twitch<span>That's the account. No forms.</span></div></li>
+            <li><div>Allow camera access<span>The app reads the OBS Virtual Camera, so the exact scene you broadcast is what gets restyled.</span></div></li>
+            <li><div>Let it find OBS<span>The app creates and positions its own source. You can watch it happen.</span></div></li>
+            <li><div>Send yourself a test hijack<span>Free, from the setup wizard, so the first one a viewer buys isn't the first one you've seen.</span></div></li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ===== Alpha ===== -->
+      <section class="wrap section" id="alpha">
+        <div class="section-head" style="text-align:center;justify-items:center">
+          <h2>Alpha. Hand-picked, not self-serve.</h2>
+          <p class="lede">We're onboarding a small cohort of streamers by hand to prove the loop on real channels before opening it up.</p>
+        </div>
+        <div class="alpha-card">
+          <h3>Free during alpha</h3>
+          <p class="price">$0 to the streamer · 100% of tips stay theirs</p>
+          <ul>
+            <li>We cover the model compute, under a monthly cap per channel.</li>
+            <li>No cut of tips, no card on file, nothing to cancel.</li>
+            <li>A short conversation first, because we want to watch the first hijacks with you.</li>
+          </ul>
+          <a class="btn btn-primary" href="https://github.com/hshwang34/Reaper/issues/new?title=Alpha%20access%20request&body=Channel%3A%20%0AAverage%20viewers%3A%20%0AWhat%20I%20stream%3A%20%0ATipping%20setup%20today%20(Streamlabs%2C%20other)%3A%20%0A">Request alpha access</a>
+          <small>Pricing after alpha is undecided on purpose. The options under consideration are written up in the <a href="https://github.com/hshwang34/Reaper/blob/main/docs/COMMERCIALIZATION.md">commercialization plan</a>.</small>
+        </div>
+      </section>
+
+      <!-- ===== FAQ ===== -->
+      <section class="wrap section" id="faq">
+        <div class="section-head">
+          <h2>Questions streamers ask first.</h2>
+        </div>
+        <div class="faq">
+          <details>
+            <summary>Is this allowed on Twitch?</summary>
+            <p>Today a hijack is triggered by the channel's own tips through Streamlabs, the same rail that existing tip-to-speech and media-share tools use. It is not a Twitch extension and does not use Bits. A native Bits or Channel Points tier is a documented later phase with its own compliance work, and we won't claim it until it exists.</p>
+          </details>
+          <details>
+            <summary>How much lag is there?</summary>
+            <p>Any realtime AI video pipeline has real glass-to-glass latency. Reality Hijack hides it rather than pretending it isn't there: a short wipe covers every switch, and OBS is only shown the AI feed after real decoded frames have arrived. A lag spike never reads as a black screen.</p>
+          </details>
+          <details>
+            <summary>What happens if it breaks in the middle of a hijack?</summary>
+            <p>Every exit path, whether the timer ending, an error, a dropped connection, or the app closing, runs the same teardown: hide the effect in OBS, then close the AI session. It fails toward your normal camera, never toward stuck. The <a href="https://github.com/hshwang34/Reaper/blob/main/docs/POSTMORTEM-first-live-hijack.md">postmortem of the first live hijack</a> covers the five bugs that shaped this.</p>
+          </details>
+          <details>
+            <summary>Can a viewer make me look like anything they want?</summary>
+            <p>No. You choose which looks and categories are offered, set an intensity ceiling, and decide whether custom prompts are allowed at all. When they are, each one is checked against your guardrails before it can run, and you always have the panic hotkey.</p>
+          </details>
+          <details>
+            <summary>Do I need a new broadcast setup?</summary>
+            <p>No. It drives your existing OBS through the websocket OBS already ships with, and adds one browser source that it manages itself.</p>
+          </details>
+          <details>
+            <summary>What does it cost me?</summary>
+            <p>Nothing during alpha. Tips go through your own tipping rail and you keep all of them. We cover the model compute per channel under a monthly cap while we validate the product on real channels.</p>
+          </details>
+          <details>
+            <summary>Is this actually built?</summary>
+            <p>Yes. Tip, queue, live restyle, revert, guardrails, and the three cost caps are all running code in the <a href="https://github.com/hshwang34/Reaper">public repository</a>, alongside the <a href="https://github.com/hshwang34/Reaper/blob/main/FEASIBILITY.md">feasibility research</a> that shaped it. The demo above is a simulation of the loop; recorded clips of the real model output replace it as they're captured.</p>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">
+        <div class="footer-grid">
+          <div>
+            <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span>Reality Hijack</a>
+            <p class="footer-tag">Viewers pay to remix a streamer's reality in real time. Built as a working product and a public case study in AI product design under real constraints.</p>
+          </div>
+          <div>
+            <h4>Product</h4>
+            <ul>
+              <li><a href="#how">How it works</a></li>
+              <li><a href="#price">$1 = 1 second</a></li>
+              <li><a href="#safety">Safety and cost caps</a></li>
+              <li><a href="#alpha">Alpha access</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Read the work</h4>
+            <ul>
+              <li><a href="https://github.com/hshwang34/Reaper">Source on GitHub</a></li>
+              <li><a href="https://github.com/hshwang34/Reaper/blob/main/FEASIBILITY.md">Feasibility assessment</a></li>
+              <li><a href="https://github.com/hshwang34/Reaper/blob/main/docs/COMMERCIALIZATION.md">Commercialization plan</a></li>
+              <li><a href="https://github.com/hshwang34/Reaper/blob/main/docs/POSTMORTEM-first-live-hijack.md">First live hijack postmortem</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <span>© <span id="year">2026</span> Reality Hijack</span>
+          <span>Built by <a href="https://github.com/hshwang34">Hyunseok Hwang</a></span>
+        </div>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
