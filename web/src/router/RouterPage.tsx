@@ -15,14 +15,12 @@ import { acquireCamera, listCameras } from "./decartSession.js";
 
 const STATE_COLOR: Record<RouterState, string> = {
   OFFLINE: "bg-zinc-600",
-  ARMING: "bg-amber-500",
   IDLE: "bg-emerald-600",
   AUTHORIZING: "bg-sky-500",
   CONNECTING: "bg-sky-500",
   BUFFERING: "bg-indigo-500",
   LIVE: "bg-fuchsia-600",
   TEARDOWN: "bg-amber-500",
-  ERROR: "bg-red-600",
 };
 
 export default function RouterPage() {
@@ -233,7 +231,7 @@ export default function RouterPage() {
         {/* Right: manual fire + guardrail settings + log */}
         <section className="space-y-4">
           <ManualHijackPanel
-            armed={state !== "OFFLINE" && state !== "ARMING"}
+            armed={state !== "OFFLINE"}
             busy={state !== "IDLE"}
             state={state}
             onFired={(outcome) => pushLog(`manual hijack → ${outcome}`)}

@@ -25,6 +25,8 @@ const local = createLocalServer({
   streamlabsToken: env.streamlabsToken,
   obsWsUrl: env.obsWsUrl,
   obsWsPassword: env.obsWsPassword,
+  obsScene: env.obsScene,
+  obsSource: env.obsSource,
   getSettings,
   updateSettings,
   uploadsDir,

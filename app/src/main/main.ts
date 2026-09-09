@@ -66,6 +66,9 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 /** Canonical viewer URL (with auth) — set at boot, reused by tray actions. */
 let viewerUrlGlobal = "";
+/** OBS scene + source the overlay lives in — resolved once at boot from
+ *  keys.json / .env (machine wiring, not streamer Settings). */
+let obsWiring = { scene: "Scene", source: "AI Hijack" };
 
 // ── Single instance ────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -115,6 +118,7 @@ async function boot(): Promise<void> {
 
   // ── Local bridge: the embedded sidecar composition ─────────────────────
   const keys = loadKeys();
+  obsWiring = { scene: keys.obsScene, source: keys.obsSource };
   const authToken = getAuthToken();
   local = createLocalServer({
     ...keys,
@@ -177,6 +181,8 @@ async function boot(): Promise<void> {
     if (k.streamlabsToken) patch.streamlabsToken = k.streamlabsToken;
     if (k.obsWsUrl) patch.obsWsUrl = k.obsWsUrl;
     if (k.obsWsPassword) patch.obsWsPassword = k.obsWsPassword;
+    if (k.obsScene) patch.obsScene = k.obsScene;
+    if (k.obsSource) patch.obsSource = k.obsSource;
     saveKeys(patch);
   });
   ipcMain.handle("rh:relaunch", () => {
@@ -216,10 +222,9 @@ async function boot(): Promise<void> {
   });
   ipcMain.handle("rh:provision-obs", async () => {
     try {
-      const s = getSettings();
       const result = await local!.obs.ensureBrowserSource(
-        s.obsScene,
-        s.obsSource,
+        obsWiring.scene,
+        obsWiring.source,
         viewerUrlGlobal,
       );
       refreshTray();
@@ -355,14 +360,13 @@ function listenOnFirstFreePort(
 /** Create/repair the hidden AI-overlay Browser Source. Never blocks boot. */
 async function provisionObs(viewerUrl: string): Promise<void> {
   if (!local) return;
-  const s = getSettings();
   try {
     const result = await local.obs.ensureBrowserSource(
-      s.obsScene,
-      s.obsSource,
+      obsWiring.scene,
+      obsWiring.source,
       viewerUrl,
     );
-    log("app", `OBS source "${s.obsSource}": ${result}`);
+    log("app", `OBS source "${obsWiring.source}": ${result}`);
   } catch (e) {
     warn(
       "app",

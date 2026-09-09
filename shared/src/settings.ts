@@ -25,9 +25,15 @@ export const DEFAULT_SETTINGS: Settings = {
   allowCustomPrompts: true,
   allowSolePendingMatch: true,
   blocklistExtra: [],
-  obsScene: "Scene",
-  obsSource: "AI Hijack",
 };
+
+/** Merge a persisted (untrusted-shape) settings object over the defaults.
+ *  Runs the same validation as a live patch, so a hand-edited or stale
+ *  settings file — one still carrying keys that have since moved out of
+ *  Settings — can never produce an invalid Settings object. */
+export function loadSettings(persisted: unknown): Settings {
+  return { ...DEFAULT_SETTINGS, ...sanitizeSettingsPatch(persisted) };
+}
 
 /** Paid seconds for a tip: floor(amount × rate), at least 1, capped. */
 export function computeDurationSec(
@@ -73,9 +79,9 @@ export function sanitizeSettingsPatch(input: unknown): Partial<Settings> {
   for (const key of ["allowCustomPrompts", "allowSolePendingMatch"] as const) {
     if (typeof p[key] === "boolean") out[key] = p[key] as boolean;
   }
-  for (const key of ["defaultPresetId", "obsScene", "obsSource"] as const) {
-    const v = p[key];
-    if (typeof v === "string" && v.trim()) out[key] = v.trim().slice(0, 200);
+  {
+    const v = p.defaultPresetId;
+    if (typeof v === "string" && v.trim()) out.defaultPresetId = v.trim().slice(0, 64);
   }
   for (const key of ["enabledPresetIds", "blocklistExtra"] as const) {
     const v = p[key];

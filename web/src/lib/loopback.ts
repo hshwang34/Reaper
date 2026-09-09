@@ -5,7 +5,7 @@
 // machine (Chrome tab ↔ OBS CEF), where mDNS host candidates often fail to
 // resolve.
 
-import type { RtcMsg, ServerMsg } from "@rh/shared";
+import { isRtcMsg, type ServerMsg } from "@rh/shared";
 import type { HubSocket } from "./ws.js";
 import { debugLog } from "./debug.js";
 
@@ -70,14 +70,12 @@ export class LoopbackSender {
   }
 
   private async onMessage(m: ServerMsg): Promise<void> {
-    if (!this.pc) return;
-    const rtc = m as RtcMsg;
-    if ("jobId" in rtc && rtc.jobId !== this.jobId) return;
-    if (rtc.t === "rtc:answer") {
-      await this.pc.setRemoteDescription(rtc.sdp as RTCSessionDescriptionInit);
-    } else if (rtc.t === "rtc:candidate") {
+    if (!this.pc || !isRtcMsg(m) || m.jobId !== this.jobId) return;
+    if (m.t === "rtc:answer") {
+      await this.pc.setRemoteDescription(m.sdp);
+    } else if (m.t === "rtc:candidate") {
       try {
-        await this.pc.addIceCandidate(rtc.candidate as RTCIceCandidateInit);
+        await this.pc.addIceCandidate(m.candidate);
       } catch {
         /* ignore late candidates */
       }
@@ -107,7 +105,8 @@ export class LoopbackReceiver {
   }
 
   private async onMessage(m: ServerMsg): Promise<void> {
-    const rtc = m as RtcMsg;
+    if (!isRtcMsg(m)) return;
+    const rtc = m;
     if (rtc.t === "rtc:offer") {
       debugLog("loopback:viewer", "offer received", rtc.jobId);
       this.pc?.close();
@@ -134,7 +133,7 @@ export class LoopbackReceiver {
         }
       };
 
-      await pc.setRemoteDescription(rtc.sdp as RTCSessionDescriptionInit);
+      await pc.setRemoteDescription(rtc.sdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       this.hub.send({
@@ -145,7 +144,7 @@ export class LoopbackReceiver {
       });
     } else if (rtc.t === "rtc:candidate" && this.pc && rtc.jobId === this.jobId) {
       try {
-        await this.pc.addIceCandidate(rtc.candidate as RTCIceCandidateInit);
+        await this.pc.addIceCandidate(rtc.candidate);
       } catch {
         /* ignore */
       }

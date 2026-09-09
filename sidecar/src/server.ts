@@ -39,6 +39,10 @@ export interface LocalServerHost {
   streamlabsToken: string;
   obsWsUrl: string;
   obsWsPassword: string;
+  /** The OBS scene + Browser Source the hijack overlay lives in. Machine
+   *  wiring, not streamer policy — so it's host config, not Settings. */
+  obsScene: string;
+  obsSource: string;
   /** Live settings access — host owns persistence. */
   getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;
@@ -157,11 +161,10 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
 
   /** Router-only wiring (decart mode + OBS target). Localhost only. */
   app.get("/api/router-config", requireAuth, (_req, res) => {
-    const s = host.getSettings();
     res.json({
       decartEnabled,
-      obsScene: s.obsScene,
-      obsSource: s.obsSource,
+      obsScene: host.obsScene,
+      obsSource: host.obsSource,
       obsConnected: obs.isConnected(),
     });
   });
@@ -169,9 +172,8 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   /** Toggle the OBS Browser Source that shows the AI viewer page. */
   app.post("/api/obs/toggle", requireAuth, async (req, res) => {
     const visible = Boolean(req.body?.visible);
-    const s = host.getSettings();
     try {
-      await obs.setVisible(s.obsScene, s.obsSource, visible);
+      await obs.setVisible(host.obsScene, host.obsSource, visible);
       res.json({ ok: true, visible });
     } catch (e) {
       res.status(502).json({ ok: false, error: (e as Error).message });

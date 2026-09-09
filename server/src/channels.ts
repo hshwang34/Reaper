@@ -16,7 +16,7 @@
 // socket the front door already adopted into the old hub.
 
 import { and, eq, gte, sql } from "drizzle-orm";
-import { DEFAULT_SETTINGS, type Settings, type TipEvent } from "@rh/shared";
+import { DEFAULT_SETTINGS, loadSettings, type Settings, type TipEvent } from "@rh/shared";
 import {
   createRuntime,
   createStreamlabsAdapter,
@@ -100,7 +100,7 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
       .where(eq(channels.id, channelId))
       .get();
     try {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(fresh?.settingsJson ?? "{}") };
+      return loadSettings(JSON.parse(fresh?.settingsJson ?? "{}"));
     } catch {
       return { ...DEFAULT_SETTINGS };
     }

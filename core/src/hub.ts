@@ -9,6 +9,7 @@
 // never be able to forge `router:state` (which can fail a paid live job) or
 // `viewer:frames-ok` (which would unhide OBS on a black frame).
 
+import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import type {
@@ -20,8 +21,17 @@ import type {
   StatusSnapshot,
   SubmissionStatus,
 } from "@rh/shared";
-import { isRtcMsg } from "@rh/shared";
+import { isLocalPlaneMsg, isRtcMsg } from "@rh/shared";
 import { log, warn } from "./log.js";
+
+/** Constant-time compare for the install token: `!==` short-circuits on the
+ *  first differing byte. Not practically exploitable on loopback, but free. */
+function tokenMatches(provided: unknown, expected: string): boolean {
+  if (typeof provided !== "string") return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 interface SocketMeta {
   role: Role;
@@ -130,7 +140,7 @@ export class Hub {
       if (
         this.opts.authToken &&
         PRIVILEGED_ROLES.has(msg.role) &&
-        msg.auth !== this.opts.authToken
+        !tokenMatches(msg.auth, this.opts.authToken)
       ) {
         warn("hub", `rejected unauthenticated ${msg.role} hello`);
         ws.close(4401, "auth required");
@@ -152,7 +162,7 @@ export class Hub {
     if (!meta) return; // ignore pre-hello traffic
 
     // ── Local plane: RTC signaling + the frame gate, relayed by role ──────
-    if (isRtcMsg(msg) || msg.t === "viewer:frames-ok") {
+    if (isLocalPlaneMsg(msg)) {
       if (this.opts.rejectLocalPlane) {
         warn("hub", `dropped local-plane ${msg.t} on hosted hub`);
         return;
@@ -163,13 +173,15 @@ export class Hub {
       }
       if (isRtcMsg(msg)) {
         // Signaling only ever flows router ↔ viewer; a peer may not target
-        // its own role, and the recorded `from` is what we know, not what
-        // the sender claimed.
-        if (msg.target === meta.role || msg.target === "portal") return;
-        this.forwardToRole(msg.target, { ...msg, from: meta.role } as ServerMsg);
+        // its own role (the type says PeerRole, the wire says anything), and
+        // the recorded `from` is what we know, not what the sender claimed.
+        const target: unknown = msg.target;
+        if (target !== "router" && target !== "viewer") return;
+        if (target === meta.role) return;
+        this.forwardToRole(target, { ...msg, from: meta.role });
       } else if (meta.role === "viewer") {
         // Router listens for this to close the buffering gate.
-        this.forwardToRole("router", msg as unknown as ServerMsg);
+        this.forwardToRole("router", msg);
       }
       return;
     }

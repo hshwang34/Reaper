@@ -19,7 +19,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, safeStorage } from "electron";
 import { config as loadDotenv } from "dotenv";
-import { DEFAULT_SETTINGS, type Settings } from "@rh/shared";
+import { DEFAULT_SETTINGS, loadSettings, type Settings } from "@rh/shared";
 import { log, warn } from "@rh/core";
 import { discoverObsWebsocket } from "./obsDiscovery.js";
 
@@ -39,11 +39,16 @@ function devRepoRoot(): string | null {
   return existsSync(resolve(root, "package.json")) ? root : null;
 }
 
+/** Credentials + machine wiring for the local bridge. Stored in keys.json
+ *  (keychain-encrypted). Distinct from Settings, which is streamer policy. */
 export interface Keys {
   decartApiKey: string;
   streamlabsToken: string;
   obsWsUrl: string;
   obsWsPassword: string;
+  /** OBS scene + Browser Source that hosts the hijack overlay. */
+  obsScene: string;
+  obsSource: string;
 }
 
 /** The per-install privilege token: gates the local bridge's privileged HTTP
@@ -123,6 +128,9 @@ export function loadKeys(): Keys {
     obsWsPassword: obsExplicit
       ? String(saved.obsWsPassword ?? "")
       : (discovered.password ?? process.env.OBS_WS_PASSWORD ?? ""),
+    obsScene: String(saved.obsScene ?? "") || process.env.OBS_SCENE?.trim() || "Scene",
+    obsSource:
+      String(saved.obsSource ?? "") || process.env.OBS_SOURCE?.trim() || "AI Hijack",
   };
 }
 
@@ -155,21 +163,24 @@ export function keysStatus(): Record<keyof Keys, boolean> {
     streamlabsToken: Boolean(k.streamlabsToken),
     obsWsUrl: Boolean(k.obsWsUrl),
     obsWsPassword: Boolean(k.obsWsPassword),
+    obsScene: Boolean(k.obsScene),
+    obsSource: Boolean(k.obsSource),
   };
 }
 
 let settings: Settings = loadSettingsFile();
 
 function loadSettingsFile(): Settings {
-  const base: Settings = { ...DEFAULT_SETTINGS };
   if (existsSync(settingsPath)) {
     try {
-      return { ...base, ...JSON.parse(readFileSync(settingsPath, "utf8")) };
+      // Validated on load (shared/settings.ts): stale keys from older
+      // versions are dropped rather than carried along forever.
+      return loadSettings(JSON.parse(readFileSync(settingsPath, "utf8")));
     } catch {
       warn("app-config", "settings.json unreadable — using defaults");
     }
   }
-  return base;
+  return { ...DEFAULT_SETTINGS };
 }
 
 export function getSettings(): Settings {
