@@ -75,6 +75,9 @@ export class CorrelationStore {
 
   /** Match a tip to a submission, consuming it if found. */
   match(tip: TipEvent, opts: MatchOptions = {}): MatchResult {
+    // Expire lazily too: the interval sweep runs every 15s, and a code the
+    // portal is about to be told has expired must not still claim a tip.
+    this.sweep();
     // 1. code in message — as a whole token, so an ordinary word in the tip
     //    message ("MATE", "GAME") can't accidentally claim someone's code.
     const tokens = new Set(

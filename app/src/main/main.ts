@@ -173,6 +173,11 @@ async function boot(): Promise<void> {
   void provisionObs(viewerUrlGlobal);
 
   // ── Keys/settings IPC for the in-app setup panel ───────────────────────
+  // Only our own loopback pages get the install token (see preload.ts).
+  ipcMain.on("rh:auth-token", (e) => {
+    const from = e.senderFrame?.url ?? "";
+    e.returnValue = from.startsWith(`http://127.0.0.1:${port}/`) ? authToken : "";
+  });
   ipcMain.handle("rh:keys-status", () => keysStatus());
   ipcMain.handle("rh:save-keys", (_e, k: Record<string, string>) => {
     // Drop empty fields so a partial paste never blanks a stored secret.
@@ -258,9 +263,19 @@ async function boot(): Promise<void> {
       // The countdown + teardown timers must run while minimized/occluded.
       backgroundThrottling: false,
       preload: resolve(dirname(fileURLToPath(import.meta.url)), "preload.cjs"),
-      // The token rides preload argv — process.argv is readable there.
-      additionalArguments: [`--rh-auth=${authToken}`],
     },
+  });
+  // The router window only ever shows our own loopback pages; anything else
+  // (a stray link, a future XSS) must not navigate this privileged window —
+  // it holds the install token and the desktop bridge. External links go
+  // through rh:open-external → the system browser.
+  const ownOrigin = `http://127.0.0.1:${port}`;
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (e, url) => {
+    if (new URL(url).origin !== ownOrigin) e.preventDefault();
   });
   // Closing the window quits the app (the router IS the product for now);
   // tray-only residency arrives with the M4 wizard polish.

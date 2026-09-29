@@ -281,9 +281,17 @@ function ObsStep({
             OBS found — it just isn't running. Launch it and the app connects
             on its own.
           </p>
-          <Primary onClick={() => void d.launchObs().then(refresh)}>
+          <Primary
+            onClick={() =>
+              void d
+                .launchObs()
+                .then(refresh)
+                .catch((e) => setResult(`Couldn't launch OBS: ${(e as Error).message}`))
+            }
+          >
             Launch OBS
           </Primary>
+          {result && <p className="text-sm text-red-400">{result}</p>}
         </>
       )}
       {state.obs.connected && (
@@ -296,10 +304,13 @@ function ObsStep({
           </p>
           <Primary
             onClick={() =>
-              void d.provisionObs().then((r) => {
-                setResult(r.ok ? `✓ ${r.detail}` : r.detail);
-                refresh();
-              })
+              void d
+                .provisionObs()
+                .then((r) => {
+                  setResult(r.ok ? `✓ ${r.detail}` : r.detail);
+                  refresh();
+                })
+                .catch((e) => setResult(`Couldn't create the source: ${(e as Error).message}`))
             }
           >
             Create the overlay source

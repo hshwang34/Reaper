@@ -31,12 +31,16 @@ export type SubmissionOutcome =
   | {
       ok: false;
       /** HTTP status the host should answer with. */
-      status: 400 | 403 | 422;
+      status: 400 | 403 | 422 | 429;
       error: string;
     };
 
 const MAX_PROMPT_CHARS = 500;
 const MAX_NAME_CHARS = 64;
+/** The endpoint is public and each pending entry lives for the TTL (10 min)
+ *  whether or not a tip follows — without a ceiling a script can grow the
+ *  store without bound. Far above any real channel's unclaimed backlog. */
+export const MAX_PENDING_SUBMISSIONS = 1000;
 
 function str(v: unknown, max: number): string {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
@@ -74,6 +78,9 @@ export function createSubmission(
     return { ok: false, status: 400, error: "provide a preset or a custom prompt" };
   }
 
+  if (store.size >= MAX_PENDING_SUBMISSIONS) {
+    return { ok: false, status: 429, error: "too many pending submissions — try again shortly" };
+  }
   const sub = store.add({
     prompt,
     presetId: finalPresetId,

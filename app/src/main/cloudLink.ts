@@ -70,6 +70,7 @@ export class CloudLink {
   private access = "";
   private stopped = false;
   private reconnectAttempt = 0;
+  private refreshing: Promise<"ok" | "revoked" | "transient"> | null = null;
   /** job:done events that failed to send — redelivered on reconnect. */
   private pendingDone: AnyMsg[] = [];
   /** Latest status the cloud engine broadcast for this channel. */
@@ -82,32 +83,74 @@ export class CloudLink {
   ) {}
 
   /** Rotate the refresh token into a fresh access JWT (and persist the new
-   *  refresh — they're single-use). */
-  private async refreshAccess(): Promise<boolean> {
+   *  refresh — they're single-use). "revoked" = the control plane refused the
+   *  refresh token (sign in again); "transient" = network error / 5xx, worth
+   *  retrying with backoff. */
+  private refreshAccess(): Promise<"ok" | "revoked" | "transient"> {
+    // Single-flight: refresh tokens are single-use, so a WS 4401 redial and
+    // an authedPost 401 retry racing each other would spend the same token
+    // twice — the loser gets "revoked" and the link stops for good.
+    this.refreshing ??= this.doRefresh().finally(() => {
+      this.refreshing = null;
+    });
+    return this.refreshing;
+  }
+
+  private async doRefresh(): Promise<"ok" | "revoked" | "transient"> {
     try {
       const res = await fetch(`${this.cfg.url}/auth/refresh`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ refresh: this.cfg.refresh }),
       });
+      if (res.status >= 500) {
+        warn("cloud", `refresh failed (${res.status}) — will retry`);
+        return "transient";
+      }
       if (!res.ok) {
         warn("cloud", `refresh rejected (${res.status}) — sign in again`);
-        return false;
+        return "revoked";
       }
       const tokens = (await res.json()) as { access: string; refresh: string };
       this.access = tokens.access;
       this.cfg.refresh = tokens.refresh;
       saveCloudConfig(this.cfg);
-      return true;
+      return "ok";
     } catch (e) {
-      warn("cloud", `refresh failed: ${(e as Error).message}`);
-      return false;
+      warn("cloud", `refresh failed: ${(e as Error).message} — will retry`);
+      return "transient";
     }
   }
 
   async start(): Promise<void> {
-    if (!(await this.refreshAccess())) return;
-    this.connect();
+    await this.refreshThenConnect();
+  }
+
+  /** Refresh the access JWT, then dial. A transient refresh failure must
+   *  re-enter the backoff loop — previously it just returned, so a control-
+   *  plane blip at launch or at a 15-minute token rotation (close 4401)
+   *  left the app permanently OFFLINE until relaunch. Only an explicit
+   *  rejection of the refresh token stops the loop. */
+  private async refreshThenConnect(): Promise<void> {
+    if (this.stopped) return;
+    const r = await this.refreshAccess();
+    if (r === "ok") this.connect();
+    else if (r === "transient") this.scheduleReconnect(true, "refresh failed");
+  }
+
+  private scheduleReconnect(needsRefresh: boolean, why: string): void {
+    if (this.stopped) return;
+    // Exponential backoff with jitter: a control-plane outage must not turn
+    // every installed app into a synchronized 3-second hammer.
+    const delay = Math.min(
+      RECONNECT_MAX_MS,
+      RECONNECT_BASE_MS * 2 ** this.reconnectAttempt++,
+    ) * (0.75 + Math.random() * 0.5);
+    warn("cloud", `${why} — reconnecting in ${Math.round(delay / 1000)}s`);
+    setTimeout(() => {
+      if (needsRefresh) void this.refreshThenConnect();
+      else this.connect();
+    }, delay);
   }
 
   private connect(): void {
@@ -151,20 +194,8 @@ export class CloudLink {
 
     ws.on("close", (code) => {
       this.lastStatus = OFFLINE_STATUS;
-      if (this.stopped) return;
-      // Exponential backoff with jitter: a control-plane outage must not turn
-      // every installed app into a synchronized 3-second hammer.
-      const delay = Math.min(
-        RECONNECT_MAX_MS,
-        RECONNECT_BASE_MS * 2 ** this.reconnectAttempt++,
-      ) * (0.75 + Math.random() * 0.5);
-      warn("cloud", `link closed (${code}) — reconnecting in ${Math.round(delay / 1000)}s`);
-      setTimeout(() => {
-        // 4401 = access token expired mid-session; rotate before redial.
-        void (code === 4401 ? this.refreshAccess() : Promise.resolve(true)).then(
-          (okay) => okay && this.connect(),
-        );
-      }, delay);
+      // 4401 = access token expired mid-session; rotate before redial.
+      this.scheduleReconnect(code === 4401, `link closed (${code})`);
     });
     ws.on("error", () => ws.close());
   }
@@ -234,10 +265,11 @@ export class CloudLink {
         },
       );
       if (res.status === 401 && attempt === 0) {
-        if (!(await this.refreshAccess())) break;
+        if ((await this.refreshAccess()) !== "ok") break;
         continue;
       }
-      const body = (await res.json()) as T & { error?: string };
+      // A proxy in front of the control plane can answer 502/504 with HTML.
+      const body = (await res.json().catch(() => ({}))) as T & { error?: string };
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
       return body;
     }

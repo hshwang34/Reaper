@@ -21,6 +21,17 @@ export default function PortalPage() {
   const [tipperName, setTipperName] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  // Blob URLs pin the file in memory until revoked — release the old
+  // preview whenever it's swapped out, and on unmount.
+  const previewRef = useRef<string | null>(null);
+  const replacePreview = (url: string | null) => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    previewRef.current = url;
+    setImagePreview(url);
+  };
+  useEffect(() => () => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+  }, []);
   const [tipAmount, setTipAmount] = useState(8);
 
   const [submitting, setSubmitting] = useState(false);
@@ -71,7 +82,7 @@ export default function PortalPage() {
   async function onImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     setImageFile(file);
-    setImagePreview(file ? URL.createObjectURL(file) : null);
+    replacePreview(file ? URL.createObjectURL(file) : null);
   }
 
   async function submit() {
@@ -116,7 +127,7 @@ export default function PortalPage() {
     setPresetId(null);
     setCustomPrompt("");
     setImageFile(null);
-    setImagePreview(null);
+    replacePreview(null);
     if (fileRef.current) fileRef.current.value = "";
   }
 
