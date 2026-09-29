@@ -60,10 +60,15 @@ import { startAutoUpdate } from "./updater.js";
 const PORTS = [17712, 17713, 17714];
 
 let local: LocalServer | null = null;
+/** Cloud-mode link to the control plane; null in local mode. */
+let link: CloudLink | null = null;
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 /** Canonical viewer URL (with auth) — set at boot, reused by tray actions. */
 let viewerUrlGlobal = "";
+/** OBS scene + source the overlay lives in — resolved once at boot from
+ *  keys.json / .env (machine wiring, not streamer Settings). */
+let obsWiring = { scene: "Scene", source: "AI Hijack" };
 
 // ── Single instance ────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -113,8 +118,8 @@ async function boot(): Promise<void> {
 
   // ── Local bridge: the embedded sidecar composition ─────────────────────
   const keys = loadKeys();
+  obsWiring = { scene: keys.obsScene, source: keys.obsSource };
   const authToken = getAuthToken();
-  let link: CloudLink | null = null;
   local = createLocalServer({
     ...keys,
     // Cloud mode: triggers + minting live server-side. The local bridge
@@ -133,6 +138,24 @@ async function boot(): Promise<void> {
         }
       : undefined,
     mintProxy: cloudMode ? (d) => link!.mint(d) : undefined,
+    // Cloud mode: the cloud engine holds the active job, so panic and status
+    // must go there — pausing the idle local engine would be a silent no-op
+    // dressed up as a panic (and the updater could relaunch mid-hijack).
+    moneyProxy: cloudMode
+      ? {
+          togglePause: () => {
+            if (!link) return Promise.reject(new Error("cloud link not up"));
+            return link.togglePause();
+          },
+          status: () =>
+            link?.status() ?? {
+              routerState: "OFFLINE",
+              activeJob: null,
+              queueLength: 0,
+              paused: false,
+            },
+        }
+      : undefined,
   });
 
   const port = await listenOnFirstFreePort(local, PORTS);
@@ -158,6 +181,8 @@ async function boot(): Promise<void> {
     if (k.streamlabsToken) patch.streamlabsToken = k.streamlabsToken;
     if (k.obsWsUrl) patch.obsWsUrl = k.obsWsUrl;
     if (k.obsWsPassword) patch.obsWsPassword = k.obsWsPassword;
+    if (k.obsScene) patch.obsScene = k.obsScene;
+    if (k.obsSource) patch.obsSource = k.obsSource;
     saveKeys(patch);
   });
   ipcMain.handle("rh:relaunch", () => {
@@ -197,10 +222,9 @@ async function boot(): Promise<void> {
   });
   ipcMain.handle("rh:provision-obs", async () => {
     try {
-      const s = getSettings();
       const result = await local!.obs.ensureBrowserSource(
-        s.obsScene,
-        s.obsSource,
+        obsWiring.scene,
+        obsWiring.source,
         viewerUrlGlobal,
       );
       refreshTray();
@@ -254,15 +278,19 @@ async function boot(): Promise<void> {
     "CommandOrControl+Shift+H",
     () => {
       if (!local) return;
-      const paused = local.engine.togglePause();
-      warn("app", paused ? "PANIC — paused via hotkey" : "resumed via hotkey");
-      refreshTray();
+      void local
+        .togglePause()
+        .then((paused) => {
+          warn("app", paused ? "PANIC — paused via hotkey" : "resumed via hotkey");
+          refreshTray();
+        })
+        .catch((e) => warn("app", `panic failed: ${(e as Error).message}`));
     },
   );
   if (!registered) warn("app", "panic hotkey unavailable (already taken?)");
 
   // Auto-update (packaged builds only; never relaunches mid-hijack).
-  void startAutoUpdate(() => local?.engine ?? null);
+  void startAutoUpdate(() => local?.status() ?? null);
 }
 
 /** Dev-only cloud sign-in against a dev-auth control plane (no Twitch app
@@ -332,14 +360,13 @@ function listenOnFirstFreePort(
 /** Create/repair the hidden AI-overlay Browser Source. Never blocks boot. */
 async function provisionObs(viewerUrl: string): Promise<void> {
   if (!local) return;
-  const s = getSettings();
   try {
     const result = await local.obs.ensureBrowserSource(
-      s.obsScene,
-      s.obsSource,
+      obsWiring.scene,
+      obsWiring.source,
       viewerUrl,
     );
-    log("app", `OBS source "${s.obsSource}": ${result}`);
+    log("app", `OBS source "${obsWiring.source}": ${result}`);
   } catch (e) {
     warn(
       "app",
@@ -364,7 +391,7 @@ function setupTray(port: number): void {
 
 function refreshTray(): void {
   if (!tray || !local) return;
-  const snap = local.engine.snapshot();
+  const snap = local.status(); // cloud engine's status in cloud mode
   const stateGlyph = snap.paused
     ? "⏸"
     : snap.routerState === "LIVE"
@@ -388,8 +415,7 @@ function refreshTray(): void {
         label: snap.paused ? "Resume hijacks" : "Panic (pause + kill live)",
         accelerator: "CommandOrControl+Shift+H",
         click: () => {
-          local?.engine.togglePause();
-          refreshTray();
+          void local?.togglePause().catch(() => {}).then(refreshTray);
         },
       },
       {
@@ -418,6 +444,7 @@ app.on("will-quit", () => {
   // Best-effort: closing the window already ran the router page's unload
   // teardown (hide OBS → drop Decart); this just stops triggers + HTTP.
   void local?.stop();
+  link?.stop();
 });
 
 // macOS convention would keep apps alive with no windows; for a streaming

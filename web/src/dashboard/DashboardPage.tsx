@@ -1,58 +1,63 @@
 // Streamer dashboard v0 (hosted) — plan M4: per-channel settings + tip
 // connect + the hijack ledger. Session model: the OAuth callback redirects
-// here with #refresh=…; we rotate it immediately (refresh tokens are
-// single-use) and keep the access token in memory, the new refresh in
-// localStorage. No cookie auth — everything is explicit Bearer calls.
+// here with #code=… (a single-use, ~60s exchange code — never the refresh
+// token itself, which would sit in browser history); we redeem it once for a
+// session, keep the access token in memory and the refresh in localStorage,
+// and rotate the refresh on every later load (refresh tokens are
+// single-use). No cookie auth — every call goes through the session-
+// credential API client, which rotates once on a 401 and otherwise surfaces
+// the failure here instead of swallowing it.
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Settings } from "@rh/shared";
-import { PRESETS } from "@rh/shared";
-
-interface Session {
-  access: string;
-  refresh: string;
-  channelId: string;
-  login: string;
-}
-
-interface LedgerRow {
-  jobId: string;
-  source: string;
-  username: string;
-  amountUsd: number;
-  durationSec: number;
-  prompt: string;
-  outcome: string;
-  reason: string | null;
-  createdAt: number;
-}
+import {
+  ApiError,
+  createApiClient,
+  redeemExchangeCode,
+  rotateRefresh,
+  type ApiClient,
+  type LedgerRow,
+  type SessionTokens,
+} from "../lib/apiClient.js";
+import { GuardrailsEditor } from "../features/GuardrailsEditor.js";
 
 const REFRESH_KEY = "rhDashRefresh";
 
-async function rotate(refresh: string): Promise<Session | null> {
-  const res = await fetch("/auth/refresh", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ refresh }),
-  });
-  if (!res.ok) return null;
-  const s = (await res.json()) as Session;
-  localStorage.setItem(REFRESH_KEY, s.refresh);
-  return s;
+/** Persist (or drop) the refresh token. On refusal the stored refresh is
+ *  dropped: it is either burned (rotation is single-use), expired, or
+ *  revoked, and retrying it on every page load would just be a silent 401
+ *  loop until the user happens to sign in again. */
+function remember(tokens: SessionTokens | null): SessionTokens | null {
+  if (tokens) localStorage.setItem(REFRESH_KEY, tokens.refresh);
+  else localStorage.removeItem(REFRESH_KEY);
+  return tokens;
 }
 
 export default function DashboardPage() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<SessionTokens | null>(null);
   const [checked, setChecked] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
-      // 1. fresh sign-in lands with #refresh=…
+      // 1. A fresh sign-in lands with #code=… — redeem it once. Clear the
+      //    hash first so a reload never re-presents a burned code.
       const hash = new URLSearchParams(location.hash.slice(1));
-      const fromHash = hash.get("refresh");
-      if (fromHash) history.replaceState(null, "", location.pathname);
-      const refresh = fromHash ?? localStorage.getItem(REFRESH_KEY);
-      if (refresh) setSession(await rotate(refresh));
+      const code = hash.get("code");
+      if (code) history.replaceState(null, "", location.pathname);
+      if (code) {
+        const s = remember(await redeemExchangeCode(code));
+        if (!s) setProblem("That sign-in link has expired — please sign in again.");
+        setSession(s);
+      } else {
+        // 2. Returning visit: rotate the stored refresh token.
+        const refresh = localStorage.getItem(REFRESH_KEY);
+        if (refresh) {
+          const s = remember(await rotateRefresh(refresh));
+          if (!s) setProblem("Your session has expired — please sign in again.");
+          setSession(s);
+        }
+      }
       setChecked(true);
     })();
   }, []);
@@ -69,6 +74,7 @@ export default function DashboardPage() {
       <div className="grid h-screen place-items-center">
         <div className="space-y-4 text-center">
           <h1 className="text-2xl font-bold">Reality Hijack — Dashboard</h1>
+          {problem && <p className="text-sm text-amber-400">{problem}</p>}
           <a
             href="/auth/twitch"
             className="inline-block rounded-lg bg-fuchsia-600 px-5 py-2 font-semibold hover:bg-fuchsia-500"
@@ -79,18 +85,32 @@ export default function DashboardPage() {
       </div>
     );
   }
-  return <Dashboard session={session} />;
+  return (
+    <Dashboard
+      session={session}
+      onSignedOut={(why) => {
+        remember(null);
+        setProblem(why);
+        setSession(null);
+      }}
+    />
+  );
 }
 
-function Dashboard({ session }: { session: Session }) {
-  const authed = useCallback(
-    (path: string, init?: RequestInit) =>
-      fetch(`/api/c/${encodeURIComponent(session.channelId)}${path}`, {
-        ...init,
-        headers: {
-          ...(init?.headers ?? {}),
-          authorization: `Bearer ${session.access}`,
-        },
+function Dashboard({
+  session,
+  onSignedOut,
+}: {
+  session: SessionTokens;
+  onSignedOut: (why: string) => void;
+}) {
+  // One client for the session's lifetime; rotations mutate its tokens in
+  // place and persist through `remember`, so React state needn't churn.
+  const client: ApiClient = useMemo(
+    () =>
+      createApiClient({
+        channel: session.channelId,
+        credential: { kind: "session", tokens: session, onRotate: remember },
       }),
     [session],
   );
@@ -99,38 +119,49 @@ function Dashboard({ session }: { session: Session }) {
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [slToken, setSlToken] = useState("");
   const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  /** Run a call; a 401 that survived rotation means the session is gone. */
+  async function guarded<T>(work: () => Promise<T>): Promise<T | undefined> {
+    try {
+      const out = await work();
+      setError(null);
+      return out;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        onSignedOut("Your session has expired — please sign in again.");
+        return undefined;
+      }
+      setError((e as Error).message);
+      return undefined;
+    }
+  }
 
   useEffect(() => {
-    void authed("/settings")
-      .then((r) => r.json())
-      .then(setSettings)
-      .catch(() => {});
-    void authed("/ledger")
-      .then((r) => r.json())
-      .then(setLedger)
-      .catch(() => {});
-  }, [authed]);
+    void guarded(client.getSettings).then((s) => s && setSettings(s));
+    void guarded(client.ledger).then((rows) => rows && setLedger(rows));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client]);
+
+  const flash = (text: string) => {
+    setNote(text);
+    setTimeout(() => setNote(null), 1500);
+  };
 
   async function save(patch: Partial<Settings>) {
-    const res = await authed("/settings", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-    setSettings(await res.json());
-    setNote("Saved.");
-    setTimeout(() => setNote(null), 1500);
+    const next = await guarded(() => client.saveSettings(patch));
+    if (next) {
+      setSettings(next);
+      flash("Saved.");
+    }
   }
 
   async function connectStreamlabs() {
-    await authed("/trigger/streamlabs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: slToken }),
-    });
-    setSlToken("");
-    setNote("Streamlabs connected.");
-    setTimeout(() => setNote(null), 1500);
+    const ok = await guarded(() => client.connectStreamlabs(slToken));
+    if (ok) {
+      setSlToken("");
+      flash("Streamlabs connected.");
+    }
   }
 
   const portal = `${location.origin}/c/${encodeURIComponent(session.login)}`;
@@ -152,6 +183,7 @@ function Dashboard({ session }: { session: Session }) {
           </p>
         </div>
         {note && <span className="text-sm text-emerald-400">{note}</span>}
+        {error && <span className="text-sm text-red-400">{error}</span>}
       </header>
 
       {settings && (
@@ -159,64 +191,9 @@ function Dashboard({ session }: { session: Session }) {
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
             Guardrails
           </h2>
-          <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-            <label className="space-y-1">
-              <span className="text-zinc-400">Min tip ($)</span>
-              <input
-                type="number"
-                min={1}
-                defaultValue={settings.minTipUSD}
-                onBlur={(e) => void save({ minTipUSD: Number(e.target.value) })}
-                className="w-full rounded bg-zinc-900 px-2 py-1"
-              />
-            </label>
-            <label className="space-y-1">
-              <span className="text-zinc-400">Max duration (s)</span>
-              <input
-                type="number"
-                min={1}
-                defaultValue={settings.maxDurationSec}
-                onBlur={(e) =>
-                  void save({ maxDurationSec: Number(e.target.value) })
-                }
-                className="w-full rounded bg-zinc-900 px-2 py-1"
-              />
-            </label>
-            <label className="mt-5 flex items-center gap-2">
-              <input
-                type="checkbox"
-                defaultChecked={settings.allowCustomPrompts}
-                onChange={(e) =>
-                  void save({ allowCustomPrompts: e.target.checked })
-                }
-              />
-              <span className="text-zinc-300">Custom prompts</span>
-            </label>
-          </div>
-          <div className="mt-3">
-            <span className="text-xs text-zinc-500">Enabled presets</span>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() =>
-                    void save({
-                      enabledPresetIds: settings.enabledPresetIds.includes(p.id)
-                        ? settings.enabledPresetIds.filter((x) => x !== p.id)
-                        : [...settings.enabledPresetIds, p.id],
-                    })
-                  }
-                  className={`rounded-full px-3 py-1 text-xs ${
-                    settings.enabledPresetIds.includes(p.id)
-                      ? "bg-emerald-600"
-                      : "bg-zinc-800 text-zinc-400"
-                  }`}
-                >
-                  {p.emoji} {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Hosted: every change autosaves — the channel row is the source
+              of truth and the engine reads it fresh on the next tip. */}
+          <GuardrailsEditor settings={settings} onChange={(p) => void save(p)} columns={4} />
         </section>
       )}
 

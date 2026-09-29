@@ -5,23 +5,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AnyMsg, RouterState, Settings, StatusSnapshot } from "@rh/shared";
-import { PRESETS } from "@rh/shared";
 import { api, type RouterConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
 import { LoopbackSender } from "../lib/loopback.js";
+import { GuardrailsEditor } from "../features/GuardrailsEditor.js";
+import { DesktopCredentials } from "../features/DesktopCredentials.js";
 import { RouterMachine } from "./stateMachine.js";
+import { browserPorts } from "./ports.js";
 import { acquireCamera, listCameras } from "./decartSession.js";
 
 const STATE_COLOR: Record<RouterState, string> = {
   OFFLINE: "bg-zinc-600",
-  ARMING: "bg-amber-500",
   IDLE: "bg-emerald-600",
   AUTHORIZING: "bg-sky-500",
   CONNECTING: "bg-sky-500",
   BUFFERING: "bg-indigo-500",
   LIVE: "bg-fuchsia-600",
   TEARDOWN: "bg-amber-500",
-  ERROR: "bg-red-600",
 };
 
 export default function RouterPage() {
@@ -47,7 +47,7 @@ export default function RouterPage() {
     const hub = new HubSocket("router").connect();
     hubRef.current = hub;
     const sender = new LoopbackSender(hub);
-    const machine = new RouterMachine(hub, sender, {
+    const machine = new RouterMachine(browserPorts(hub, sender), {
       onState: (s, rem) => {
         setState(s);
         setRemaining(rem);
@@ -88,14 +88,15 @@ export default function RouterPage() {
       if (e.key === "Escape") void panic();
     };
     window.addEventListener("keydown", onKey);
-    const onUnload = () => machine.dispose();
+    const onUnload = () => void machine.dispose();
     window.addEventListener("pagehide", onUnload);
 
     return () => {
       off();
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pagehide", onUnload);
-      machine.dispose();
+      void machine.dispose();
+      sender.dispose();
       hub.close();
     };
   }, []);
@@ -231,13 +232,13 @@ export default function RouterPage() {
         {/* Right: manual fire + guardrail settings + log */}
         <section className="space-y-4">
           <ManualHijackPanel
-            armed={state !== "OFFLINE" && state !== "ARMING"}
+            armed={state !== "OFFLINE"}
             busy={state !== "IDLE"}
             state={state}
             onFired={(outcome) => pushLog(`manual hijack → ${outcome}`)}
           />
           <SettingsPanel onSaved={(s) => pushLog(`settings saved (min $${s.minTipUSD}, max ${s.maxDurationSec}s)`)} />
-          <AppKeysPanel />
+          <DesktopCredentials />
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
               Event log
@@ -336,100 +337,6 @@ function ManualHijackPanel({
   );
 }
 
-/** Desktop-app credential panel — renders only inside the Electron shell
- *  (window.rhDesktop from the preload). Secrets are write-only: the app
- *  reports back booleans, never values, and empty fields leave stored
- *  secrets untouched. Saving relaunches so the bridge picks the keys up. */
-interface RhDesktop {
-  keysStatus(): Promise<Record<string, boolean>>;
-  saveKeys(keys: Record<string, string>): Promise<void>;
-  relaunch(): Promise<void>;
-}
-
-function AppKeysPanel() {
-  const desktop = (window as { rhDesktop?: RhDesktop }).rhDesktop;
-  const [status, setStatus] = useState<Record<string, boolean> | null>(null);
-  const [form, setForm] = useState({
-    decartApiKey: "",
-    streamlabsToken: "",
-    obsWsUrl: "",
-    obsWsPassword: "",
-  });
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    desktop?.keysStatus().then(setStatus).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (!desktop) return null;
-
-  const field = (
-    key: keyof typeof form,
-    label: string,
-    placeholder: string,
-  ) => (
-    <label className="space-y-1">
-      <span className="flex items-center gap-2 text-zinc-400">
-        {label}
-        {status && (
-          <span
-            className={`rounded-full px-1.5 text-[10px] ${status[key] ? "bg-emerald-700" : "bg-zinc-700"}`}
-          >
-            {status[key] ? "set" : "not set"}
-          </span>
-        )}
-      </span>
-      <input
-        type="password"
-        value={form[key]}
-        placeholder={placeholder}
-        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-        className="w-full rounded bg-zinc-900 px-2 py-1"
-      />
-    </label>
-  );
-
-  async function save() {
-    if (!desktop) return;
-    setSaving(true);
-    try {
-      await desktop.saveKeys(form);
-      await desktop.relaunch();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const dirty = Object.values(form).some((v) => v.trim());
-
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
-        App credentials
-      </h3>
-      <p className="mb-3 text-xs text-zinc-500">
-        Stored in your OS keychain. Leave a field blank to keep its current
-        value. (These disappear once accounts go live — the hosted service
-        will hold the keys.)
-      </p>
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        {field("decartApiKey", "Decart API key", "dct_…")}
-        {field("streamlabsToken", "Streamlabs socket token", "eyJ…")}
-        {field("obsWsUrl", "OBS WebSocket URL", "auto-discovered")}
-        {field("obsWsPassword", "OBS WebSocket password", "auto-discovered")}
-      </div>
-      <button
-        onClick={() => void save()}
-        disabled={!dirty || saving}
-        className="mt-4 rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-semibold hover:bg-sky-500 disabled:opacity-40"
-      >
-        {saving ? "Saving…" : "Save & restart app"}
-      </button>
-    </div>
-  );
-}
-
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
@@ -439,31 +346,30 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Guardrails for the local rig: edit a draft, then Save — the streamer
+ *  typically adjusts several knobs at once before a stream, and a single
+ *  POST keeps the sidecar's settings.json write atomic. */
 function SettingsPanel({ onSaved }: { onSaved: (s: Settings) => void }) {
   const [s, setS] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getSettings().then(setS).catch(() => {});
+    api.getSettings().then(setS).catch((e) => setError((e as Error).message));
   }, []);
 
   if (!s) return null;
 
-  const patch = (p: Partial<Settings>) => setS({ ...s, ...p });
-  const togglePreset = (id: string) =>
-    patch({
-      enabledPresetIds: s.enabledPresetIds.includes(id)
-        ? s.enabledPresetIds.filter((x) => x !== id)
-        : [...s.enabledPresetIds, id],
-    });
-
   async function save() {
     if (!s) return;
     setSaving(true);
+    setError(null);
     try {
       const next = await api.saveSettings(s);
       setS(next);
       onSaved(next);
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -474,57 +380,7 @@ function SettingsPanel({ onSaved }: { onSaved: (s: Settings) => void }) {
       <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
         Guardrails
       </h3>
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        <label className="space-y-1">
-          <span className="text-zinc-400">Min tip ($)</span>
-          <input
-            type="number"
-            min={1}
-            value={s.minTipUSD}
-            onChange={(e) => patch({ minTipUSD: Number(e.target.value) })}
-            className="w-full rounded bg-zinc-900 px-2 py-1"
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="text-zinc-400">Max duration (s)</span>
-          <input
-            type="number"
-            min={1}
-            value={s.maxDurationSec}
-            onChange={(e) => patch({ maxDurationSec: Number(e.target.value) })}
-            className="w-full rounded bg-zinc-900 px-2 py-1"
-          />
-        </label>
-      </div>
-
-      <label className="mt-3 flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={s.allowCustomPrompts}
-          onChange={(e) => patch({ allowCustomPrompts: e.target.checked })}
-        />
-        <span className="text-zinc-300">Allow custom free-text prompts</span>
-      </label>
-
-      <div className="mt-3">
-        <span className="text-xs text-zinc-500">Enabled presets</span>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {PRESETS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => togglePreset(p.id)}
-              className={`rounded-full px-3 py-1 text-xs ${
-                s.enabledPresetIds.includes(p.id)
-                  ? "bg-emerald-600"
-                  : "bg-zinc-800 text-zinc-400"
-              }`}
-            >
-              {p.emoji} {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
+      <GuardrailsEditor settings={s} onChange={(p) => setS({ ...s, ...p })} />
       <button
         onClick={save}
         disabled={saving}
@@ -532,6 +388,7 @@ function SettingsPanel({ onSaved }: { onSaved: (s: Settings) => void }) {
       >
         {saving ? "Saving…" : "Save settings"}
       </button>
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
     </div>
   );
 }

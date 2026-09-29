@@ -4,33 +4,16 @@
 // process and deep-links back when something fails.
 
 import { useCallback, useEffect, useState } from "react";
+import type { DesktopBridge, DesktopSetupState } from "@rh/shared";
+import { desktopBridge } from "../lib/desktop.js";
 import { acquireCamera } from "../router/decartSession.js";
 
-interface SetupState {
-  cloudMode: boolean;
-  login: string | null;
-  cloudUrl: string;
-  obs: { discovery: string; connected: boolean };
-  keys: Record<string, boolean>;
-  port: number;
-  viewerUrl: string;
-  portalUrl: string | null;
-  autoLaunch: boolean;
-}
+// The wizard reads everything through the typed preload bridge
+// (shared/src/desktopBridge.ts) — no hand-declared window shape here.
+type SetupState = DesktopSetupState;
+type RhDesktopSetup = DesktopBridge;
 
-interface RhDesktopSetup {
-  setupState(): Promise<SetupState>;
-  signIn(): Promise<{ ok: boolean; login?: string }>;
-  signOut(): Promise<void>;
-  provisionObs(): Promise<{ ok: boolean; detail: string }>;
-  launchObs(): Promise<void>;
-  testHijack(prompt: string, durationSec: number): Promise<string>;
-  setAutoLaunch(enabled: boolean): Promise<void>;
-  openExternal(url: string): Promise<void>;
-}
-
-const desktop = () =>
-  (window as { rhDesktop?: RhDesktopSetup }).rhDesktop ?? null;
+const desktop = desktopBridge;
 
 const STEPS = [
   "Sign in",

@@ -10,7 +10,7 @@
 // creates a local fake channel and returns tokens. This keeps the entire
 // control plane verifiable while the real OAuth app application is pending.
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import { eq } from "drizzle-orm";
@@ -34,6 +34,46 @@ export interface SessionTokens {
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/** Constant-time string equality. A plain `!==` short-circuits on the first
+ *  differing byte, which leaks how much of a presented secret matched — not
+ *  practically exploitable over a network at hash length, but free to fix. */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+// ── One-time exchange codes (browser sign-in) ─────────────────────────────
+// The OAuth callback must hand the session to the dashboard SPA somehow. A
+// URL fragment never reaches a server, but it does land in browser history,
+// referrer-stripped-but-still-visible page JS, and any extension — so a
+// 30-day refresh token must not ride it. Instead the callback mints a random
+// code that is single-use and expires in seconds; the SPA redeems it via POST
+// once, and what lands in history is worthless a minute later. In-memory is
+// fine: a code only ever needs to survive one redirect on one process.
+
+const EXCHANGE_TTL_MS = 60 * 1000;
+const exchangeCodes = new Map<string, { tokens: SessionTokens; expiresAt: number }>();
+
+export function issueExchangeCode(tokens: SessionTokens): string {
+  // Opportunistic sweep so an abandoned sign-in never accumulates.
+  const now = Date.now();
+  for (const [k, v] of exchangeCodes) if (v.expiresAt <= now) exchangeCodes.delete(k);
+  const code = randomBytes(24).toString("base64url");
+  exchangeCodes.set(code, { tokens, expiresAt: now + EXCHANGE_TTL_MS });
+  return code;
+}
+
+/** Redeem a code exactly once; null if unknown, expired, or already used. */
+export function redeemExchangeCode(code: string): SessionTokens | null {
+  const entry = exchangeCodes.get(code);
+  if (!entry) return null;
+  exchangeCodes.delete(code); // burn on first touch, valid or not
+  if (entry.expiresAt <= Date.now()) return null;
+  return entry.tokens;
+}
 
 export async function issueSession(
   channelId: string,
@@ -67,7 +107,7 @@ export async function refreshSession(
     .from(refreshTokens)
     .where(eq(refreshTokens.id, id))
     .get();
-  if (!row || row.tokenHash !== sha256(refresh) || row.expiresAt < Date.now()) {
+  if (!row || !safeEqual(row.tokenHash, sha256(refresh)) || row.expiresAt < Date.now()) {
     return null;
   }
   db.delete(refreshTokens).where(eq(refreshTokens.id, id)).run();

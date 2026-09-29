@@ -19,6 +19,8 @@
     "start": "npm run build && npm run start --workspace sidecar",
     "dev:app": "npm run build && npm run dev --workspace app",
     "typecheck": "npm run typecheck --workspace shared && npm run typecheck --workspace core && npm run typecheck --workspace sidecar && npm run typecheck --workspace web && npm run typecheck --workspace app && npm run typecheck --workspace server",
+    "test": "npm run test --workspace core && npm run test --workspace web && npm run test --workspace server",
+    "check": "npm run typecheck && npm run test",
     "dev:server": "npm run dev --workspace server"
   },
   "devDependencies": {

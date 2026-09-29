@@ -5,26 +5,29 @@
 //     userData, keys from the app's settings UI)
 //
 // Everything host-specific arrives through LocalServerHost; nothing in here
-// reads process.env or touches module-level singletons. The returned handles
-// (engine, hub, obs) let the Electron host wire tray status, the panic
-// hotkey, and OBS provisioning without going through HTTP.
+// reads process.env or touches module-level singletons. The money path
+// (engine ↔ hub) comes from @rh/core's createRuntime and the channel API from
+// buildApiRouter — the same two calls the hosted control plane makes per
+// channel. What's left here is what is genuinely local: OBS control, the
+// loopback bind, static serving, and the install-token auth gate.
 
 import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import express from "express";
-import { getPreset, PRESETS, type Settings } from "@rh/shared";
+import type { RouterState, Settings, StatusSnapshot } from "@rh/shared";
 import {
-  CorrelationStore,
-  Engine,
-  Hub,
-  checkPrompt,
+  buildApiRouter,
+  createRuntime,
   createStreamlabsAdapter,
+  gatedMint,
+  memoryLedger,
   mintClientToken,
-  parseFakeTip,
   log,
   warn,
-  type EngineEmit,
+  type ApiContext,
+  type Engine,
+  type Hub,
   type TriggerAdapter,
 } from "@rh/core";
 import { ObsController } from "./obs.js";
@@ -36,6 +39,10 @@ export interface LocalServerHost {
   streamlabsToken: string;
   obsWsUrl: string;
   obsWsPassword: string;
+  /** The OBS scene + Browser Source the hijack overlay lives in. Machine
+   *  wiring, not streamer policy — so it's host config, not Settings. */
+  obsScene: string;
+  obsSource: string;
   /** Live settings access — host owns persistence. */
   getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;
@@ -53,17 +60,21 @@ export interface LocalServerHost {
    *  alongside the local engine — the cloud engine owns the money logic, the
    *  local one just idles. */
   observer?: {
-    onRouterState(
-      state: import("@rh/shared").RouterState,
-      jobId?: string,
-      remainingSec?: number,
-    ): void;
+    onRouterState(state: RouterState, jobId?: string, remainingSec?: number): void;
     onJobDone(jobId: string, ok: boolean, reason?: string): void;
   };
   /** Cloud mode (Electron): delegate ek_ minting to the control plane (which
    *  job-gates and budget-caps it). When set, /api/token never touches a
    *  local key — there is none. */
   mintProxy?: (durationSec: number) => Promise<string>;
+  /** Cloud mode (Electron): the money authority is remote, so panic and the
+   *  status the tray/updater read must come from the control plane — the
+   *  local engine never holds the active job in cloud mode, and pausing it
+   *  would be a no-op that *looks* like a panic. */
+  moneyProxy?: {
+    togglePause(): Promise<boolean>;
+    status(): StatusSnapshot;
+  };
 }
 
 export interface LocalServer {
@@ -73,45 +84,71 @@ export interface LocalServer {
   obs: ObsController;
   /** True when a real dct_ key is present (otherwise tokens mint as "MOCK"). */
   decartEnabled: boolean;
+  /** Panic toggle against whichever engine owns the money path (local or
+   *  cloud). Every panic surface — HTTP, hotkey, tray — goes through here. */
+  togglePause(): Promise<boolean>;
+  /** Status from whichever engine owns the money path. */
+  status(): StatusSnapshot;
   /** Start listening + best-effort OBS connect + trigger adapters. */
   start(port: number): void;
-  /** Stop triggers and close the HTTP server (Electron quit path). */
+  /** Stop triggers, dispose the engine, drop sockets, close the HTTP server. */
   stop(): Promise<void>;
 }
 
 export function createLocalServer(host: LocalServerHost): LocalServer {
   const decartEnabled = host.decartApiKey.startsWith("dct_");
   const obs = new ObsController(host.obsWsUrl, host.obsWsPassword);
-  const { upload, publicUploadUrl, deleteUpload } = createUploads(
-    host.uploadsDir,
-  );
+  const { upload, publicUploadUrl, deleteUpload } = createUploads(host.uploadsDir);
 
   const app = express();
   // Deliberately NO cors() here: every legitimate consumer is same-origin
   // (dev pages reach us through the Vite proxy; in production/Electron we
   // serve the pages ourselves). A wildcard CORS header would instead invite
   // any website open in the streamer's browser to drive the money/panic/OBS
-  // endpoints. Browser WS connections aren't CORS-gated, so role auth on the
-  // hub (per-boot token) is the remaining hardening — tracked for M2 polish.
+  // endpoints. Browser WS connections aren't CORS-gated, so the hub gates
+  // privileged roles on the install token instead.
   app.use(express.json());
+  // The HTTP server exists before the routes so the hub can attach /ws now;
+  // Express resolves routes per request, so registration order below is free.
+  const server = createServer(app);
 
-  // ── Engine ↔ Hub wiring (late-bound to break the construction cycle) ─────
-  let hub: Hub;
-  const correlation = new CorrelationStore();
-  const engineEmit: EngineEmit = {
-    dispatchJob: (job) => hub.dispatchJob(job),
-    cancelJob: (jobId, reason) => hub.cancelJob(jobId, reason),
-    status: (snap) => hub.broadcastStatus(snap),
-    submissionUpdate: (code, status) => hub.sendSubmissionUpdate(code, status),
+  // ── The money path ───────────────────────────────────────────────────────
+  const runtime = createRuntime({
+    getSettings: host.getSettings,
+    server,
+    hub: { authToken: host.authToken },
+    tag: "server",
+    hooks: {
+      onRouterState: (s, j, r) => host.observer?.onRouterState(s, j, r),
+      onJobDone: (j, ok, r) => host.observer?.onJobDone(j, ok, r),
+    },
+  });
+  const { engine, hub } = runtime;
+
+  const togglePause = () =>
+    host.moneyProxy ? host.moneyProxy.togglePause() : Promise.resolve(engine.togglePause());
+  const status = () => host.moneyProxy?.status() ?? engine.snapshot();
+
+  // One-per-job for this process; the hosted plane adds a persistent budget.
+  const mintLedger = memoryLedger();
+  const ctx: ApiContext = {
+    runtime,
+    updateSettings: host.updateSettings,
+    decartEnabled,
+    mint: (durationSec, origin) =>
+      host.mintProxy
+        ? host.mintProxy(durationSec) // the control plane gates it
+        : gatedMint(engine, durationSec, (d) => mintClientToken(host.decartApiKey, d, origin), mintLedger),
+    togglePause,
+    imageUrl: (f) => publicUploadUrl(f.filename),
+    discardUpload: (f) => deleteUpload(publicUploadUrl(f.filename)),
   };
-  const engine = new Engine(correlation, engineEmit, host.getSettings);
 
   /** Gate for privileged endpoints. Public surface stays: health, config,
    *  presets, submissions, uploads, static pages. */
   const requireAuth: express.RequestHandler = (req, res, next) => {
     if (!host.authToken) return next(); // CLI demo rig — ungated
-    const provided =
-      req.header("x-rh-auth") ?? String(req.query.auth ?? "");
+    const provided = req.header("x-rh-auth") ?? String(req.query.auth ?? "");
     if (provided === host.authToken) return next();
     res.status(401).json({ error: "auth required" });
   };
@@ -119,152 +156,36 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   // ── HTTP API ─────────────────────────────────────────────────────────────
 
   app.get("/api/health", (_req, res) => {
-    res.json({
-      ok: true,
-      decartEnabled,
-      streamlabs: Boolean(host.streamlabsToken),
-    });
-  });
-
-  /** Public config the portal needs (no secrets). */
-  app.get("/api/config", (_req, res) => {
-    const s = host.getSettings();
-    const enabled = PRESETS.filter((p) => s.enabledPresetIds.includes(p.id));
-    res.json({
-      presets: enabled,
-      allowCustomPrompts: s.allowCustomPrompts,
-      minTipUSD: s.minTipUSD,
-      maxDurationSec: s.maxDurationSec,
-      secondsPerUSD: s.secondsPerUSD,
-      decartEnabled,
-    });
+    res.json({ ok: true, decartEnabled, streamlabs: Boolean(host.streamlabsToken) });
   });
 
   /** Router-only wiring (decart mode + OBS target). Localhost only. */
   app.get("/api/router-config", requireAuth, (_req, res) => {
-    const s = host.getSettings();
     res.json({
       decartEnabled,
-      obsScene: s.obsScene,
-      obsSource: s.obsSource,
+      obsScene: host.obsScene,
+      obsSource: host.obsSource,
       obsConnected: obs.isConnected(),
     });
-  });
-
-  /** Mint a per-job Decart client token (ek_) capped to the paid duration. */
-  app.post("/api/token", requireAuth, async (req, res) => {
-    const durationSec = Number(req.body?.durationSec);
-    if (!Number.isFinite(durationSec) || durationSec <= 0) {
-      return res.status(400).json({ error: "durationSec required" });
-    }
-    const origin = String(req.body?.origin ?? "");
-    try {
-      const token = host.mintProxy
-        ? await host.mintProxy(durationSec)
-        : await mintClientToken(host.decartApiKey, durationSec, origin);
-      res.json({ token });
-    } catch (e) {
-      res.status(502).json({ error: (e as Error).message });
-    }
   });
 
   /** Toggle the OBS Browser Source that shows the AI viewer page. */
   app.post("/api/obs/toggle", requireAuth, async (req, res) => {
     const visible = Boolean(req.body?.visible);
-    const s = host.getSettings();
     try {
-      await obs.setVisible(s.obsScene, s.obsSource, visible);
+      await obs.setVisible(host.obsScene, host.obsSource, visible);
       res.json({ ok: true, visible });
     } catch (e) {
       res.status(502).json({ ok: false, error: (e as Error).message });
     }
   });
 
-  /** Full settings for the streamer control panel. */
-  app.get("/api/settings", requireAuth, (_req, res) => res.json(host.getSettings()));
-
-  app.post("/api/settings", requireAuth, (req, res) => {
-    const next = host.updateSettings(req.body ?? {});
-    engineEmit.status(engine.snapshot()); // reflect any wiring changes
-    res.json(next);
-  });
-
-  app.get("/api/presets", (_req, res) => res.json(PRESETS));
-
-  /** Viewer submission: prompt + optional image, before tipping. */
-  app.post("/api/submissions", upload.single("image"), (req, res) => {
-    const s = host.getSettings();
-    const presetId = String(req.body.presetId ?? "").trim() || null;
-    const customPrompt = String(req.body.prompt ?? "").trim();
-    const tipperName = String(req.body.tipperName ?? "").trim() || null;
-    const imageUrl = req.file ? publicUploadUrl(req.file.filename) : null;
-
-    const fail = (code: number, reason: string) => {
-      deleteUpload(imageUrl);
-      res.status(code).json({ error: reason });
-    };
-
-    let finalPrompt: string;
-    let finalPresetId: string | null;
-
-    if (presetId) {
-      const preset = getPreset(presetId);
-      if (!preset) return fail(400, "unknown preset");
-      if (!s.enabledPresetIds.includes(presetId)) {
-        return fail(403, "preset not enabled by streamer");
-      }
-      finalPrompt = preset.prompt; // resolved server-side; client can't spoof it
-      finalPresetId = preset.id;
-    } else if (customPrompt) {
-      if (!s.allowCustomPrompts) {
-        return fail(403, "custom prompts are disabled by the streamer");
-      }
-      const mod = checkPrompt(customPrompt, s.blocklistExtra);
-      if (!mod.ok) return fail(422, mod.reason ?? "prompt rejected");
-      finalPrompt = customPrompt;
-      finalPresetId = null;
-    } else {
-      return fail(400, "provide a preset or a custom prompt");
-    }
-
-    const sub = correlation.add({
-      prompt: finalPrompt,
-      presetId: finalPresetId,
-      tipperName,
-      imageUrl,
-    });
-    res.json({ code: sub.code, expiresAt: sub.expiresAt });
-  });
-
-  /** Streamer panic toggle (also bound to a hotkey on the router page). */
-  app.post("/api/panic", requireAuth, (_req, res) => {
-    const paused = engine.togglePause();
-    res.json({ paused });
-  });
-
-  /** Streamer console trigger — fire a hijack directly from the router page.
-   *  Runs the identical job pipeline (queue → state machine → OBS), minus
-   *  payment/matching. Localhost-only by nature (server binds locally). */
-  app.post("/api/dev/hijack", requireAuth, (req, res) => {
-    const prompt = String(req.body?.prompt ?? "").trim();
-    const durationSec = Number(req.body?.durationSec ?? 15);
-    if (!prompt) return res.status(400).json({ error: "prompt required" });
-    if (!Number.isFinite(durationSec) || durationSec <= 0) {
-      return res.status(400).json({ error: "durationSec must be positive" });
-    }
-    const outcome = engine.manual(prompt, durationSec);
-    log("manual", `${durationSec}s "${prompt.slice(0, 40)}…" → ${outcome}`);
-    res.json({ ok: true, outcome });
-  });
-
-  /** Dev trigger — fakes a tip so the whole path runs without Streamlabs. */
-  app.post("/api/dev/fake-tip", requireAuth, (req, res) => {
-    const parsed = parseFakeTip(req.body);
-    if ("error" in parsed) return res.status(400).json(parsed);
-    const outcome = engine.onTip(parsed);
-    log("fake-tip", `$${parsed.amount} "${parsed.message}" → ${outcome}`);
-    res.json({ ok: true, outcome });
-  });
+  // config · presets · submissions · settings · token · panic · dev/* —
+  // the channel API shared with the hosted plane.
+  app.use(
+    "/api",
+    buildApiRouter({ context: () => ctx, requireAuth, upload: upload.single("image") }),
+  );
 
   // Serve uploaded reference images (also reachable via the Vite proxy).
   app.use("/uploads", express.static(host.uploadsDir));
@@ -293,25 +214,6 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     log("server", "web/dist not found — dev mode, expecting the Vite server");
   }
 
-  // ── Server + Hub ─────────────────────────────────────────────────────────
-  const server = createServer(app);
-  hub = new Hub(server, {
-    onRouterState: (state, jobId, rem) => {
-      engine.setRouterState(state, jobId, rem);
-      host.observer?.onRouterState(state, jobId, rem);
-    },
-    onJobDone: (jobId, ok, reason) => {
-      engine.onJobDone(jobId, ok, reason);
-      host.observer?.onJobDone(jobId, ok, reason);
-    },
-    onRouterDisconnected: () => {
-      warn("server", "router disconnected");
-      engine.setRouterState("OFFLINE");
-      host.observer?.onRouterState("OFFLINE");
-    },
-    getStatus: () => engine.snapshot(),
-  }, { authToken: host.authToken });
-
   // ── Triggers ─────────────────────────────────────────────────────────────
   const triggers: TriggerAdapter[] = [];
   if (host.streamlabsToken) {
@@ -324,6 +226,8 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     hub,
     obs,
     decartEnabled,
+    togglePause,
+    status,
     start(port: number) {
       for (const t of triggers) {
         t.start((tip) => {
@@ -348,6 +252,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     },
     async stop() {
       for (const t of triggers) t.stop();
+      runtime.dispose("server stopping");
       await new Promise<void>((done) => server.close(() => done()));
     },
   };

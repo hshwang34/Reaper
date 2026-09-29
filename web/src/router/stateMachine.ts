@@ -9,17 +9,19 @@
 // The buffering gate is the crux: OBS is unhidden ONLY after the viewer page
 // reports N verified decoded frames (viewer:frames-ok), never on a timer or
 // onloadeddata — a WebRTC stream can fire those while still black.
+//
+// Concurrency model: every async continuation (token mint, image fetch, Decart
+// connect, OBS toggle) captures the job *generation* it started under and bails
+// if a teardown has bumped it since. That is what makes teardown genuinely
+// idempotent — a late callback from a job that was cancelled mid-await can't
+// re-enter the machine, flap router:state, or (worst) unhide OBS after the
+// session it belonged to was already torn down.
+//
+// Side effects go through MachinePorts (ports.ts) so all of the above is
+// asserted by web/test/stateMachine.test.ts rather than promised in prose.
 
 import type { HijackJob, RouterState } from "@rh/shared";
-import { api } from "../lib/api.js";
-import type { HubSocket } from "../lib/ws.js";
-import { LoopbackSender } from "../lib/loopback.js";
-import { DecartSession } from "./decartSession.js";
-
-const CONNECT_TIMEOUT_MS = 10_000;
-const BUFFER_TIMEOUT_MS = 8_000;
-const WATCHDOG_EXTRA_MS = 10_000; // beyond paid duration
-const WIPE_MS = 420; // glitch-wipe cover for the cut
+import { DEFAULT_TIMEOUTS, type MachinePorts, type MachineTimeouts } from "./ports.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -36,10 +38,12 @@ export class RouterMachine {
   private state: RouterState = "OFFLINE";
   private job: HijackJob | null = null;
   private camera: MediaStream | null = null;
-  private decart = new DecartSession();
   private tearingDown = false;
   private wentLive = false;
   private gotStream = false;
+  /** Bumped on every job start and every teardown; see header comment. */
+  private gen = 0;
+  private t: MachineTimeouts;
 
   private liveInterval?: ReturnType<typeof setInterval>;
   private watchdog?: ReturnType<typeof setTimeout>;
@@ -47,10 +51,12 @@ export class RouterMachine {
   private connectTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
-    private hub: HubSocket,
-    private sender: LoopbackSender,
+    private ports: MachinePorts,
     private cb: MachineCallbacks,
-  ) {}
+    timeouts: Partial<MachineTimeouts> = {},
+  ) {
+    this.t = { ...DEFAULT_TIMEOUTS, ...timeouts };
+  }
 
   getState(): RouterState {
     return this.state;
@@ -68,13 +74,18 @@ export class RouterMachine {
 
   private setState(state: RouterState, remainingSec?: number): void {
     this.state = state;
-    this.hub.send({
+    this.ports.send({
       t: "router:state",
       state,
       jobId: this.job?.jobId,
       remainingSec,
     });
     this.cb.onState(state, remainingSec);
+  }
+
+  /** True when a teardown has happened since generation `g` was captured. */
+  private stale(g: number): boolean {
+    return g !== this.gen;
   }
 
   // ── Job entry ────────────────────────────────────────────────────────────
@@ -85,9 +96,14 @@ export class RouterMachine {
       return;
     }
     if (this.job) {
-      this.cb.log("busy — ignoring overlapping job");
+      // Should be unreachable (the engine runs one job at a time with a
+      // cooldown), but if it ever happens, fail it back explicitly rather
+      // than leaving the engine to wait out its deadline backstop.
+      this.cb.log("busy — rejecting overlapping job");
+      this.ports.send({ t: "job:done", jobId: job.jobId, ok: false, reason: "router busy" });
       return;
     }
+    const g = ++this.gen;
     this.job = job;
     this.tearingDown = false;
     this.wentLive = false;
@@ -100,36 +116,37 @@ export class RouterMachine {
     this.setState("AUTHORIZING");
     let token: string;
     try {
-      token = (await api.mintToken(job.durationSec)).token;
+      token = await this.ports.mintToken(job.durationSec);
     } catch (e) {
+      if (this.stale(g)) return;
       return this.abort(`token mint failed: ${(e as Error).message}`);
     }
-    if (!this.job) return; // cancelled during await
+    if (this.stale(g)) return; // cancelled during await
 
     // 2. CONNECTING — open Decart (or MOCK passthrough).
     this.setState("CONNECTING");
     let imageBlob: Blob | null = null;
     if (job.imageUrl) {
-      try {
-        imageBlob = await fetch(job.imageUrl).then((r) => r.blob());
-      } catch {
-        this.cb.log("reference image fetch failed — continuing without it");
-      }
+      imageBlob = await this.ports.fetchImage(job.imageUrl);
+      if (!imageBlob) this.cb.log("reference image fetch failed — continuing without it");
+      if (this.stale(g)) return;
     }
 
-    this.connectTimer = setTimeout(
-      () => this.abort("connect timeout"),
-      CONNECT_TIMEOUT_MS,
-    );
+    this.connectTimer = setTimeout(() => this.abort("connect timeout"), this.t.connectMs);
     try {
-      await this.decart.start({
+      await this.ports.decart.start({
         token,
         prompt: job.prompt,
         imageBlob,
         camera: this.camera,
-        onRemoteStream: (stream) => this.onRemoteStream(stream),
+        onRemoteStream: (stream) => {
+          if (!this.stale(g)) void this.onRemoteStream(stream);
+        },
       });
     } catch (e) {
+      // A connect that fails *after* the timeout already aborted us is old
+      // news — the DecartSession generation guard has cleaned it up.
+      if (this.stale(g)) return;
       clearTimeout(this.connectTimer);
       return this.abort(`decart connect failed: ${(e as Error).message}`);
     }
@@ -140,6 +157,7 @@ export class RouterMachine {
     this.gotStream = true;
     clearTimeout(this.connectTimer);
     const job = this.job;
+    const g = this.gen;
 
     // Confirm the Decart stream actually carries a live video track, and mirror
     // it into the router's local AI preview so it's visible without OBS.
@@ -153,11 +171,9 @@ export class RouterMachine {
 
     // 3. BUFFERING — push to the viewer, wait for verified frames.
     this.setState("BUFFERING");
-    await this.sender.start(job.jobId, stream);
-    this.bufferTimer = setTimeout(
-      () => this.abort("no verified frames"),
-      BUFFER_TIMEOUT_MS,
-    );
+    await this.ports.sender.start(job.jobId, stream);
+    if (this.stale(g)) return;
+    this.bufferTimer = setTimeout(() => this.abort("no verified frames"), this.t.bufferMs);
   }
 
   /** Called by RouterPage when the viewer confirms N decoded frames. */
@@ -169,13 +185,21 @@ export class RouterMachine {
   }
 
   private async goLive(job: HijackJob): Promise<void> {
+    const g = this.gen;
     // 4. LIVE — unhide OBS, start the strict countdown.
     try {
-      await api.obsToggle(true);
+      await this.ports.setObsVisible(true);
     } catch (e) {
+      if (this.stale(g)) return;
       return this.abort(`obs toggle failed: ${(e as Error).message}`);
     }
-    if (!this.job) return;
+    if (this.stale(g)) {
+      // Panic/cancel landed while the unhide request was in flight. Teardown
+      // already ran with wentLive=false (so it did NOT hide OBS) — re-hide
+      // now or the overlay stays up on a source with no stream behind it.
+      void this.ports.setObsVisible(false).catch(() => {});
+      return;
+    }
     this.wentLive = true;
 
     // Count down against an absolute wall-clock deadline, not a tick counter:
@@ -203,7 +227,7 @@ export class RouterMachine {
     // Watchdog backstop in case the interval is starved (heavy tab throttling).
     this.watchdog = setTimeout(
       () => this.teardown(true, "watchdog"),
-      job.durationSec * 1000 + WATCHDOG_EXTRA_MS,
+      job.durationSec * 1000 + this.t.watchdogExtraMs,
     );
   }
 
@@ -215,14 +239,17 @@ export class RouterMachine {
   }
 
   private abort(reason: string): void {
+    if (!this.job) return; // nothing to abort — a stale timer or callback
     this.cb.log(`ABORT: ${reason}`);
     void this.teardown(false, reason);
   }
 
-  /** Idempotent teardown — safe to call from any state, any number of times. */
+  /** Idempotent teardown — safe to call from any state, any number of times.
+   *  No-op when no job is in flight, so late callbacks can't flap state. */
   private async teardown(ok: boolean, reason: string): Promise<void> {
-    if (this.tearingDown) return;
+    if (this.tearingDown || !this.job) return;
     this.tearingDown = true;
+    this.gen += 1; // invalidate every in-flight continuation of this job
     const job = this.job;
 
     clearInterval(this.liveInterval);
@@ -233,38 +260,49 @@ export class RouterMachine {
     this.setState("TEARDOWN");
 
     // Cover the cut with the viewer's glitch-wipe, but only if something was
-    // actually on screen (i.e. we reached LIVE).
+    // actually on screen (i.e. we reached LIVE). Hide OBS BEFORE dropping the
+    // Decart session so the source never shows a dead stream.
     if (this.wentLive) {
-      this.sender.sendReset();
-      await sleep(WIPE_MS);
+      this.ports.sender.sendReset();
+      await sleep(this.t.wipeMs);
       try {
-        await api.obsToggle(false);
+        await this.ports.setObsVisible(false);
       } catch {
         /* best effort — never block teardown on OBS */
       }
     }
 
-    this.decart.disconnect();
-    this.sender.stop();
+    this.ports.decart.disconnect();
+    this.ports.sender.stop();
     this.cb.onAiStream?.(null);
 
-    if (job) {
-      this.hub.send({ t: "job:done", jobId: job.jobId, ok, reason });
-    }
+    this.ports.send({ t: "job:done", jobId: job.jobId, ok, reason });
     this.cb.log(`teardown (${ok ? "ok" : "failed"}: ${reason})`);
 
     this.job = null;
     this.tearingDown = false;
     this.wentLive = false;
     this.gotStream = false;
-    this.setState("IDLE");
+    // If dispose() released the camera while we were mid-teardown, we are
+    // OFFLINE, not IDLE — reporting IDLE would invite the engine to dispatch
+    // the next job to a router that can't run it.
+    this.setState(this.camera ? "IDLE" : "OFFLINE");
   }
 
-  /** Full stop: release the camera (page unload / disarm). */
-  dispose(): void {
-    void this.teardown(false, "disposed");
-    this.camera?.getTracks().forEach((t) => t.stop());
+  /** Full stop: release the camera (page unload / disarm). Resolves once the
+   *  hide→disconnect sequence has finished. */
+  dispose(): Promise<void> {
+    const camera = this.camera;
     this.camera = null;
+    if (this.job) {
+      // teardown() ends in OFFLINE (camera is already null). Release the
+      // camera only once the hide→disconnect sequence has finished.
+      return this.teardown(false, "disposed").finally(() => {
+        camera?.getTracks().forEach((t) => t.stop());
+      });
+    }
+    camera?.getTracks().forEach((t) => t.stop());
     this.setState("OFFLINE");
+    return Promise.resolve();
   }
 }

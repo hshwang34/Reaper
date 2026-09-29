@@ -8,6 +8,16 @@ import { log, err } from "./log.js";
 
 const MODEL = "lucy-2.5";
 
+/** Headroom added to the paid duration for the token's maxSessionDuration:
+ *  covers connect + buffering + the wipe so a healthy job never gets cut by
+ *  its own cap. Budget ledgers must count `durationSec + SESSION_CAP_EXTRA_SEC`
+ *  — that is the most a token can ever bill. */
+export const SESSION_CAP_EXTRA_SEC = 15;
+
+/** Token validity window: mint→connect takes seconds; a leaked token is
+ *  useless after this. */
+export const TOKEN_TTL_SEC = 45;
+
 /**
  * Mint an ek_ client token scoped to lucy-2.5, with a 45s validity window and a
  * server-side session cap of durationSec + 15s. Returns "MOCK" when no real
@@ -35,12 +45,13 @@ export async function mintClientToken(
     // origin and can confirm Decart's matching against it (tracked in
     // docs/PHASE0.md live-verification).
     void origin;
+    const cap = durationSec + SESSION_CAP_EXTRA_SEC;
     const res = await client.tokens.create({
-      expiresIn: 45,
+      expiresIn: TOKEN_TTL_SEC,
       allowedModels: [MODEL],
-      constraints: { realtime: { maxSessionDuration: durationSec + 15 } },
+      constraints: { realtime: { maxSessionDuration: cap } },
     });
-    log("decart", `minted ek_ token, session cap ${durationSec + 15}s`);
+    log("decart", `minted ek_ token, session cap ${cap}s`);
     return res.apiKey;
   } catch (e) {
     err("decart", "token mint failed:", (e as Error).message);

@@ -5,7 +5,11 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { config as loadDotenv } from "dotenv";
-import { DEFAULT_SETTINGS, type Settings } from "@rh/shared";
+import {
+  DEFAULT_SETTINGS,
+  loadSettings as loadPersistedSettings,
+  type Settings,
+} from "@rh/shared";
 import { log, warn } from "./log.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -32,20 +36,16 @@ const settingsPath = resolve(__dirname, "..", "settings.json");
 let settings: Settings = loadSettings();
 
 function loadSettings(): Settings {
-  const base: Settings = {
-    ...DEFAULT_SETTINGS,
-    obsScene: env.obsScene,
-    obsSource: env.obsSource,
-  };
   if (existsSync(settingsPath)) {
     try {
-      const saved = JSON.parse(readFileSync(settingsPath, "utf8"));
-      return { ...base, ...saved };
+      // Validated on load: a stale file (e.g. one still carrying the OBS
+      // wiring keys that moved to .env) or a hand edit can't poison Settings.
+      return loadPersistedSettings(JSON.parse(readFileSync(settingsPath, "utf8")));
     } catch {
       warn("config", "settings.json unreadable — using defaults");
     }
   }
-  return base;
+  return { ...DEFAULT_SETTINGS };
 }
 
 export function getSettings(): Settings {
