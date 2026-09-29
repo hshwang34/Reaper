@@ -147,18 +147,40 @@ export function upsertChannel(
   login: string,
   displayName: string,
 ): void {
-  const existing = db.select().from(channels).where(eq(channels.id, id)).get();
-  if (existing) return;
-  db.insert(channels)
-    .values({
-      id,
-      login,
-      displayName,
-      settingsJson: JSON.stringify(DEFAULT_SETTINGS),
-      createdAt: Date.now(),
-    })
-    .run();
-  log("auth", `provisioned channel ${login} (${id})`);
+  login = login.toLowerCase();
+  db.transaction((tx) => {
+    // Twitch logins are renameable and get recycled. The row keyed by `id`
+    // (the immutable Twitch user id) is the truth, so a stale row still
+    // holding this login belongs to someone who renamed away from it — free
+    // the UNIQUE login for the current holder rather than letting the insert
+    // throw and wedge this user's sign-in forever.
+    const squatter = tx.select().from(channels).where(eq(channels.login, login)).get();
+    if (squatter && squatter.id !== id) {
+      tx.update(channels)
+        .set({ login: `${login}~${squatter.id}` })
+        .where(eq(channels.id, squatter.id))
+        .run();
+      warn("auth", `login ${login} moved from ${squatter.id} to ${id} (Twitch rename)`);
+    }
+    const existing = tx.select().from(channels).where(eq(channels.id, id)).get();
+    if (existing) {
+      // Keep the vanity URL (/c/:login) and display name tracking Twitch.
+      if (existing.login !== login || existing.displayName !== displayName) {
+        tx.update(channels).set({ login, displayName }).where(eq(channels.id, id)).run();
+      }
+      return;
+    }
+    tx.insert(channels)
+      .values({
+        id,
+        login,
+        displayName,
+        settingsJson: JSON.stringify(DEFAULT_SETTINGS),
+        createdAt: Date.now(),
+      })
+      .run();
+    log("auth", `provisioned channel ${login} (${id})`);
+  });
 }
 
 // ── Twitch OAuth ──────────────────────────────────────────────────────────

@@ -57,6 +57,10 @@ export interface HubOptions {
    *  Electron bridge relays them locally; anything arriving here is either a
    *  misconfigured client or an attack. */
   rejectLocalPlane?: boolean;
+  /** Local mode: vet the WS upgrade request before accepting it (the local
+   *  server refuses foreign Origins / non-loopback Hosts — WS handshakes
+   *  aren't CORS-gated, so this is the only place to do it). */
+  verifyRequest?: (req: IncomingMessage) => boolean;
 }
 
 const ROLES: ReadonlySet<string> = new Set<Role>(["portal", "router", "viewer"]);
@@ -90,7 +94,12 @@ export class Hub {
     private opts: HubOptions = {},
   ) {
     if (server) {
-      this.wss = new WebSocketServer({ server, path: "/ws" });
+      const verify = opts.verifyRequest;
+      this.wss = new WebSocketServer({
+        server,
+        path: "/ws",
+        ...(verify ? { verifyClient: (info: { req: IncomingMessage }) => verify(info.req) } : {}),
+      });
       this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
     }
   }
@@ -132,6 +141,18 @@ export class Hub {
 
     // Registration must come first.
     if (msg.t === "hello") {
+      // One hello per socket. On the hosted plane the front door verifies
+      // only the FIRST hello (then adopts the socket into a hub that has no
+      // authToken of its own), so honoring a second one would let a public
+      // portal socket re-register as router with no JWT — receiving the
+      // channel's jobs and forging job:done/router:state. It would also
+      // leave the socket in its old role's set forever (onClose only clears
+      // the latest role).
+      if (this.meta.has(ws)) {
+        warn("hub", "rejected second hello on a registered socket");
+        ws.close(4409, "already registered");
+        return;
+      }
       if (!isRole(msg.role)) {
         warn("hub", `rejected hello with unknown role ${JSON.stringify(msg.role)}`);
         ws.close(4400, "unknown role");
@@ -195,7 +216,8 @@ export class Hub {
       if (msg.t === "router:state") {
         this.handlers.onRouterState(msg.state, msg.jobId, msg.remainingSec);
       } else {
-        this.handlers.onJobDone(msg.jobId, msg.ok, msg.reason);
+        // Wire values aren't typed: "false" is truthy, so coerce strictly.
+        this.handlers.onJobDone(msg.jobId, msg.ok === true, msg.reason);
       }
     }
   }

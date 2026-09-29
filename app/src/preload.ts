@@ -12,10 +12,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge, DesktopSetupState } from "@rh/shared";
 
-contextBridge.exposeInMainWorld(
-  "rhAuth",
-  process.argv.find((a) => a.startsWith("--rh-auth="))?.slice("--rh-auth=".length) ?? "",
-);
+// Fetched synchronously over IPC (web/src/lib/auth.ts reads it as a plain
+// string at load). Not via `additionalArguments`: those become the renderer
+// process's command line, readable by any local process through `ps`.
+contextBridge.exposeInMainWorld("rhAuth", String(ipcRenderer.sendSync("rh:auth-token") ?? ""));
 
 const bridge = {
   keysStatus: (): Promise<Record<string, boolean>> =>

@@ -77,5 +77,8 @@ export const PRESETS_BY_ID: Record<string, Preset> = Object.fromEntries(
 );
 
 export function getPreset(id: string | null | undefined): Preset | undefined {
-  return id ? PRESETS_BY_ID[id] : undefined;
+  // Own-property check: `id` comes off the public submissions endpoint, and a
+  // plain-object lookup of "__proto__" / "constructor" returns a truthy
+  // prototype member instead of undefined (→ a job with prompt: undefined).
+  return id && Object.hasOwn(PRESETS_BY_ID, id) ? PRESETS_BY_ID[id] : undefined;
 }

@@ -88,10 +88,32 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
 
   r.get("/presets", (_req, res) => res.json(PRESETS));
 
+  /** Resolve the channel BEFORE multer touches the body: this route is
+   *  public, and letting the upload hit disk first means every request to a
+   *  bogus/suspended channel leaves a file behind (the 404 path has no ctx to
+   *  discard it) — an unauthenticated disk-fill. Multer's own errors (size
+   *  limit, extra files) become JSON 413/400 instead of Express's default
+   *  500 HTML page. */
+  const guardedUpload: RequestHandler = (req, res, next) => {
+    if (!opts.context(req)) {
+      res.status(404).json({ error: "unknown channel" });
+      return;
+    }
+    opts.upload(req, res, (err?: unknown) => {
+      if (!err) return next();
+      const code = (err as { code?: string }).code;
+      if (code === "LIMIT_FILE_SIZE") {
+        res.status(413).json({ error: "image too large" });
+      } else {
+        res.status(400).json({ error: "invalid upload" });
+      }
+    });
+  };
+
   /** Viewer submission: prompt/preset + optional image, before tipping. */
   r.post(
     "/submissions",
-    opts.upload,
+    guardedUpload,
     withCtx((ctx, req, res) => {
       const file = req.file;
       const imageUrl = file ? ctx.imageUrl(file) : null;

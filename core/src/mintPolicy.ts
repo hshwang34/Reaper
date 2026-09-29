@@ -48,6 +48,17 @@ export function memoryLedger(): MintLedger {
   };
 }
 
+/** Mints that passed the gate but whose Decart call hasn't returned yet, per
+ *  engine (one engine = one channel). The ledger is only written after the
+ *  await, so without this two concurrent POST /token requests for the same
+ *  job both see `hasMintFor() === false` and both mint — two billed sessions
+ *  for one paid job — and both pass a budget check that neither has debited. */
+interface InFlight {
+  jobs: Set<string>;
+  cappedSec: number;
+}
+const inFlight = new WeakMap<Engine, InFlight>();
+
 export async function gatedMint(
   engine: Engine,
   durationSec: number,
@@ -62,16 +73,26 @@ export async function gatedMint(
   if (durationSec > active.remainingSec + SESSION_CAP_EXTRA_SEC) {
     throw new MintError("requested duration exceeds the active job");
   }
-  if (ledger.hasMintFor(active.jobId)) {
+  let pending = inFlight.get(engine);
+  if (!pending) inFlight.set(engine, (pending = { jobs: new Set(), cappedSec: 0 }));
+  if (ledger.hasMintFor(active.jobId) || pending.jobs.has(active.jobId)) {
     throw new MintError("a token was already minted for this job");
   }
   const cappedSec = durationSec + SESSION_CAP_EXTRA_SEC;
-  if (ledger.usedSec() + cappedSec > ledger.capSec()) {
+  if (ledger.usedSec() + pending.cappedSec + cappedSec > ledger.capSec()) {
     throw new MintError("GPU budget exhausted for this period");
   }
-  // Debit only once Decart actually issued the token — a failed mint must
-  // not eat into the budget.
-  const token = await mint(durationSec);
-  ledger.record({ jobId: active.jobId, durationSec, cappedSec });
-  return token;
+  // Reserve synchronously (no await between the checks above and here), then
+  // debit only once Decart actually issued the token — a failed mint must
+  // not eat into the budget, and releases the reservation so it can retry.
+  pending.jobs.add(active.jobId);
+  pending.cappedSec += cappedSec;
+  try {
+    const token = await mint(durationSec);
+    ledger.record({ jobId: active.jobId, durationSec, cappedSec });
+    return token;
+  } finally {
+    pending.jobs.delete(active.jobId);
+    pending.cappedSec -= cappedSec;
+  }
 }

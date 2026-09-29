@@ -11,6 +11,7 @@
 // channel. What's left here is what is genuinely local: OBS control, the
 // loopback bind, static serving, and the install-token auth gate.
 
+import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
@@ -32,6 +33,7 @@ import {
 } from "@rh/core";
 import { ObsController } from "./obs.js";
 import { createUploads } from "./uploads.js";
+import { isLoopbackRequest, loopbackGuard } from "./loopback.js";
 
 export interface LocalServerHost {
   /** Secrets + wiring the host resolved (from .env or the app's settings UI). */
@@ -107,6 +109,9 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   // any website open in the streamer's browser to drive the money/panic/OBS
   // endpoints. Browser WS connections aren't CORS-gated, so the hub gates
   // privileged roles on the install token instead.
+  // Refuse foreign websites (CSRF) and DNS-rebound hosts before any route
+  // runs — see loopback.ts. The hub applies the same check to /ws upgrades.
+  app.use(loopbackGuard);
   app.use(express.json());
   // The HTTP server exists before the routes so the hub can attach /ws now;
   // Express resolves routes per request, so registration order below is free.
@@ -116,7 +121,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   const runtime = createRuntime({
     getSettings: host.getSettings,
     server,
-    hub: { authToken: host.authToken },
+    hub: { authToken: host.authToken, verifyRequest: isLoopbackRequest },
     tag: "server",
     hooks: {
       onRouterState: (s, j, r) => host.observer?.onRouterState(s, j, r),
@@ -149,7 +154,10 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   const requireAuth: express.RequestHandler = (req, res, next) => {
     if (!host.authToken) return next(); // CLI demo rig — ungated
     const provided = req.header("x-rh-auth") ?? String(req.query.auth ?? "");
-    if (provided === host.authToken) return next();
+    // Constant-time, like the hub's hello check.
+    const a = Buffer.from(provided);
+    const b = Buffer.from(host.authToken);
+    if (a.length === b.length && timingSafeEqual(a, b)) return next();
     res.status(401).json({ error: "auth required" });
   };
 

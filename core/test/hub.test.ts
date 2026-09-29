@@ -111,3 +111,20 @@ test("router disconnect is reported once the last router leaves; close() drops e
   assert.equal(portal.closedWith?.code, 1012);
   assert.equal(hub.routerOnline, false);
 });
+
+test("a second hello cannot re-register a socket (hosted portal → router escalation)", () => {
+  // Hosted mode: the front door vetted only the first hello; the hub itself
+  // has no authToken. A portal re-helloing as router must be refused.
+  const { join, calls } = build({ rejectLocalPlane: true });
+  const ws = join("portal");
+  ws.receive({ t: "hello", role: "router" });
+  assert.equal(ws.closedWith?.code, 4409);
+  ws.receive({ t: "job:done", jobId: "j", ok: true });
+  assert.deepEqual(calls, []);
+});
+
+test("job:done ok is coerced strictly — a truthy string is a failure", () => {
+  const { join, calls } = build();
+  join("router").receive({ t: "job:done", jobId: "j", ok: "false" });
+  assert.deepEqual(calls, ["done:j:false"]);
+});

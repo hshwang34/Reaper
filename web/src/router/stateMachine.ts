@@ -41,6 +41,7 @@ export class RouterMachine {
   private tearingDown = false;
   private wentLive = false;
   private gotStream = false;
+  private goingLive = false;
   /** Bumped on every job start and every teardown; see header comment. */
   private gen = 0;
   private t: MachineTimeouts;
@@ -108,6 +109,7 @@ export class RouterMachine {
     this.tearingDown = false;
     this.wentLive = false;
     this.gotStream = false;
+    this.goingLive = false;
     this.cb.log(
       `job ${job.jobId.slice(0, 8)} — ${job.durationSec}s — "${job.prompt.slice(0, 48)}…"`,
     );
@@ -179,7 +181,12 @@ export class RouterMachine {
   /** Called by RouterPage when the viewer confirms N decoded frames. */
   onFramesOk(jobId: string): void {
     if (!this.job || this.job.jobId !== jobId) return;
-    if (this.state !== "BUFFERING") return;
+    // `goingLive` guards re-entry across goLive's await: a second frames-ok
+    // (two viewer pages open — OBS source + a debug tab) would otherwise pass
+    // the BUFFERING check too and start a second countdown + watchdog whose
+    // handles overwrite the first's, leaking timers that never get cleared.
+    if (this.state !== "BUFFERING" || this.goingLive) return;
+    this.goingLive = true;
     clearTimeout(this.bufferTimer);
     void this.goLive(this.job);
   }
@@ -213,6 +220,7 @@ export class RouterMachine {
     let lastShown = job.durationSec;
     this.setState("LIVE", job.durationSec);
     this.liveInterval = setInterval(() => {
+      if (this.stale(g)) return; // belt and braces: never act on a later job
       if (Date.now() >= endAt) {
         void this.teardown(true, "completed");
         return;
@@ -226,7 +234,9 @@ export class RouterMachine {
 
     // Watchdog backstop in case the interval is starved (heavy tab throttling).
     this.watchdog = setTimeout(
-      () => this.teardown(true, "watchdog"),
+      () => {
+        if (!this.stale(g)) void this.teardown(true, "watchdog");
+      },
       job.durationSec * 1000 + this.t.watchdogExtraMs,
     );
   }
@@ -283,6 +293,7 @@ export class RouterMachine {
     this.tearingDown = false;
     this.wentLive = false;
     this.gotStream = false;
+    this.goingLive = false;
     // If dispose() released the camera while we were mid-teardown, we are
     // OFFLINE, not IDLE — reporting IDLE would invite the engine to dispatch
     // the next job to a router that can't run it.

@@ -125,7 +125,21 @@ export function createApiClient(opts: ApiClientOptions) {
     return {};
   }
 
+  /** Single-flight rotation. Refresh tokens are single-use, so two calls
+   *  hitting 401 together (the dashboard loads settings + ledger at once)
+   *  must share ONE rotation — otherwise the loser presents an already-spent
+   *  token, gets refused, and the page signs out a perfectly valid session
+   *  (wiping the fresh token its sibling just stored). */
+  let rotating: Promise<SessionTokens | null> | null = null;
+  function rotateOnce(refresh: string): Promise<SessionTokens | null> {
+    rotating ??= rotateRefresh(refresh).finally(() => {
+      rotating = null;
+    });
+    return rotating;
+  }
+
   async function request<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
+    const sentAccess = cred.kind === "session" ? cred.tokens.access : null;
     const res = await fetch(prefix() + path, {
       ...init,
       headers: { ...(init.headers as Record<string, string> | undefined), ...authHeaders() },
@@ -133,10 +147,16 @@ export function createApiClient(opts: ApiClientOptions) {
     if (res.status === 401 && cred.kind === "session" && !retried) {
       // The 15-minute access token lapsed mid-session. Rotate once, then
       // retry the same call; a second 401 means the refresh is dead too.
-      const next = await rotateRefresh(cred.tokens.refresh);
+      // A sibling may already have rotated while this call was in flight.
+      if (cred.tokens.access !== sentAccess) return request<T>(path, init, true);
+      const pending = rotating;
+      const next = await rotateOnce(cred.tokens.refresh);
       if (next) {
-        cred.tokens = next;
-        cred.onRotate(next);
+        // Only the caller that started the rotation persists it.
+        if (!pending && cred.tokens.access === sentAccess) {
+          cred.tokens = next;
+          cred.onRotate(next);
+        }
         return request<T>(path, init, true);
       }
     }

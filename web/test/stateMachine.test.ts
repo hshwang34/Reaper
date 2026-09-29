@@ -213,3 +213,44 @@ test("an overlapping job is failed back explicitly", async () => {
   assert.deepEqual(b, { t: "job:done", jobId: "b", ok: false, reason: "router busy" });
   h.machine.cancel("a", "cleanup");
 });
+
+test("duplicate frames-ok (two viewer pages) goes LIVE once, and its timers can't kill the next job", async () => {
+  let resolveShow!: () => void;
+  let shows = 0;
+  const h = harness(
+    {
+      setObsVisible: (v) => {
+        h.calls.push(`obs:${v}`);
+        if (!v) return Promise.resolve();
+        shows++;
+        return new Promise<void>((r) => { resolveShow = r; });
+      },
+    },
+    { watchdogExtraMs: 300 },
+  );
+  void h.machine.runJob(job({ durationSec: 1 }));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  h.machine.onFramesOk("job-1"); // second viewer, while the unhide is in flight
+  await tick();
+  assert.equal(shows, 1, "OBS unhidden exactly once");
+  resolveShow();
+  await tick(1100); // job-1 completes → IDLE
+  assert.equal(h.machine.getState(), "IDLE");
+
+  // Job 2 starts and goes LIVE; any leaked job-1 watchdog (1s + 300ms after
+  // its start) must not tear it down.
+  void h.machine.runJob(job({ jobId: "job-2", durationSec: 1 }));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-2");
+  await tick();
+  resolveShow();
+  await tick(400);
+  assert.equal(h.machine.getState(), "LIVE", "job-2 still running");
+  const done = h.sent.filter((m): m is JobDoneMsg => m.t === "job:done");
+  assert.deepEqual(done.map((d) => d.jobId), ["job-1"]);
+});

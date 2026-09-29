@@ -62,3 +62,29 @@ test("budget is checked on capped seconds and debited only after success", async
   await assert.rejects(gatedMint(engine, 1, okMint, ledger), /budget/);
   engine.dispose();
 });
+
+test("concurrent requests for one job mint once (no await-gap double mint)", async () => {
+  const engine = activeEngine(10);
+  const ledger = memoryLedger();
+  let calls = 0;
+  const slowMint = async (d: number) => {
+    calls++;
+    await new Promise((r) => setTimeout(r, 10));
+    return `ek_${d}`;
+  };
+  const results = await Promise.allSettled([
+    gatedMint(engine, 10, slowMint, ledger),
+    gatedMint(engine, 10, slowMint, ledger),
+  ]);
+  assert.equal(calls, 1, "Decart must be called once");
+  assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+  engine.dispose();
+});
+
+test("a failed mint releases its reservation so the router can retry", async () => {
+  const engine = activeEngine(10);
+  const ledger = memoryLedger();
+  await assert.rejects(gatedMint(engine, 10, async () => { throw new Error("decart down"); }, ledger));
+  assert.equal(await gatedMint(engine, 10, okMint, ledger), "ek_10");
+  engine.dispose();
+});
