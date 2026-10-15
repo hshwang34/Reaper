@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS: Settings = {
     "cyberpunk",
     "haunted",
     "winter-wonderland",
+    "photo-swap",
   ],
   allowCustomPrompts: true,
   allowSolePendingMatch: true,

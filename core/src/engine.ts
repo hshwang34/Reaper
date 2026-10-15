@@ -86,15 +86,18 @@ export class Engine {
     let prompt: string;
     let presetId: string | null;
     let imageUrl: string | null;
+    let enhance: boolean;
     if (submission) {
       prompt = submission.prompt;
       presetId = submission.presetId;
       imageUrl = submission.imageUrl;
+      enhance = submission.enhance;
     } else {
       const preset = getPreset(s.defaultPresetId) ?? getPreset(FALLBACK_PRESET_ID)!;
       prompt = preset.prompt;
       presetId = preset.id;
       imageUrl = null;
+      enhance = true; // Decart's default; preset text is written to be enhanced
     }
 
     const job: HijackJob = {
@@ -102,6 +105,7 @@ export class Engine {
       prompt,
       presetId,
       imageUrl,
+      enhance,
       durationSec,
       tip,
       matchedBy,
@@ -119,6 +123,7 @@ export class Engine {
       prompt,
       presetId: null,
       imageUrl: null,
+      enhance: true,
       durationSec: d,
       tip: {
         source: "manual",

@@ -139,6 +139,7 @@ export class RouterMachine {
       await this.ports.decart.start({
         token,
         prompt: job.prompt,
+        enhance: job.enhance,
         imageBlob,
         camera: this.camera,
         onRemoteStream: (stream) => {

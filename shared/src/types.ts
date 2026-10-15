@@ -24,8 +24,15 @@ export interface Submission {
   presetId: string | null;
   /** Optional name the viewer said they'll tip as (secondary match path). */
   tipperName: string | null;
-  /** Sidecar-absolute path to the uploaded reference image, or null. */
+  /** URL of the uploaded reference image, or null. Host-relative on the local
+   *  rig (`/uploads/x.jpg`, same-origin to the router page); absolute on the
+   *  hosted control plane, because the job is dispatched down to the streamer's
+   *  machine and the router there must be able to fetch it cross-origin. */
   imageUrl: string | null;
+  /** Decart "enhance prompt": let the model's prompt-rewriter expand the text
+   *  (Decart default = on). Off = the prompt is used literally, which is what
+   *  you want for precise edits or when the reference image carries the intent. */
+  enhance: boolean;
   createdAt: number;
   expiresAt: number;
 }
@@ -36,6 +43,8 @@ export interface HijackJob {
   prompt: string;
   presetId: string | null;
   imageUrl: string | null;
+  /** See Submission.enhance — travels with the job to the router untouched. */
+  enhance: boolean;
   durationSec: number;
   tip: TipEvent;
   /** How the tip was matched to a submission (for logs / portal display). */

@@ -13,6 +13,10 @@ export interface Preset {
   intensity: number;
   /** Emoji used as a lightweight thumbnail in the portal UI. */
   emoji: string;
+  /** The prompt only makes sense with a reference image (lucy-2.5 character
+   *  substitution). Portal gates the pick on an attached photo; the server
+   *  rejects the submission without one instead of running a no-op. */
+  needsImage?: boolean;
 }
 
 export const PRESETS: Preset[] = [
@@ -69,6 +73,19 @@ export const PRESETS: Preset[] = [
     category: "environment",
     intensity: 1,
     emoji: "❄️",
+  },
+  {
+    // lucy-2.5's headline capability: swap the person on camera for whoever is
+    // in the reference image. Decart's own docs run this prompt with enhance
+    // on; the viewer's toggle still applies.
+    id: "photo-swap",
+    label: "Become the Photo",
+    prompt:
+      "Substitute the character in the video with the person in the reference image — match their face, hair and outfit, keep the original pose, framing and lighting",
+    category: "character",
+    intensity: 3,
+    emoji: "🪞",
+    needsImage: true,
   },
 ];
 

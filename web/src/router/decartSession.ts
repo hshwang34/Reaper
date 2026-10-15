@@ -91,6 +91,8 @@ export interface StartArgs {
   /** ek_ client token, or "MOCK" for passthrough. */
   token: string;
   prompt: string;
+  /** Decart prompt enhancement (viewer's choice; Decart default true). */
+  enhance: boolean;
   imageBlob: Blob | null;
   camera: MediaStream;
   /** Fires when the styled (or, in MOCK, raw) stream is available. */
@@ -135,7 +137,7 @@ export class DecartSession {
       model: models.realtime("lucy-2.5"),
       resolution: "720p",
       initialState: {
-        prompt: { text: a.prompt, enhance: true },
+        prompt: { text: a.prompt, enhance: a.enhance },
         image: a.imageBlob ?? undefined,
       },
       onConnectionChange: (state) => debugLog("decart", "conn=", state),

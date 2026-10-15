@@ -202,7 +202,11 @@ app.use(
         decartEnabled: Boolean(env.decartApiKey),
         mint: (durationSec) => rt.mint(durationSec),
         togglePause: () => Promise.resolve(rt.engine.togglePause()),
-        imageUrl: (f) => `/uploads/${id}/${f.filename}`,
+        // Absolute, not host-relative: the job is dispatched down the cloud link
+        // to the streamer's machine, where the router page runs on a 127.0.0.1
+        // origin and fetches the image itself. A bare `/uploads/…` would resolve
+        // against that local origin and 404 — a silent prompt-only hijack.
+        imageUrl: (f) => `${env.publicUrl}/uploads/${id}/${f.filename}`,
         discardUpload: (f) => rmSync(f.path, { force: true }),
         onSubmission: ({ code, presetId, hasImage }) => {
           db.insert(submissionsLog)
@@ -244,6 +248,14 @@ app.get("/api/c/:channel/ledger", requireChannel, (req, res) => {
 // ── Uploads + hosted portal ───────────────────────────────────────────────
 
 if (!existsSync(env.uploadsDir)) mkdirSync(env.uploadsDir, { recursive: true });
+// Reference images are fetched by the router page on the streamer's machine
+// (a 127.0.0.1 origin) into a Blob for Decart — a cross-origin fetch the
+// browser only allows with CORS. Read-only, already-public files with
+// server-chosen image extensions, so `*` does not widen the API surface.
+app.use("/uploads", (_req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  next();
+});
 app.use("/uploads", express.static(env.uploadsDir));
 
 const webDist = resolve(repoRoot, "web", "dist");
