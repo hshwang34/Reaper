@@ -31,12 +31,13 @@ import {
   redeemExchangeCode,
   refreshSession,
   requireChannel,
+  resolveChannelId,
   signState,
   twitchAuthorizeUrl,
   upsertChannel,
   verifyAccess,
 } from "./auth.js";
-import { channelExists, getRuntime } from "./channels.js";
+import { getRuntime } from "./channels.js";
 
 const app = express();
 app.use(express.json());
@@ -148,16 +149,8 @@ if (devAuthEnabled) {
 
 // ── Per-channel public API (viewers) ──────────────────────────────────────
 
-/** Resolve :channel as id or login (vanity portal URLs use logins). */
-function resolveChannelId(param: string): string | null {
-  if (channelExists(param)) return param;
-  const byLogin = db
-    .select()
-    .from(channels)
-    .where(eq(channels.login, param.toLowerCase()))
-    .get();
-  return byLogin?.id ?? null;
-}
+// :channel → id goes through auth.ts's resolveChannelId — the same resolver
+// the requireChannel gate uses, so the two can never disagree.
 
 // Per-channel upload dirs; same validation as the local rig. The stored
 // extension comes from the ALLOWED mimetype map, never from the client's
@@ -222,7 +215,7 @@ app.use(
  *  Swapped in place: rebuilding the runtime would orphan the router socket
  *  already adopted into its hub. */
 app.post("/api/c/:channel/trigger/streamlabs", requireChannel, (req, res) => {
-  const rt = getRuntime(String(req.params.channel));
+  const rt = getRuntime(String(res.locals.channelId));
   if (!rt) return res.status(404).json({ error: "unknown channel" });
   const token = String(req.body?.token ?? "").trim();
   rt.setStreamlabsToken(token);
@@ -234,7 +227,7 @@ app.get("/api/c/:channel/ledger", requireChannel, (req, res) => {
   const rows = db
     .select()
     .from(hijacks)
-    .where(eq(hijacks.channelId, String(req.params.channel)))
+    .where(eq(hijacks.channelId, String(res.locals.channelId)))
     .all()
     .slice(-100)
     .reverse();
@@ -258,7 +251,7 @@ if (existsSync(webDist)) {
     ) {
       return next();
     }
-    res.sendFile(resolve(webDist, "index.html"));
+    res.sendFile("index.html", { root: webDist }); // root: see sidecar server.ts
   });
   log("server", "serving hosted portal from web/dist");
 } else {

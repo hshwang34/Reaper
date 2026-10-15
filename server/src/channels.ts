@@ -81,15 +81,19 @@ function dbLedger(channelId: string, capSec: number): MintLedger {
 }
 
 export function getRuntime(channelId: string): ChannelRuntime | null {
-  const existing = runtimes.get(channelId);
-  if (existing) return existing;
-
   const row = db
     .select()
     .from(channels)
     .where(eq(channels.id, channelId))
     .get();
-  if (!row || row.suspended) return null;
+  // Suspension is checked on EVERY lookup, not just cold creation: a channel
+  // suspended mid-stream must stop minting now, not at the next restart.
+  const existing = runtimes.get(channelId);
+  if (!row || row.suspended) {
+    existing?.stop();
+    return null;
+  }
+  if (existing) return existing;
 
   const tag = `engine:${row.login}`;
 
