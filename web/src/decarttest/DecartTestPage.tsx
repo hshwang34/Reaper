@@ -90,6 +90,7 @@ export default function DecartTestPage() {
     setRecording(true);
     let rt: { disconnect: () => void } | null = null;
     let camera: MediaStream | null = null;
+    let done = false;
     try {
       push(`clip: acquiring camera for "${preset.label}"…`);
       const { stream } = await acquireCamera();
@@ -104,12 +105,19 @@ export default function DecartTestPage() {
 
       // Resolve once the styled stream has a live, unmuted video track: that is
       // the first real frame, and the point the recording should start from.
-      const styled = new Promise<MediaStream>((resolve) => {
+      // Rejects on a failed connect or no first frame within 15s — otherwise
+      // the button would stay stuck on "recording" with the camera held open.
+      const styled = new Promise<MediaStream>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("no styled frame within 15s")), 15_000);
+        const ok = (out: MediaStream) => {
+          clearTimeout(timer);
+          resolve(out);
+        };
         const arm = (out: MediaStream) => {
           const t = out.getVideoTracks()[0];
           if (!t) return false;
-          if (!t.muted) resolve(out);
-          else t.onunmute = () => resolve(out);
+          if (!t.muted) ok(out);
+          else t.onunmute = () => ok(out);
           return true;
         };
         void client.realtime
@@ -128,8 +136,13 @@ export default function DecartTestPage() {
           })
           .then((c) => {
             rt = c;
+            // Connected after we already gave up: drop it so it doesn't bill.
+            if (done) c.disconnect();
           })
-          .catch((e) => push("clip: connect FAILED: " + (e as Error).message));
+          .catch((e) => {
+            clearTimeout(timer);
+            reject(new Error("connect FAILED: " + (e as Error).message));
+          });
       });
       const out = await styled;
       push(`clip: first frame — recording ${clipSec}s (before + after)…`);
@@ -146,6 +159,7 @@ export default function DecartTestPage() {
     } catch (e) {
       push("clip FAILED: " + (e as Error).message);
     } finally {
+      done = true;
       try {
         (rt as { disconnect: () => void } | null)?.disconnect();
       } catch {
