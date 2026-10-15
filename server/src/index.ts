@@ -31,12 +31,13 @@ import {
   redeemExchangeCode,
   refreshSession,
   requireChannel,
+  resolveChannelId,
   signState,
   twitchAuthorizeUrl,
   upsertChannel,
   verifyAccess,
 } from "./auth.js";
-import { channelExists, getRuntime } from "./channels.js";
+import { getRuntime } from "./channels.js";
 
 const app = express();
 app.use(express.json());
@@ -148,16 +149,8 @@ if (devAuthEnabled) {
 
 // ── Per-channel public API (viewers) ──────────────────────────────────────
 
-/** Resolve :channel as id or login (vanity portal URLs use logins). */
-function resolveChannelId(param: string): string | null {
-  if (channelExists(param)) return param;
-  const byLogin = db
-    .select()
-    .from(channels)
-    .where(eq(channels.login, param.toLowerCase()))
-    .get();
-  return byLogin?.id ?? null;
-}
+// :channel → id goes through auth.ts's resolveChannelId — the same resolver
+// the requireChannel gate uses, so the two can never disagree.
 
 // Per-channel upload dirs; same validation as the local rig. The stored
 // extension comes from the ALLOWED mimetype map, never from the client's

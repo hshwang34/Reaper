@@ -130,7 +130,23 @@ export async function verifyAccess(token: string): Promise<string | null> {
   }
 }
 
-/** Express guard: Bearer token must belong to req.params.channel. */
+/** Resolve :channel as id or login (vanity portal URLs use logins). The id
+ *  wins on a collision. This is the ONE resolver: the auth gate and the
+ *  channel API must agree on which channel a param means, or a login that
+ *  happens to equal another channel's id could pass the gate as its owner
+ *  while the handler acts on the other channel. */
+export function resolveChannelId(param: string): string | null {
+  const byId = db.select().from(channels).where(eq(channels.id, param)).get();
+  if (byId) return byId.id;
+  const byLogin = db
+    .select()
+    .from(channels)
+    .where(eq(channels.login, param.toLowerCase()))
+    .get();
+  return byLogin?.id ?? null;
+}
+
+/** Express guard: Bearer token must belong to the channel :channel names. */
 export const requireChannel: RequestHandler = async (req, res, next) => {
   const header = req.header("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
@@ -141,11 +157,7 @@ export const requireChannel: RequestHandler = async (req, res, next) => {
   }
   // :channel may be the id or the vanity login (the portal URL form). A valid
   // token for a DIFFERENT channel is 403, not 401 — re-authenticating won't help.
-  const param = String(req.params.channel);
-  const own =
-    param === sub ||
-    db.select().from(channels).where(eq(channels.id, sub)).get()?.login === param.toLowerCase();
-  if (!own) {
+  if (resolveChannelId(String(req.params.channel)) !== sub) {
     res.status(403).json({ error: "not your channel" });
     return;
   }

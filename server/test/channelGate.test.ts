@@ -46,6 +46,15 @@ test("requireChannel: no/bad token is 401, someone else's channel is 403", async
   assert.equal((await gate("other", access)).outcome, 403);
 });
 
+test("requireChannel: a login equal to another channel's id can't claim it", async () => {
+  // Twitch logins may be all digits, so a login can collide with a numeric id.
+  upsertChannel("424242", "victim", "Victim");
+  upsertChannel("dev:attacker", "424242", "Attacker");
+  const { access } = await issueSession("dev:attacker", "424242");
+  assert.equal((await gate("424242", access)).outcome, 403, "the id wins — not the attacker's");
+  assert.equal((await gate("dev:attacker", access)).outcome, "next");
+});
+
 test("suspending a channel stops its already-running runtime", () => {
   upsertChannel("dev:susp", "susp", "Susp");
   const rt = getRuntime("dev:susp");
