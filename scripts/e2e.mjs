@@ -98,12 +98,15 @@ async function main() {
 
   // Explicit empty values win over .env (dotenv never overrides set vars), so
   // a developer's real keys can't leak into the test — MOCK, no Streamlabs.
+  // E2E_REAL_DECART=1 opts into the .env Decart key: same checks, real lucy
+  // sessions (a few seconds of billed GPU time per run).
+  const realDecart = process.env.E2E_REAL_DECART === "1";
   sidecar = spawn("npm", ["run", "start", "--workspace", "sidecar"], {
     cwd: root,
     env: {
       ...process.env,
       SIDECAR_PORT: String(port),
-      DECART_API_KEY: "",
+      ...(realDecart ? {} : { DECART_API_KEY: "" }),
       STREAMLABS_SOCKET_TOKEN: "",
       OBS_WS_URL: `ws://127.0.0.1:${obsPort}`,
       OBS_WS_PASSWORD: "",
@@ -127,7 +130,7 @@ async function main() {
   if (!up) return;
 
   const cfg = await api("/api/router-config");
-  check("runs in MOCK mode", cfg.json?.decartEnabled === false);
+  check(realDecart ? "runs in LIVE Decart mode" : "runs in MOCK mode", cfg.json?.decartEnabled === realDecart);
 
   browser = await chromium.launch({
     executablePath: CHROME,
@@ -161,6 +164,11 @@ async function main() {
 
   const shown = await waitFor(() => obsCalls.some((c) => c.visible === true), 20_000);
   check("OBS source unhidden after the buffering gate", shown, shown ? `${Date.now() - t0} ms after tip` : "");
+  if (shown && process.env.E2E_SCREENSHOT) {
+    await sleep(1500);
+    await viewer.screenshot({ path: process.env.E2E_SCREENSHOT });
+    console.log(`    viewer screenshot → ${process.env.E2E_SCREENSHOT}`);
+  }
   const hidden = await waitFor(() => obsCalls.at(-1)?.visible === false && obsCalls.some((c) => c.visible), (N + 15) * 1000);
   check("OBS source hidden again when the job ends", hidden);
   const on = obsCalls.find((c) => c.visible === true);
@@ -173,7 +181,7 @@ async function main() {
   // ── 2. panic mid-job: hides immediately ─────────────────────────────────
   await sleep(4000); // cooldown between jobs
   obsCalls.length = 0;
-  await api("/api/dev/fake-tip", { amount: 30, message: "panic test", username: "e2e" });
+  await api("/api/dev/fake-tip", { amount: 10, message: "panic test", username: "e2e" });
   const shown2 = await waitFor(() => obsCalls.some((c) => c.visible === true), 20_000);
   check("second job goes live", shown2);
   const tPanic = Date.now();
