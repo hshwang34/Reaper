@@ -169,6 +169,9 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
 
   /** Router-only wiring (decart mode + OBS target). Localhost only. */
   app.get("/api/router-config", requireAuth, (_req, res) => {
+    // The router polls this, so it doubles as the OBS reconnect loop: OBS is
+    // often launched after the rig. Best-effort, deduped by ensureConnected.
+    if (!obs.isConnected()) obs.ensureConnected().catch(() => {});
     res.json({
       decartEnabled,
       obsScene: host.obsScene,
@@ -215,7 +218,10 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       if (req.path.startsWith("/api") || req.path.startsWith("/uploads")) {
         return next();
       }
-      res.sendFile(resolve(webDist, "index.html"));
+      // `root` matters: without it `send` vets the WHOLE absolute path for
+      // dotfiles and 404s any install living under a dot-directory
+      // (~/.local/…, a .claude/worktrees checkout).
+      res.sendFile("index.html", { root: webDist });
     });
     log("server", "serving web/dist (production mode)");
   } else {

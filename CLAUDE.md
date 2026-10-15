@@ -28,6 +28,8 @@ npm run typecheck         # tsc --noEmit across all SIX workspaces
 npm test                  # node --test: core/test (engine, correlation, hub, mint policy, submissions,
                           #   settings), web/test (router state machine), server/test (auth)
 npm run check             # typecheck + test — the gate to run after edits
+npm run e2e               # mock-mode end-to-end: real sidecar + headless Chrome router/viewer +
+                          #   a fake OBS; asserts what the audience sees (needs Google Chrome)
 npm run build             # builds the web app only
 npm run start             # production demo rig: build, then ONE process on :7712
 

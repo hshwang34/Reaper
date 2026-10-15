@@ -222,7 +222,7 @@ app.use(
  *  Swapped in place: rebuilding the runtime would orphan the router socket
  *  already adopted into its hub. */
 app.post("/api/c/:channel/trigger/streamlabs", requireChannel, (req, res) => {
-  const rt = getRuntime(String(req.params.channel));
+  const rt = getRuntime(String(res.locals.channelId));
   if (!rt) return res.status(404).json({ error: "unknown channel" });
   const token = String(req.body?.token ?? "").trim();
   rt.setStreamlabsToken(token);
@@ -234,7 +234,7 @@ app.get("/api/c/:channel/ledger", requireChannel, (req, res) => {
   const rows = db
     .select()
     .from(hijacks)
-    .where(eq(hijacks.channelId, String(req.params.channel)))
+    .where(eq(hijacks.channelId, String(res.locals.channelId)))
     .all()
     .slice(-100)
     .reverse();
@@ -258,7 +258,7 @@ if (existsSync(webDist)) {
     ) {
       return next();
     }
-    res.sendFile(resolve(webDist, "index.html"));
+    res.sendFile("index.html", { root: webDist }); // root: see sidecar server.ts
   });
   log("server", "serving hosted portal from web/dist");
 } else {

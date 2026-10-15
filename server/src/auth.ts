@@ -135,10 +135,22 @@ export const requireChannel: RequestHandler = async (req, res, next) => {
   const header = req.header("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   const sub = token ? await verifyAccess(token) : null;
-  if (!sub || sub !== String(req.params.channel)) {
+  if (!sub) {
     res.status(401).json({ error: "auth required" });
     return;
   }
+  // :channel may be the id or the vanity login (the portal URL form). A valid
+  // token for a DIFFERENT channel is 403, not 401 — re-authenticating won't help.
+  const param = String(req.params.channel);
+  const own =
+    param === sub ||
+    db.select().from(channels).where(eq(channels.id, sub)).get()?.login === param.toLowerCase();
+  if (!own) {
+    res.status(403).json({ error: "not your channel" });
+    return;
+  }
+  // Downstream handlers key on the id, never the login.
+  res.locals.channelId = sub;
   next();
 };
 
