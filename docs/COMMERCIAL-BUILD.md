@@ -14,7 +14,8 @@ between here and a public alpha.
 | Downloadable streamer app (Electron) | `app/` | done — local + cloud modes |
 | Hosted control plane (accounts, per-channel engines, ledger, portal) | `server/` | done |
 | Onboarding wizard + hosted dashboard | `web/` `/setup` `/dashboard` | done |
-| Packaging (dmg/zip), auto-update, Fly deploy, CI | `app/`, `server/`, `.github/` | done (unsigned verified) |
+| Packaging (dmg/zip), auto-update, Fly deploy | `app/`, `server/` | done (unsigned verified) |
+| CI: `check` (typecheck + tests + web build) on every PR; `release` on `v*` tags | `.github/workflows/` | done (release gated on Apple secrets) |
 
 Two modes, one app:
 - **Local mode** — pasted keys, everything on the machine. The offline demo.
@@ -51,6 +52,37 @@ For the pure single-machine demo (no control plane), `npm run start` or
 - Packaged unsigned `.app` boots from its bundle and serves `/router`,
   `/setup`, and `web-dist` from `process.resourcesPath`.
 - Every security-review finding fixed (see the milestone commits).
+- Post-build audit (`ARCHITECTURE-REVIEW.md`, 2026-09): two hub flaws and a
+  cloud-mode panic bug fixed; `npm run check` (typecheck + 46 tests) is the
+  gate, run in CI on every pull request.
+
+## Deployment shape — one instance, on purpose
+
+`server/fly.toml` pins **exactly one machine** (`min_machines_running = 1`,
+auto-stop and auto-start off). That is not a cost setting; the control plane
+keeps three things in process memory and none of them survive a second
+instance:
+
+- **Channel runtimes** (`server/src/channels.ts`): one `@rh/core` engine +
+  queue + adopted hub per channel, created lazily and held in a `Map`. Two
+  instances would run two engines for the same channel, each with half the
+  tips and its own idea of the active job.
+- **Adopted WebSocket sockets**: the desktop app's cloud link and every
+  portal socket are bound to the hub on the instance that accepted them.
+  A job dispatched on instance A cannot reach a router attached to B.
+- **Sign-in exchange codes** (`server/src/auth.ts`): 60-second single-use
+  codes minted by the OAuth callback and redeemed by `POST /auth/exchange`;
+  the redeem must land on the instance that minted.
+
+So: `fly scale count 1`, and never enable autoscaling for this app. The
+SQLite ledger on the volume is the only durable state, which also makes a
+redeploy safe: in-flight jobs fail closed (router watchdog + the token's
+`maxSessionDuration` bound cost with no cloud at all — see FEASIBILITY §3)
+and portals reconnect.
+
+Going multi-instance later means: sticky routing by channel (or a shared
+message bus), the exchange codes in the database, and one engine per channel
+guaranteed by a lease — a real piece of work, deliberately out of alpha scope.
 
 ## What's left — external accounts only
 

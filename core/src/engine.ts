@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  computeDurationSec,
   getPreset,
   type HijackJob,
   type RouterState,
@@ -34,6 +35,9 @@ export interface EngineEmit {
 // maxSessionDuration (see decart.ts).
 const JOB_DEADLINE_GRACE_MS = 45_000;
 
+/** Last-resort preset when the streamer's configured default is unknown. */
+const FALLBACK_PRESET_ID = "80s-anime";
+
 export class Engine {
   private queue: HijackJob[] = [];
   private active: HijackJob | null = null;
@@ -43,8 +47,11 @@ export class Engine {
   private cooldownUntil = 0;
   /** Backstop timer for the active job; cleared when it reports done. */
   private jobDeadline?: ReturnType<typeof setTimeout>;
-  /** jobId → originating submission code (null for default-preset jobs). */
-  private jobCode = new Map<string, string | null>();
+  /** Wakes tryDispatch once the cooldown after the last job has elapsed. */
+  private cooldownTimer?: ReturnType<typeof setTimeout>;
+  /** jobId → originating submission code, for queued/active jobs only. */
+  private jobCode = new Map<string, string>();
+  private disposed = false;
 
   constructor(
     public readonly correlation: CorrelationStore,
@@ -71,12 +78,10 @@ export class Engine {
       return `ignored: below min tip ($${s.minTipUSD})`;
     }
 
-    const durationSec = Math.min(
-      Math.max(1, Math.floor(tip.amount * s.secondsPerUSD)),
-      s.maxDurationSec,
-    );
-
-    const { submission, matchedBy } = this.correlation.match(tip);
+    const durationSec = computeDurationSec(tip.amount, s);
+    const { submission, matchedBy } = this.correlation.match(tip, {
+      allowSolePendingMatch: s.allowSolePendingMatch,
+    });
 
     let prompt: string;
     let presetId: string | null;
@@ -86,7 +91,7 @@ export class Engine {
       presetId = submission.presetId;
       imageUrl = submission.imageUrl;
     } else {
-      const preset = getPreset(s.defaultPresetId) ?? getPreset("80s-anime")!;
+      const preset = getPreset(s.defaultPresetId) ?? getPreset(FALLBACK_PRESET_ID)!;
       prompt = preset.prompt;
       presetId = preset.id;
       imageUrl = null;
@@ -101,9 +106,7 @@ export class Engine {
       tip,
       matchedBy,
     };
-    this.jobCode.set(job.jobId, submission?.code ?? null);
-
-    return this.enqueue(job);
+    return this.enqueue(job, submission?.code ?? null);
   }
 
   /** Streamer-fired hijack from the router console: no payment, no matching,
@@ -126,17 +129,20 @@ export class Engine {
       },
       matchedBy: "manual",
     };
-    this.jobCode.set(job.jobId, null);
-    return this.enqueue(job);
+    return this.enqueue(job, null);
   }
 
-  private enqueue(job: HijackJob): string {
+  private enqueue(job: HijackJob, code: string | null): string {
     const s = this.getSettings();
     if (this.queue.length >= s.queueDepth) {
       warn("engine", `queue full (${s.queueDepth}) — dropping job`);
-      this.notify(job, { state: "failed", message: "Queue is full." });
+      // Not tracked in jobCode (it never enters the queue), so notify directly.
+      if (code) {
+        this.emit.submissionUpdate(code, { state: "failed", message: "Queue is full." });
+      }
       return "dropped: queue full";
     }
+    if (code) this.jobCode.set(job.jobId, code);
     this.queue.push(job);
     log(
       "engine",
@@ -205,13 +211,15 @@ export class Engine {
     this.active = null;
     this.activeRemaining = 0;
     // Cooldown before the next job inits.
-    this.cooldownUntil = Date.now() + this.getSettings().cooldownSec * 1000;
+    const cooldownMs = this.getSettings().cooldownSec * 1000;
+    this.cooldownUntil = Date.now() + cooldownMs;
     this.broadcast();
-    setTimeout(() => this.tryDispatch(), this.getSettings().cooldownSec * 1000 + 50);
+    clearTimeout(this.cooldownTimer);
+    this.cooldownTimer = setTimeout(() => this.tryDispatch(), cooldownMs + 50);
   }
 
   private tryDispatch(): void {
-    if (this.paused || this.active) return;
+    if (this.disposed || this.paused || this.active) return;
     if (this.routerState !== "IDLE") return;
     if (Date.now() < this.cooldownUntil) return;
     const job = this.queue.shift();
@@ -281,5 +289,27 @@ export class Engine {
   private notify(job: HijackJob, status: Omit<SubmissionStatus, "code">): void {
     const code = this.jobCode.get(job.jobId);
     if (code) this.emit.submissionUpdate(code, status);
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────
+
+  /** Stop timers and fail everything in flight. The active job (if any) is
+   *  told to cancel — its router-side teardown still runs — and waiting
+   *  submissions are notified so portals don't hang on "queued". */
+  dispose(reason = "engine stopped"): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    clearTimeout(this.jobDeadline);
+    clearTimeout(this.cooldownTimer);
+    if (this.active) {
+      this.emit.cancelJob(this.active.jobId, reason);
+      this.finishActive(false, reason);
+      clearTimeout(this.cooldownTimer); // finishActive re-armed it
+    }
+    for (const job of this.queue.splice(0)) {
+      this.notify(job, { state: "failed", message: `Hijack cancelled: ${reason}` });
+      this.jobCode.delete(job.jobId);
+    }
+    this.correlation.dispose();
   }
 }

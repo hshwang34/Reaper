@@ -1,6 +1,15 @@
-// WebSocket message contract between the sidecar hub and the three pages.
-// Discriminated union on `t`. Keep both directions in one union so the hub
-// and clients share exhaustive typing.
+// WebSocket message contract between the hub and the pages. Discriminated
+// union on `t`. Both directions live in one file so the hub and clients share
+// exhaustive typing.
+//
+// Two planes, deliberately separate:
+//   · CONTROL plane — registration, job dispatch, lifecycle reports, status.
+//     Traverses the cloud in hosted mode (the Electron cloud link).
+//   · LOCAL plane — WebRTC signaling between the router and the OBS viewer
+//     page, and the viewer's frames-ok gate. NEVER leaves the streamer's
+//     machine: the local hub relays it by role; the hosted hub rejects it
+//     (`rejectLocalPlane`). Keeping the planes as distinct types is what lets
+//     the hub express that rule as a type guard instead of a string list.
 
 import type {
   HijackJob,
@@ -10,7 +19,7 @@ import type {
   SubmissionStatus,
 } from "./types.js";
 
-// ── Client → Server ──────────────────────────────────────────────────────
+// ── Control plane: client → server ───────────────────────────────────────
 
 /** First message a page sends: declare its role. */
 export interface HelloMsg {
@@ -18,11 +27,11 @@ export interface HelloMsg {
   role: Role;
   /** Portal only: the claim code it wants submission updates for. */
   code?: string;
-  /** Privileged-role auth (router/viewer). Local hosts use a per-install
-   *  token (Electron preload / provisioned OBS URL); the hosted control
-   *  plane uses a session JWT. Absent on public portal connections. */
+  /** Privileged-role credential (router/viewer). Opaque to the protocol —
+   *  the local hub compares it to the per-install token; the hosted front
+   *  door verifies it as a session JWT. Absent on public portal connections. */
   auth?: string;
-  /** Multi-tenant routing on the hosted control plane (M3). A local
+  /** Multi-tenant routing on the hosted control plane. A local
    *  single-streamer hub ignores it. */
   channel?: string;
 }
@@ -43,13 +52,7 @@ export interface JobDoneMsg {
   reason?: string;
 }
 
-/** Viewer confirms N verified decoded frames — the buffering gate. */
-export interface ViewerFramesOkMsg {
-  t: "viewer:frames-ok";
-  jobId: string;
-}
-
-// ── Server → Client ──────────────────────────────────────────────────────
+// ── Control plane: server → client ───────────────────────────────────────
 
 /** Ack of registration. */
 export interface WelcomeMsg {
@@ -82,66 +85,71 @@ export interface SubmissionUpdateMsg {
   status: SubmissionStatus;
 }
 
-// ── RTC signaling (relayed by role) ──────────────────────────────────────
+// ── Local plane: router ↔ viewer, relayed by role ────────────────────────
 
-export interface RtcOfferMsg {
+/** The two peers of the loopback. The portal is never a peer. */
+export type PeerRole = "router" | "viewer";
+
+/** Structural mirrors of the DOM's RTCSessionDescriptionInit /
+ *  RTCIceCandidateInit — declared here so `shared` needs no DOM lib and the
+ *  browser can pass them straight to the WebRTC API without casts. */
+export interface RtcSdp {
+  type: "offer" | "answer" | "pranswer" | "rollback";
+  sdp?: string;
+}
+export interface RtcCandidate {
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
+}
+
+interface RtcBase {
+  target: PeerRole;
+  /** Stamped by the hub from the sending socket's registered role — never
+   *  trusted from the payload. Absent on the wire from the client. */
+  from?: PeerRole;
+  jobId: string;
+}
+export interface RtcOfferMsg extends RtcBase {
   t: "rtc:offer";
-  target: Role;
-  from?: Role;
-  jobId: string;
-  sdp: unknown;
+  sdp: RtcSdp;
 }
-export interface RtcAnswerMsg {
+export interface RtcAnswerMsg extends RtcBase {
   t: "rtc:answer";
-  target: Role;
-  from?: Role;
-  jobId: string;
-  sdp: unknown;
+  sdp: RtcSdp;
 }
-export interface RtcCandidateMsg {
+export interface RtcCandidateMsg extends RtcBase {
   t: "rtc:candidate";
-  target: Role;
-  from?: Role;
-  jobId: string;
-  candidate: unknown;
+  candidate: RtcCandidate;
 }
-/** Router tells viewer to reset its peer connection for a new job. */
-export interface RtcResetMsg {
+/** Router tells the viewer to play its out-wipe and drop its peer. */
+export interface RtcResetMsg extends RtcBase {
   t: "rtc:reset";
-  target: Role;
-  from?: Role;
+}
+
+/** Viewer confirms media is flowing — the buffering gate. */
+export interface ViewerFramesOkMsg {
+  t: "viewer:frames-ok";
   jobId: string;
 }
 
-export type ClientMsg =
-  | HelloMsg
-  | RouterStateMsg
-  | JobDoneMsg
-  | ViewerFramesOkMsg
-  | RtcOfferMsg
-  | RtcAnswerMsg
-  | RtcCandidateMsg
-  | RtcResetMsg;
+export type RtcMsg = RtcOfferMsg | RtcAnswerMsg | RtcCandidateMsg | RtcResetMsg;
+export type LocalPlaneMsg = RtcMsg | ViewerFramesOkMsg;
 
-export type ServerMsg =
+// ── Unions ───────────────────────────────────────────────────────────────
+
+export type ControlClientMsg = HelloMsg | RouterStateMsg | JobDoneMsg;
+export type ControlServerMsg =
   | WelcomeMsg
   | JobStartMsg
   | JobCancelMsg
   | StatusMsg
-  | SubmissionUpdateMsg
-  | RtcOfferMsg
-  | RtcAnswerMsg
-  | RtcCandidateMsg
-  | RtcResetMsg;
+  | SubmissionUpdateMsg;
 
+export type ClientMsg = ControlClientMsg | LocalPlaneMsg;
+export type ServerMsg = ControlServerMsg | LocalPlaneMsg;
 export type AnyMsg = ClientMsg | ServerMsg;
-
-/** RTC messages are the ones the hub blindly forwards to `target`. */
-export type RtcMsg =
-  | RtcOfferMsg
-  | RtcAnswerMsg
-  | RtcCandidateMsg
-  | RtcResetMsg;
 
 export function isRtcMsg(m: AnyMsg): m is RtcMsg {
   return (
@@ -150,4 +158,9 @@ export function isRtcMsg(m: AnyMsg): m is RtcMsg {
     m.t === "rtc:candidate" ||
     m.t === "rtc:reset"
   );
+}
+
+/** Everything that must never leave the streamer's machine. */
+export function isLocalPlaneMsg(m: AnyMsg): m is LocalPlaneMsg {
+  return isRtcMsg(m) || m.t === "viewer:frames-ok";
 }

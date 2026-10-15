@@ -3,7 +3,7 @@
 // full event logging. This answers "does the Decart pipeline work at all?"
 // independent of the rest of the app. Open at /decart-test.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createDecartClient, models } from "@decartai/sdk";
 import { PRESETS } from "@rh/shared";
 import { api } from "../lib/api.js";
@@ -42,12 +42,36 @@ export default function DecartTestPage() {
   const inRef = useRef<HTMLVideoElement>(null);
   const outRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<{ disconnect: () => void } | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const mountedRef = useRef(true);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [log, setLog] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [clipPreset, setClipPreset] = useState(PRESETS[0]!.id);
   const [clipSec, setClipSec] = useState(10);
   const [recording, setRecording] = useState(false);
+
+  // Leaving the page must release the camera and the (billed) Decart
+  // session — previously only the Stop button did, so navigating away left
+  // both running.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      release();
+    };
+  }, []);
+
+  function release() {
+    try {
+      clientRef.current?.disconnect();
+    } catch {
+      /* */
+    }
+    clientRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
 
   const push = (s: string) => {
     console.warn("[decart-test]", s); // mirrored to the Vite terminal
@@ -138,6 +162,8 @@ export default function DecartTestPage() {
     try {
       push("acquiring camera…");
       const { stream, usingObs } = await acquireCamera();
+      streamRef.current = stream;
+      if (!mountedRef.current) return release();
       const t = stream.getVideoTracks()[0];
       push(
         `camera OK (${usingObs ? "OBS Virtual Camera" : "default webcam"}) — track ${t?.readyState}, ${t?.getSettings().width}x${t?.getSettings().height}`,
@@ -178,6 +204,7 @@ export default function DecartTestPage() {
         },
       });
       clientRef.current = rt;
+      if (!mountedRef.current) return release(); // left mid-connect
       rt.on("error", (e) =>
         push("ERROR: " + ((e as { message?: string })?.message ?? e)),
       );
@@ -191,12 +218,7 @@ export default function DecartTestPage() {
   }
 
   function stop() {
-    try {
-      clientRef.current?.disconnect();
-    } catch {
-      /* */
-    }
-    clientRef.current = null;
+    release();
     setRunning(false);
     push("disconnected");
   }

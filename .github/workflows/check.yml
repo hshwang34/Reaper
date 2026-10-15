@@ -1,0 +1,31 @@
+# The gate, on every pull request and every push to main: typecheck across
+# all six workspaces, the node:test suites (core, web, server), and a web
+# build. Nothing here needs secrets — MOCK mode and DEV AUTH make the whole
+# stack verifiable with zero external accounts, which is the point.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # typecheck + tests (see package.json "check")
+      - run: npm run check
+      # The pages must still bundle — the hosted portal and the packaged app
+      # both serve web/dist.
+      - run: npm run build --workspace web

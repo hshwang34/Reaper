@@ -5,6 +5,14 @@ teardown, OBS integration architectures, Twitch payment rails + Crowd Control
 teardown). Sources inline. Companion to `FEASIBILITY.md`, which governs the
 core pipeline; this doc governs the product around it.*
 
+> **Status (2026-09-09).** The software in Phases 1–2 is built: the hosted
+> control plane, the Electron companion app, the dashboard, and the wizard
+> (`COMMERCIAL-BUILD.md` is the map; `ARCHITECTURE-REVIEW.md` is the
+> post-build audit). This doc has been trimmed to what is **not** done: the
+> live-quality proof (Phase 0), the external accounts, the payment rail, the
+> Twitch-native tier, and the business-model decision. Anything marked
+> *built* below is described once, in `COMMERCIAL-BUILD.md`, not here.
+
 **North star:** a streamer goes from "heard about it" to "viewers can hijack my
 cam" in under 5 minutes, without touching a config file, an API key, or an OBS
 setting. That bar is what made Streamlabs 40% of Twitch within nine months of
@@ -60,52 +68,56 @@ with `inputKind: "browser_source"`), so the streamer never opens OBS's UI.
 
 ## 3. Phased plan
 
-### Phase 0 — Prove the picture (1–2 weeks, pre-commercial)
+### Phase 0 — Prove the picture (still open)
 The single biggest unretired risk is aesthetic/latency: does a live hijack
 *look good enough to pay for*? No commercial benchmark exists for our exact
 round trip (verified: nobody ships local-cam → cloud-AI → browser-source today).
-- Live Decart run on the existing MVP; measure glass-to-glass latency; record
-  real before/after captures (these also feed the README and the pitch).
-- Tauri-vs-Electron spike: verify `getUserMedia` robustness in Tauri's system
-  WebView (unverified in research; Electron's bundled Chromium is known-good).
+- Live Decart run on the rig; measure glass-to-glass latency; record real
+  before/after captures (these also feed the README and the pitch).
 - Manually read the **May 2026 Bits AUP update** primary text (research only
   confirmed it via secondary reporting) — it decides how safe the Phase 3 Bits
   tier is.
+- ~~Tauri-vs-Electron spike~~ — *decided:* Electron (bundled Chromium is the
+  known-good `getUserMedia` path; the app is built on it).
 - **Exit criteria:** latency number, real capture footage, go/no-go on quality.
 
-### Phase 1 — Hosted alpha: kill the local sidecar (4–8 weeks)
-Cloud control plane + today's browser-tab pattern; 5–15 hand-recruited streamers.
-- Backend v1 (see §4): Twitch OAuth, per-channel hosted portal + viewer page,
-  WS hub, engine/queue/correlation ported from the sidecar, Decart key vault +
-  token minting, Streamlabs trigger (their OAuth connect flow, not a pasted
-  socket token) **plus** `channel.cheer` via EventSub (`bits:read`, webhook) —
-  Bits-native triggering with zero review, viable for any streamer post
-  "Monetization for All" (May 2026).
-- Streamer onboarding (target ≤5 min): sign in with Twitch → connect Streamlabs
-  (OAuth) → open Arm page, grant cam once → copy ONE Browser Source URL (with a
-  "connect OBS" option that auto-creates it via obs-websocket QR pairing) →
-  fire a test hijack.
-- Money: streamer keeps 100% of tips (their Streamlabs); GPU on our metered
-  Decart account with hard monthly caps per channel; we eat alpha COGS.
+### Phase 1 — Hosted alpha (software built; alpha not run)
+*Built:* the control plane (Twitch OAuth → our JWTs, per-channel engines,
+server-side job-gated + budget-capped minting, ledger, hosted portal at
+`/c/:channel`, dashboard) and the ≤5-minute onboarding wizard. See
+`COMMERCIAL-BUILD.md`.
+
+Still to do — none of it is code:
+- External accounts: Twitch OAuth app, Streamlabs OAuth app (the pasted
+  socket token works meanwhile), Fly deploy. Listed with exact env names in
+  `COMMERCIAL-BUILD.md` §"What's left".
+- `channel.cheer` via EventSub (`bits:read`, webhook) — Bits-native
+  triggering with zero review, viable for any streamer post "Monetization for
+  All" (May 2026). Not built; needs the Twitch app first.
+- Recruit 5–15 streamers and run it. Money: streamer keeps 100% of tips
+  (their Streamlabs); GPU on our metered Decart account under the per-channel
+  monthly cap; we eat alpha COGS.
 - **Exit criteria:** 10 streamers ran ≥1 real paid hijack; median setup time
   ≤10 min; zero runaway-billing incidents.
 
-### Phase 2 — Companion app + our own payment rail (8–12 weeks)
-This is where it becomes a business.
-- **Tray app** (Electron or Tauri per spike): wraps the router; auto-launch at
-  boot, survives backgrounding (kills the tab-throttling failure mode);
-  auto-provisions/repairs the OBS source (`CreateInput`), pairs via OBS's QR;
-  global panic hotkey. NVIDIA-Broadcast-class friction: install → sign in →
-  allow camera → done.
+### Phase 2 — Our own payment rail (app built; rail not)
+*Built:* the Electron companion app — auto-launch, survives backgrounding,
+auto-provisions/repairs the OBS source, global panic hotkey, signed-in cloud
+mode with no key on the machine, auto-update. The streamer dashboard exists
+with catalog curation and guardrails.
+
+Still to do — this is where it becomes a business:
 - **Direct Stripe checkout** on the viewer page (Stripe Connect for splits):
   our first revenue. No Twitch review, no 6.2.8 free-text ban, works on
   YouTube/Kick chats too. Per-hijack split: GPU COGS netted first, then
   platform cut, remainder to streamer — margin-positive by construction.
-- **Streamer dashboard:** catalog curation, intensity ceiling, per-viewer rate
-  limits, free-text approval queue, earnings, session replays.
+- Dashboard additions: intensity ceiling, per-viewer rate limits, free-text
+  approval queue, earnings, session replays.
 - Moderation upgrade: blocklist → LLM classifier scored against streamer
   settings (FEASIBILITY Layer 2); image-upload moderation becomes mandatory
   (CSAM scanning is a legal requirement once we host viewer uploads).
+- Signed/notarized macOS build (Apple Developer enrollment; the CI job is
+  ready and gated on secrets).
 - **Exit criteria:** first $1k month across cohort; support load per streamer
   quantified; chargeback rate known (tips carry chargeback risk; Bits don't).
 
@@ -136,26 +148,33 @@ This is where it becomes a business.
 
 ## 4. Backend requirements (the control plane)
 
-| Service | Scope | Notes |
+The table as originally planned, with what `server/` now has. "Built" means
+in the repo and exercised by the test gate; it does not mean deployed.
+
+| Service | Planned scope | State |
 |---|---|---|
-| Auth & accounts | Twitch OAuth (+ YouTube later), multi-tenant channels | One OAuth = full provisioning (principle #1) |
-| Channel config | Catalog, guardrails, rate limits — today's `Settings` per tenant | Same shape as `shared/src/types.ts` |
-| Realtime hub | WS fan-out per channel (portal/router/viewer roles), RTC signaling relay | Today's `hub.ts`, multi-tenant; sticky per-channel routing |
-| Engine | Tip→job matching, duration, FIFO queue, cooldown | Port `engine.ts`/`correlation.ts` nearly as-is |
-| Token minting | Decart key vault; per-job `ek_` tokens, `maxSessionDuration` capped | The cost-safety backstop stays server-side |
-| Trigger ingestion | Streamlabs OAuth+socket per channel; EventSub webhooks (cheer, channel points, later bits-transactions) | Normalized `TipEvent` stays the seam |
-| Payments | Stripe Connect (checkout, splits, payouts, refunds/chargebacks) | Phase 2 |
-| Moderation | Text: blocklist → LLM classifier. Images: hash-match + CSAM scan on upload | Legal requirement, not optional |
-| Uploads | S3-compatible store, signed URLs, TTL cleanup | Replaces `uploads/` dir |
-| Observability | Per-hijack ledger (tip → job → seconds billed → outcome), billing alarms | The "#1 support surface" per FEASIBILITY |
-| Admin/support | Session inspector, refund tooling, channel kill-switch | |
+| Auth & accounts | Twitch OAuth (+ YouTube later), multi-tenant channels | **built** (Twitch; one-time exchange code for the browser session) |
+| Channel config | Catalog, guardrails, rate limits — `Settings` per tenant | **built** (per-channel row; no per-viewer rate limits yet) |
+| Realtime hub | WS fan-out per channel, RTC relay | **built** (one front door → per-channel adopted hubs; local plane rejected) |
+| Engine | Tip→job matching, duration, FIFO queue, cooldown | **built** (`@rh/core`, unchanged across hosts) |
+| Token minting | Decart key vault; per-job `ek_`, `maxSessionDuration` capped | **built** (job-gated, one per job, monthly budget) |
+| Trigger ingestion | Streamlabs per channel; EventSub webhooks | Streamlabs pasted-token **built**; OAuth connect + EventSub open |
+| Payments | Stripe Connect (checkout, splits, payouts, chargebacks) | open — Phase 2 |
+| Moderation | Text: blocklist → LLM classifier. Images: hash + CSAM scan | blocklist **built**; the rest open, and legally required before public uploads |
+| Uploads | S3-compatible store, signed URLs, TTL cleanup | local disk per channel; S3 open |
+| Observability | Per-hijack ledger, billing alarms | ledger **built** (SQLite); alarms open |
+| Admin/support | Session inspector, refund tooling, channel kill-switch | `suspended` flag only |
+
+Deployment shape: **one instance**. Channel runtimes, adopted WS sockets, and
+sign-in exchange codes are process memory by design for the alpha; see
+`COMMERCIAL-BUILD.md` §"Deployment shape" before scaling to two.
 
 ## 5. UX targets
 
-**Streamer (Phase 2 steady-state):** install app → Sign in with Twitch → allow
-camera → app finds OBS + creates the source (QR pair once) → "Send yourself a
-test hijack" → link-in-chat button for the viewer page. *Five clicks, zero OBS
-UI, zero keys.*
+**Streamer (built as the `/setup` wizard):** install app → Sign in with Twitch
+→ allow camera → app finds OBS + creates the source → "Send yourself a test
+hijack" → link-in-chat button for the viewer page. *Five clicks, zero OBS UI,
+zero keys.* Not yet measured against the ≤5-minute target with real streamers.
 
 **Viewer:** open streamer's hijack page (chat command / panel link) → card grid
 (emoji-thumbnailed presets, exactly today's portal) → slider: amount ⇄ seconds,
@@ -181,9 +200,10 @@ Decide at Phase 2 entry with alpha data on hijacks/streamer/month.
 ## 7. Top risks & open questions
 
 1. **Quality/latency unproven live** — Phase 0 exists to retire this first.
+   Still the top risk: everything since has been built against MOCK mode.
 2. **May 2026 Bits AUP** primary text unread — could constrain Phase 3; verify
    manually before any Bits build.
-3. **Tauri camera capture unverified** — spike before committing the app stack.
+3. ~~Tauri camera capture unverified~~ — resolved by choosing Electron.
 4. **T&S burden of image uploads** (CSAM scanning, DMCA on reference images) —
    scope legal review before Phase 2 opens uploads beyond alpha.
 5. **Decart platform risk** — single-vendor realtime model; fal.ai hosts

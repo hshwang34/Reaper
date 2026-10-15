@@ -10,7 +10,7 @@
 // creates a local fake channel and returns tokens. This keeps the entire
 // control plane verifiable while the real OAuth app application is pending.
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import { eq } from "drizzle-orm";
@@ -34,6 +34,46 @@ export interface SessionTokens {
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/** Constant-time string equality. A plain `!==` short-circuits on the first
+ *  differing byte, which leaks how much of a presented secret matched — not
+ *  practically exploitable over a network at hash length, but free to fix. */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+// ── One-time exchange codes (browser sign-in) ─────────────────────────────
+// The OAuth callback must hand the session to the dashboard SPA somehow. A
+// URL fragment never reaches a server, but it does land in browser history,
+// referrer-stripped-but-still-visible page JS, and any extension — so a
+// 30-day refresh token must not ride it. Instead the callback mints a random
+// code that is single-use and expires in seconds; the SPA redeems it via POST
+// once, and what lands in history is worthless a minute later. In-memory is
+// fine: a code only ever needs to survive one redirect on one process.
+
+const EXCHANGE_TTL_MS = 60 * 1000;
+const exchangeCodes = new Map<string, { tokens: SessionTokens; expiresAt: number }>();
+
+export function issueExchangeCode(tokens: SessionTokens): string {
+  // Opportunistic sweep so an abandoned sign-in never accumulates.
+  const now = Date.now();
+  for (const [k, v] of exchangeCodes) if (v.expiresAt <= now) exchangeCodes.delete(k);
+  const code = randomBytes(24).toString("base64url");
+  exchangeCodes.set(code, { tokens, expiresAt: now + EXCHANGE_TTL_MS });
+  return code;
+}
+
+/** Redeem a code exactly once; null if unknown, expired, or already used. */
+export function redeemExchangeCode(code: string): SessionTokens | null {
+  const entry = exchangeCodes.get(code);
+  if (!entry) return null;
+  exchangeCodes.delete(code); // burn on first touch, valid or not
+  if (entry.expiresAt <= Date.now()) return null;
+  return entry.tokens;
+}
 
 export async function issueSession(
   channelId: string,
@@ -67,7 +107,7 @@ export async function refreshSession(
     .from(refreshTokens)
     .where(eq(refreshTokens.id, id))
     .get();
-  if (!row || row.tokenHash !== sha256(refresh) || row.expiresAt < Date.now()) {
+  if (!row || !safeEqual(row.tokenHash, sha256(refresh)) || row.expiresAt < Date.now()) {
     return null;
   }
   db.delete(refreshTokens).where(eq(refreshTokens.id, id)).run();
@@ -107,18 +147,40 @@ export function upsertChannel(
   login: string,
   displayName: string,
 ): void {
-  const existing = db.select().from(channels).where(eq(channels.id, id)).get();
-  if (existing) return;
-  db.insert(channels)
-    .values({
-      id,
-      login,
-      displayName,
-      settingsJson: JSON.stringify(DEFAULT_SETTINGS),
-      createdAt: Date.now(),
-    })
-    .run();
-  log("auth", `provisioned channel ${login} (${id})`);
+  login = login.toLowerCase();
+  db.transaction((tx) => {
+    // Twitch logins are renameable and get recycled. The row keyed by `id`
+    // (the immutable Twitch user id) is the truth, so a stale row still
+    // holding this login belongs to someone who renamed away from it — free
+    // the UNIQUE login for the current holder rather than letting the insert
+    // throw and wedge this user's sign-in forever.
+    const squatter = tx.select().from(channels).where(eq(channels.login, login)).get();
+    if (squatter && squatter.id !== id) {
+      tx.update(channels)
+        .set({ login: `${login}~${squatter.id}` })
+        .where(eq(channels.id, squatter.id))
+        .run();
+      warn("auth", `login ${login} moved from ${squatter.id} to ${id} (Twitch rename)`);
+    }
+    const existing = tx.select().from(channels).where(eq(channels.id, id)).get();
+    if (existing) {
+      // Keep the vanity URL (/c/:login) and display name tracking Twitch.
+      if (existing.login !== login || existing.displayName !== displayName) {
+        tx.update(channels).set({ login, displayName }).where(eq(channels.id, id)).run();
+      }
+      return;
+    }
+    tx.insert(channels)
+      .values({
+        id,
+        login,
+        displayName,
+        settingsJson: JSON.stringify(DEFAULT_SETTINGS),
+        createdAt: Date.now(),
+      })
+      .run();
+    log("auth", `provisioned channel ${login} (${id})`);
+  });
 }
 
 // ── Twitch OAuth ──────────────────────────────────────────────────────────

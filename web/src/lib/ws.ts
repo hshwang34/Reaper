@@ -9,6 +9,7 @@ export class HubSocket {
   private listeners = new Set<(m: ServerMsg) => void>();
   private outbox: ClientMsg[] = [];
   private closed = false;
+  private attempt = 0;
 
   constructor(
     private role: Role,
@@ -21,6 +22,7 @@ export class HubSocket {
     this.ws = ws;
 
     ws.onopen = () => {
+      this.attempt = 0;
       this.raw({
         t: "hello",
         role: this.role,
@@ -42,7 +44,14 @@ export class HubSocket {
       this.listeners.forEach((l) => l(m));
     };
     ws.onclose = () => {
-      if (!this.closed) setTimeout(() => this.connect(), 1000);
+      if (this.closed) return;
+      // Backoff with jitter (1s → 15s): during a server restart every open
+      // router/viewer/portal tab would otherwise redial in lockstep each
+      // second. Capped low because the router/viewer are live-stream critical.
+      const delay = Math.min(15_000, 1000 * 2 ** this.attempt++) * (0.75 + Math.random() * 0.5);
+      setTimeout(() => {
+        if (!this.closed) this.connect(); // close() may land during the wait
+      }, delay);
     };
     ws.onerror = () => ws.close();
     return this;

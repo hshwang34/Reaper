@@ -42,19 +42,21 @@ export interface HijackJob {
   matchedBy: "code" | "username" | "sole-pending" | "default-preset" | "manual";
 }
 
-/** The router's lifecycle state, reported to the sidecar and fanned out. */
+/** The router's lifecycle state, reported to the sidecar and fanned out.
+ *  Exactly the states the machine emits (web/src/router/stateMachine.ts). */
 export type RouterState =
-  | "OFFLINE" // page not connected
+  | "OFFLINE" // page not connected / camera released
   | "IDLE" // armed, camera held, ready for a job
   | "AUTHORIZING" // minting token
   | "CONNECTING" // opening Decart WebRTC
   | "BUFFERING" // waiting for verified frames before unhiding OBS
   | "LIVE" // effect visible, counting down
-  | "TEARDOWN" // cleaning up
-  | "ARMING" // acquiring camera + OBS
-  | "ERROR"; // last job failed; will return to IDLE
+  | "TEARDOWN"; // cleaning up
 
-/** Streamer-configurable guardrails + wiring. Persisted to settings.json. */
+/** Streamer-configurable policy: pricing, guardrails, catalog. Portable
+ *  across hosts and persisted by each (settings.json / userData / the
+ *  channel row). Machine wiring — OBS scene/source names, ports, keys — is
+ *  NOT settings; it lives in the host's own config. */
 export interface Settings {
   minTipUSD: number;
   maxDurationSec: number;
@@ -68,10 +70,13 @@ export interface Settings {
   enabledPresetIds: string[];
   /** Whether viewers may submit custom free-text prompts at all. */
   allowCustomPrompts: boolean;
+  /** Match an unlabeled tip to the only pending submission (correlation rule
+   *  3). Convenient on a one-viewer demo rig; on a real channel it hands a
+   *  stranger's tip to whoever submitted last, so hosted streamers should
+   *  turn it off. */
+  allowSolePendingMatch: boolean;
   /** Extra words to reject on top of the built-in blocklist. */
   blocklistExtra: string[];
-  obsScene: string;
-  obsSource: string;
 }
 
 /** Public snapshot the portal renders (no secrets). */
