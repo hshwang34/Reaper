@@ -38,7 +38,7 @@ import {
   type SafetyLedger,
   type TriggerAdapter,
 } from "@rh/core";
-import { channels, db, hijacks, moderationEvents, tokenMints } from "./db.js";
+import { channels, db, hijacks, moderationEvents, takedownContacts, tokenMints } from "./db.js";
 import { env } from "./env.js";
 
 /** One classifier suite for every channel — it holds OUR vendor keys and is
@@ -73,6 +73,11 @@ function dbSafetyLedger(channelId: string): SafetyLedger {
         })
         .run();
       return ev;
+    },
+    recordContact(ticket, contact) {
+      db.insert(takedownContacts)
+        .values({ ticket, channelId, contact: contact.slice(0, 200), ts: Date.now() })
+        .run();
     },
     recent(limit = 100) {
       return db

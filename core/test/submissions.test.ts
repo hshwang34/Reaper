@@ -108,17 +108,45 @@ test("classifier reject → 422 + ledger + strike; error → 503; review → par
   borderline.dispose();
 });
 
-test("three rejections block the submitter (no brute-forcing the classifier)", async () => {
+test("three rejections pause the submitter's untrusted tiers — presets stay open", async () => {
   const d = intakeDeps(settings({ blocklistExtra: ["bad"] }));
   for (let i = 0; i < 3; i++) {
     const r = await createSubmission(d, { ...noImage, prompt: "bad" });
     assert.equal(!r.ok && r.status, 422);
   }
-  const next = await createSubmission(d, { ...noImage, presetId: "underwater" });
-  assert.equal(!next.ok && next.status, 429);
-  const other = await createSubmission(d, { image: null, ipHash: "someone-else", presetId: "underwater" });
+  const custom = await createSubmission(d, { ...noImage, prompt: "a lighthouse" });
+  assert.equal(!custom.ok && custom.status, 429, "custom text paused");
+  const photo = await createSubmission(d, {
+    ipHash: ip,
+    presetId: "underwater",
+    image: { url: "/u/s.jpg", path: await imageFile() },
+  });
+  assert.equal(!photo.ok && photo.status, 429, "photos paused");
+  // Bounded blast radius: even if many viewers shared this key (a
+  // misconfigured proxy), nobody loses presets.
+  const preset = await createSubmission(d, { ...noImage, presetId: "underwater" });
+  assert.ok(preset.ok, "a preset with no photo carries no viewer bytes");
+  const other = await createSubmission(d, { image: null, ipHash: "someone-else", prompt: "a lighthouse" });
   assert.ok(other.ok);
   d.dispose();
+});
+
+test("custom text needs a non-LLM floor classifier; the floor always runs first", async () => {
+  const policyOnly = fakeText(undefined, "llm", "policy");
+  const d = intakeDeps(settings(), liveSuite([policyOnly]));
+  const r = await createSubmission(d, { ...noImage, prompt: "a castle" });
+  assert.equal(!r.ok && r.status, 503, "an LLM alone can be argued with");
+  assert.equal(policyOnly.seen.length, 0);
+
+  const order: string[] = [];
+  const llm = fakeText((t) => (order.push("llm"), { verdict: "allow", categories: [], reason: t }), "llm", "policy");
+  const floor = fakeText(() => (order.push("floor"), { verdict: "allow", categories: [], reason: "ok" }), "floor", "floor");
+  const both = intakeDeps(settings(), liveSuite([llm, floor]));
+  const ok = await createSubmission(both, { ...noImage, prompt: "a castle" });
+  assert.ok(ok.ok);
+  assert.deepEqual(order, ["floor", "llm"]);
+  d.dispose();
+  both.dispose();
 });
 
 test("banned tipper names and the approval tier", async () => {

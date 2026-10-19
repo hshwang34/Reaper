@@ -40,6 +40,15 @@ import {
 import { getRuntime } from "./channels.js";
 
 const app = express();
+// Real client IPs behind the edge proxy (see env.trustProxy): strikes and the
+// public report/takedown limits are per viewer, not per proxy.
+app.set("trust proxy", env.trustProxy);
+if (env.trustProxy === false && env.publicUrl.startsWith("https://")) {
+  warn(
+    "server",
+    "RH_TRUST_PROXY unset on a public deployment — if a proxy fronts this server, every viewer will share one strike/rate-limit identity",
+  );
+}
 app.use(express.json());
 
 // ── Health ────────────────────────────────────────────────────────────────

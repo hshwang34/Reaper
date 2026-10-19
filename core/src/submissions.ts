@@ -142,8 +142,16 @@ export async function createSubmission(
   const ipHash = input.ipHash;
 
   // ── Cheap gates first ──────────────────────────────────────────────────
-  if (strikes.blocked(ipHash)) {
-    return { ok: false, status: 429, error: "too many rejected requests — try again later" };
+  // Strikes pause only the UNTRUSTED tiers for this submitter. A preset with
+  // no photo carries no viewer bytes, so it stays open — which also bounds
+  // the damage if many viewers ever share one key (e.g. a misconfigured
+  // proxy): the worst case is "presets only", never "nobody can hijack".
+  if (strikes.blocked(ipHash) && (!presetId || input.image)) {
+    return {
+      ok: false,
+      status: 429,
+      error: "too many rejected requests — custom prompts and photos are paused for you; presets still work",
+    };
   }
   if (isBanned(s, tipperName)) {
     return { ok: false, status: 403, error: "you can't submit effects on this stream" };
@@ -255,7 +263,7 @@ export async function createSubmission(
         // CONTENT-SAFETY S5: we now have "actual knowledge" (18 U.S.C. §2258A).
         // Preserve, block, and follow docs/runbooks/csam.md — the bytes have
         // already stopped before any further vendor saw them.
-        deps.uploads.block(prepared.sha256, prepared.dhash);
+        deps.uploads.block(prepared.sha256, prepared.dhash, true); // near-dup, pinned
         ledger.record({ stage: "image", verdict: "reject", source: step.source, reason: "suspected CSAM — runbook", categories: ["csam-suspected"], inputHash, ipHash, tipper: tipperName });
         warn("safety", `SUSPECTED CSAM upload quarantined (sha256 ${inputHash.slice(0, 12)}…) — follow docs/runbooks/csam.md`);
         strikes.strike(ipHash);

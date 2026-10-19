@@ -230,6 +230,11 @@ async function main() {
   check("viewer report accepted", rep.status === 200 && rep.json?.ok === true);
   const td = await api("/api/takedown", { contact: "e2e@example.com", description: "e2e takedown" });
   check("takedown request ticketed", td.status === 200 && typeof td.json?.ticket === "string");
+  const log2 = await api("/api/moderation?limit=50");
+  check(
+    "takedown requester's contact is not in the streamer's log",
+    !JSON.stringify(log2.json).includes("e2e@example.com"),
+  );
   const cfg2 = await api("/api/config");
   check("portal config carries the consent statement", /18 or older/.test(cfg2.json?.consentStatement ?? ""));
 

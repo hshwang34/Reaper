@@ -19,7 +19,7 @@ import {
 } from "@rh/shared";
 import { MintError } from "../mintPolicy.js";
 import { imagesReady, textReady } from "../moderation.js";
-import { ipHash, RateLimiter } from "../safetyLedger.js";
+import { clientKey, RateLimiter } from "../safetyLedger.js";
 import { createSubmission } from "../submissions.js";
 import { parseFakeTip } from "../triggers/fake.js";
 import { log, warn } from "../log.js";
@@ -66,6 +66,11 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
   // mergeParams: the hosted plane mounts us under /api/c/:channel and the
   // context resolver needs that param.
   const r = Router({ mergeParams: true });
+
+  /** Strike / rate-limit identity: (channel, real client IP). `req.ip` is the
+   *  client only when the host set `trust proxy` correctly — see clientKey. */
+  const submitter = (req: Request) =>
+    clientKey(typeof req.params.channel === "string" ? req.params.channel : undefined, req.ip);
 
   /** Resolve-or-404, so every handler below can assume a context. */
   const withCtx =
@@ -153,7 +158,7 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
           {
             ...(req.body as Record<string, unknown>),
             image: file ? { url: ctx.imageUrl(file), path: file.path } : null,
-            ipHash: ipHash(req.ip),
+            ipHash: submitter(req),
           },
         );
       } catch (e) {
@@ -173,11 +178,11 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
     }),
   );
 
-  // Public safety surface (S5). Rate-limited per submitter; both land in the
-  // ledger the streamer reads, and a takedown acts immediately.
+  // Public safety surface (S5). Rate-limited per submitter per channel; both
+  // land in the ledger the streamer reads, and a takedown acts immediately.
   const publicLimiter = new RateLimiter(10, 60_000);
   const limited: RequestHandler = (req, res, next) => {
-    if (publicLimiter.allow(ipHash(req.ip))) return next();
+    if (publicLimiter.allow(submitter(req))) return next();
     res.status(429).json({ error: "too many requests" });
   };
   const field = (v: unknown, max: number) =>
@@ -199,7 +204,7 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
         categories: [],
         code: field(b.code, 8) || null,
         jobId: field(b.jobId, 64) || null,
-        ipHash: ipHash(req.ip),
+        ipHash: submitter(req),
       });
       warn("safety", `viewer report ${ev.id.slice(0, 8)}: ${reason.slice(0, 80)}`);
       res.json({ ok: true, id: ev.id });
@@ -207,9 +212,12 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
   );
 
   /** TAKE IT DOWN-style removal request (docs/runbooks/takedown.md). Deletes
-   *  the named upload and every identical / near-identical copy we hold now,
-   *  and blocks the picture from being uploaded again. The 48h SLA clock
-   *  starts at the ledger timestamp. */
+   *  the named upload and every EXACT (sha256) copy we hold now, and blocks
+   *  that picture from being uploaded again. Near-duplicate fan-out is the
+   *  streamer's call (POST /moderation/takedown) — an anonymous requester
+   *  can't wipe everyone's similar-looking photos. The requester's contact
+   *  goes to the operator-only store, never the streamer-visible ledger.
+   *  The 48h SLA clock starts at the ledger timestamp. */
   r.post(
     "/takedown",
     limited,
@@ -232,12 +240,36 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
         stage: "takedown",
         verdict: "info",
         source: "requester",
-        reason: `${description.slice(0, 300)} — contact: ${contact} — removed ${removed} file(s)`,
+        reason: `${description.slice(0, 300)} — removed ${removed} exact copy(ies)${imageUrl ? "" : " — code/description only: operator to verify"}`,
         categories: ["takedown"],
         code: code ?? null,
-        ipHash: ipHash(req.ip),
+        ipHash: submitter(req),
       });
+      ctx.runtime.ledger.recordContact(ev.id, contact);
       warn("safety", `TAKEDOWN request ${ev.id.slice(0, 8)} — removed ${removed}; 48h SLA (docs/runbooks/takedown.md)`);
+      res.json({ ok: true, ticket: ev.id, removed });
+    }),
+  );
+
+  /** Streamer/operator takedown: the full fan-out — exact copies AND dHash
+   *  near-duplicates (re-compressed / resized), blocked from re-upload. */
+  r.post(
+    "/moderation/takedown",
+    opts.requireAuth,
+    withCtx((ctx, req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const imageUrl = field(b.imageUrl, 500) || undefined;
+      const sha256 = /^[0-9a-f]{64}$/.test(field(b.sha256, 64)) ? field(b.sha256, 64) : undefined;
+      if (!imageUrl && !sha256) return res.status(400).json({ error: "imageUrl or sha256 required" });
+      const removed = ctx.runtime.uploads.takedown({ url: imageUrl, sha256 }, { nearDuplicates: true });
+      const ev = ctx.runtime.ledger.record({
+        stage: "takedown",
+        verdict: "info",
+        source: "streamer",
+        reason: `streamer takedown incl. near-duplicates — removed ${removed} file(s)`,
+        categories: ["takedown", "near-duplicates"],
+        inputHash: sha256 ?? null,
+      });
       res.json({ ok: true, ticket: ev.id, removed });
     }),
   );

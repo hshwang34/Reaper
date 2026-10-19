@@ -443,6 +443,23 @@ numbers in `VERIFICATION.md`.
 - The Electron bundle keeps `sharp` external and stages its prebuilt binaries
   (`app/scripts/stage-resources.mjs`). Build the DMG on the target arch.
 
+### Hardening pass (security review of PR #6)
+
+An automated review of the merged build found five issues, all fixed on
+`worktree-safety-hardening`:
+
+| Finding | Fix |
+|---|---|
+| Strikes and public rate limits keyed on `req.ip`. Behind Fly's proxy that is the proxy, so one troll could lock out every viewer. | Hosted sets Express `trust proxy` (`RH_TRUST_PROXY`, default 1 on Fly) and warns when a public deployment leaves it unset. Keys are `clientKey(channel, ip)`. A strike block now pauses only custom text and photos, so even a mis-keyed proxy degrades to "presets only", never "nobody". |
+| The "hijacked by &lt;name&gt;" chip showed the tipper's unmoderated free-text name on stream. | `displayName()`: NFKC fold, a character whitelist, a link check and the blocklist (including the streamer's own words), falling back to "a viewer". Banned tippers get no chip. |
+| An anonymous takedown fanned out to dHash near-duplicates and blocked them permanently, so one request could wipe and block everyone's similar photos. A sha-only takedown also blocked a placeholder all-zero dHash, which matches flat images. | Anonymous requests remove and block **exact** sha256 copies only. Near-duplicate fan-out is the streamer's `POST /moderation/takedown`. The block list is capped at 5,000 entries, and suspected-CSAM entries are pinned so the cap never evicts them. |
+| The takedown requester's contact was written into the streamer-visible ledger. | `SafetyLedger.recordContact()` writes to an operator-only store (`takedown_contacts` table / `moderation.contacts.jsonl`) that no route reads. |
+| Viewer text sat between plain tags in the Claude prompt, so it could close the tag and inject instructions. | The text is JSON-encoded with `<`/`>` escaped (`jsonForPrompt`). Classifiers declare a `role`: custom text now requires a non-instructable **floor** classifier (OpenAI moderation), floors always run first, and Claude alone no longer enables the tier. |
+
+The review's tests also caught a bypass in the blocklist itself: `\b` treats
+`_` as a word character, so `naked_lol` slipped through. `checkPrompt` now
+NFKC-folds and treats `_` and `-` as separators.
+
 ### Still open
 
 - Phase C: known-CSAM hash matching (Cloudflare / PhotoDNA), NCMEC ESP

@@ -64,7 +64,7 @@ it fixed, and the migration to the target layout.
 ### Content safety (docs/CONTENT-SAFETY.md)
 
 With a real Decart key, viewer-authored bytes reach the model only through classifiers:
-custom text needs `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`; **any** reference image needs
+custom text needs `OPENAI_API_KEY` (the non-LLM floor; `ANTHROPIC_API_KEY` adds the policy check but never suffices alone); **any** reference image needs
 Sightengine (`SIGHTENGINE_API_USER`/`SECRET`), the minors check. Missing keys switch the
 matching tier off (fail closed); presets always work. MOCK mode ("dev mode") runs blocklist +
 structural checks only. Invariants: the chain runs before a claim code exists; suspected CSAM

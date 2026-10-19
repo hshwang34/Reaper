@@ -48,7 +48,9 @@ export function checkPrompt(
   prompt: string,
   extra: string[] = [],
 ): ModerationResult {
-  const text = prompt.toLowerCase();
+  // `_` is a regex word character, so "\bnaked\b" would miss "naked_lol";
+  // treat underscores and hyphens as the separators a reader sees them as.
+  const text = prompt.normalize("NFKC").toLowerCase().replace(/[_-]+/g, " ");
   const list = [...BUILTIN_BLOCKLIST, ...extra.map((w) => w.toLowerCase())];
   for (const word of list) {
     if (!word) continue;
@@ -63,6 +65,38 @@ export function checkPrompt(
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** What the "hijacked by …" chip says when a name can't be shown as-is. */
+export const ANONYMOUS_TIPPER = "a viewer";
+const MAX_DISPLAY_NAME = 25; // Twitch's own login limit
+
+/**
+ * The tipper name as it may appear ON STREAM (CONTENT-SAFETY S6). A tip's
+ * display name is free text the tipper typed (Streamlabs doesn't verify it),
+ * so it gets the same suspicion as a prompt — without a network call, because
+ * the engine decides synchronously on the tip:
+ *   · normalize (NFKC folds look-alike/full-width tricks), keep only letters,
+ *     digits, space, `_` and `-` — no URLs, no markup, no emoji spam
+ *   · anything blocklisted, link-like, or empty after cleaning → "a viewer"
+ * Returns null when there's no name at all.
+ */
+export function displayName(raw: string | null | undefined, blocklistExtra: string[] = []): string | null {
+  if (!raw) return null;
+  const folded = raw.normalize("NFKC");
+  const cleaned = folded
+    .replace(/[^\p{L}\p{N} _-]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_DISPLAY_NAME)
+    .trim();
+  if (!cleaned) return ANONYMOUS_TIPPER;
+  if (/https?|www|\.(com|net|org|gg|tv|io)\b/i.test(folded)) return ANONYMOUS_TIPPER;
+  // Check both the raw and cleaned forms: "n.a.k.e.d" cleans to "naked".
+  if (!checkPrompt(cleaned, blocklistExtra).ok || !checkPrompt(folded, blocklistExtra).ok) {
+    return ANONYMOUS_TIPPER;
+  }
+  return cleaned;
 }
 
 // ── Classifier contracts ─────────────────────────────────────────────────
@@ -87,6 +121,12 @@ export interface ClassifierVerdict {
 
 export interface TextClassifier {
   readonly name: string;
+  /** "floor": a fixed-category moderation model that doesn't follow
+   *  instructions (OpenAI moderation) — immune to prompt injection.
+   *  "policy": an instruction-following LLM scoring against the streamer's
+   *  policy — smarter, but the viewer's text is in its context, so it can be
+   *  argued with. Custom text needs at least one floor classifier. */
+  readonly role: "floor" | "policy";
   classifyText(text: string, policy: ContentPolicy): Promise<ClassifierVerdict>;
 }
 
@@ -124,9 +164,11 @@ export const emptySuite = (devMode: boolean): ModerationSuite => ({
   devMode,
 });
 
-/** Can this host accept custom text at all? */
+/** Can this host accept custom text at all? An LLM classifier alone isn't
+ *  enough: viewer text can try to talk it into "allow". A non-instructable
+ *  floor classifier must also pass the text. */
 export function textReady(m: ModerationSuite): boolean {
-  return m.devMode || m.text.length > 0;
+  return m.devMode || m.text.some((c) => c.role === "floor");
 }
 
 /** Can this host accept reference images at all? Requires a minors check. */
@@ -202,11 +244,15 @@ export async function moderateText(
   if (!bl.ok) return { verdict: "reject", reason: bl.reason!, steps };
 
   if (!textReady(suite)) {
-    throw new ModerationUnavailable("text", "no text classifier configured");
+    throw new ModerationUnavailable("text", "no floor text classifier configured");
   }
 
   let review: ChainStep | null = null;
-  for (const c of suite.text) {
+  // Floor first: the injection-proof check runs before the LLM sees the text.
+  const ordered = [...suite.text].sort(
+    (a, b) => Number(b.role === "floor") - Number(a.role === "floor"),
+  );
+  for (const c of ordered) {
     const v = await withTimeout(c.name, c.classifyText(text, policy));
     steps.push({ source: c.name, ...v });
     if (v.verdict === "reject") return { verdict: "reject", reason: v.reason, steps };

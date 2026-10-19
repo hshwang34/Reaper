@@ -13,7 +13,9 @@
 export { Engine, REVIEW_TTL_MS, type EngineEmit } from "./engine.js";
 export { CorrelationStore, type MatchResult, type MatchOptions } from "./correlation.js";
 export {
+  ANONYMOUS_TIPPER,
   checkPrompt,
+  displayName,
   emptySuite,
   imagesReady,
   moderateImage,
@@ -30,6 +32,7 @@ export {
 } from "./moderation.js";
 export {
   claudeClassifiers,
+  jsonForPrompt,
   DEFAULT_CLASSIFIER_MODEL,
   moderationFromEnv,
   openAiImageClassifier,
@@ -38,8 +41,9 @@ export {
   type ModerationEnv,
 } from "./moderationProviders.js";
 export { dHash, hamming, ImageRejected, prepareUpload, sha256Hex, sniffImage } from "./images.js";
-export { sweepUploadDir, UPLOAD_TTL_MS, UploadRegistry } from "./uploadRegistry.js";
+export { MAX_BLOCKED, sweepUploadDir, UPLOAD_TTL_MS, UploadRegistry, type TakedownOptions } from "./uploadRegistry.js";
 export {
+  clientKey,
   ipHash,
   jsonlSafetyLedger,
   memorySafetyLedger,

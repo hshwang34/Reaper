@@ -90,7 +90,7 @@ export function DesktopCredentials() {
       </h4>
       <p className="mb-3 text-xs text-zinc-500">
         With a real Decart key, viewers' own text and photos only reach the
-        model through these. Custom prompts need OpenAI or Anthropic; photo
+        model through these. Custom prompts need OpenAI (Anthropic adds the policy check on top); photo
         uploads need Sightengine (the minors check). Presets always work.
       </p>
       <div className="grid grid-cols-2 gap-3 text-sm">
