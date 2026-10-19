@@ -1,0 +1,4 @@
+{
+  "_comment": "Recorded clips of the real model output. Empty until captured on the rig; see site/CLIPS.md. Each entry: { preset, after, before? } with paths under /clips/. The hero and the looks grid switch from the CSS simulation to these automatically.",
+  "clips": []
+}
