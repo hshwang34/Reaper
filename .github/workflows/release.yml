@@ -90,6 +90,12 @@ jobs:
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # An unset secret arrives as "", and electron-builder reads an empty
+          # CSC_LINK as a (directory) path and fails — unset the empties so a
+          # missing secret means "unsigned", as intended.
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+            [ -n "${!v}" ] || unset "$v"
+          done
           npm run prepackage
           npx electron-builder ${{ matrix.platform }} \
             --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}

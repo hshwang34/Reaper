@@ -11,7 +11,13 @@ import { join } from "node:path";
 // processes migrating the same fresh database race (seen as a flaky failure).
 const dbPath = join(tmpdir(), `rh-server-test-${process.pid}.sqlite`);
 process.env.RH_DATABASE_PATH = dbPath;
+// Best effort: Windows refuses to delete a file SQLite still holds open
+// (EBUSY), and the OS temp dir gets cleaned eventually anyway.
 process.on("exit", () => {
-  for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) rmSync(f, { force: true });
+  for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    try {
+      rmSync(f, { force: true });
+    } catch {}
+  }
 });
 process.env.RH_JWT_SECRET = "test-secret";
