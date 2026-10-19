@@ -73,7 +73,19 @@ and (iv) a **subsequent** tip still runs (the queue recovered).
 - [ ] **Reference image actually shapes output.** Submit a portal job with an
   image; confirm the restyle reflects it (`initialState.image` in
   `decartSession.ts`). If it has no visible effect, decide: keep, or hide the
-  image field in the portal until Phase 1 — **no silently-broken UI**.
+  image field in the portal until Phase 1 — **no silently-broken UI**. Then
+  run the **Become the Photo** preset with a clear face photo — that is
+  lucy-2.5's character-substitution path and the strongest signal the image
+  is reaching the model.
+- [ ] **Enhance toggle is honoured.** Submit the same literal prompt (e.g. "make
+  the wall light blue") with *Enhance prompt* on and off; the off run should
+  be visibly more literal. Confirm `enhance` on the `HijackJob` in the router
+  log matches the checkbox.
+- [ ] **Cloud-mode reference image.** With the Electron app linked to the
+  control plane, submit from `/c/:channel` with a photo. The job's `imageUrl`
+  must be absolute (control-plane origin) and the router must fetch it — check
+  the router log does **not** say "reference image fetch failed". Requires
+  `RH_PUBLIC_URL` to be the real public origin in production.
 - [ ] **Rapid-tip queue stress.** Fire six tips fast and watch FIFO order,
   live queue-position updates on the portal, `queueDepth` rejection at the 6th
   (default depth 5), and the cooldown gap between jobs:

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getPreset } from "@rh/shared";
-import { CorrelationStore, createSubmission } from "../src/index.js";
+import { CorrelationStore, createSubmission, parseEnhance } from "../src/index.js";
 import { settings } from "./helpers.js";
 
 test("preset prompt is resolved server-side from the id, never from the client", () => {
@@ -60,5 +60,33 @@ test("non-string fields are treated as absent, long prompts are truncated", () =
   const long = createSubmission(store, settings(), { prompt: "a".repeat(2000), imageUrl: null });
   assert.ok(long.ok);
   assert.equal(store.get(long.code)?.prompt.length, 500);
+  store.dispose();
+});
+
+test("parseEnhance: absent = Decart default (on); only explicit off values disable", () => {
+  assert.equal(parseEnhance(undefined), true);
+  assert.equal(parseEnhance(null), true);
+  for (const on of ["1", "true", "on", "yes", ""]) assert.equal(parseEnhance(on), true, on);
+  for (const off of ["0", "false", "OFF", " no "]) assert.equal(parseEnhance(off), false, off);
+});
+
+test("enhance rides the submission; a needsImage preset without a photo is a 400", () => {
+  const store = new CorrelationStore();
+  const s = settings({ enabledPresetIds: ["photo-swap", "lava-room"] });
+  const noPhoto = createSubmission(store, s, { presetId: "photo-swap", imageUrl: null });
+  assert.deepEqual(noPhoto, { ok: false, status: 400, error: "this effect needs a reference image" });
+  assert.equal(store.size, 0);
+
+  const withPhoto = createSubmission(store, s, {
+    presetId: "photo-swap",
+    enhance: "0",
+    imageUrl: "/uploads/x.jpg",
+  });
+  assert.ok(withPhoto.ok);
+  assert.equal(store.get(withPhoto.code)?.enhance, false);
+
+  const legacy = createSubmission(store, s, { presetId: "lava-room", imageUrl: null });
+  assert.ok(legacy.ok);
+  assert.equal(store.get(legacy.code)?.enhance, true);
   store.dispose();
 });
