@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { encode, decode } from "@msgpack/msgpack";
 import { chromium } from "playwright-core";
+import sharp from "sharp";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CHROME =
@@ -108,6 +109,12 @@ async function main() {
       SIDECAR_PORT: String(port),
       ...(realDecart ? {} : { DECART_API_KEY: "" }),
       STREAMLABS_SOCKET_TOKEN: "",
+      // Never call paid classifier vendors from the harness: MOCK runs the
+      // dev suite (blocklist + structure). With E2E_REAL_DECART the .env
+      // classifier keys apply, exactly as on the rig.
+      ...(realDecart
+        ? {}
+        : { OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", SIGHTENGINE_API_USER: "", SIGHTENGINE_API_SECRET: "" }),
       OBS_WS_URL: `ws://127.0.0.1:${obsPort}`,
       OBS_WS_PASSWORD: "",
       OBS_SCENE: "Scene",
@@ -164,6 +171,18 @@ async function main() {
 
   const shown = await waitFor(() => obsCalls.some((c) => c.visible === true), 20_000);
   check("OBS source unhidden after the buffering gate", shown, shown ? `${Date.now() - t0} ms after tip` : "");
+  // CONTENT-SAFETY S4/S6: the real nsfwjs guard loaded in Chrome and passed
+  // the first frame (the default policy runs it), and the viewer draws the
+  // on-stream chips over the effect.
+  check(
+    "output guard loaded in the router and passed the first frame",
+    /output guard ready/i.test(await router.locator("body").innerText()),
+  );
+  const chips = await waitFor(async () => {
+    const t = await viewer.locator("body").innerText();
+    return /AI-altered/.test(t) && /hijacked by e2e/.test(t);
+  }, 3000);
+  check('viewer shows "AI-altered" + "hijacked by e2e" chips', chips);
   if (shown && process.env.E2E_SCREENSHOT) {
     await sleep(1500);
     await viewer.screenshot({ path: process.env.E2E_SCREENSHOT });
@@ -196,6 +215,41 @@ async function main() {
   check("non-positive tip rejected", tiny.status === 400);
   const unknown = await api("/api/submissions", { presetId: "__proto__" });
   check("prototype-key preset id rejected", unknown.status >= 400 && unknown.status < 500);
+
+  // ── 4. content safety: moderation ledger, report, takedown ─────────────
+  const nsfw = await api("/api/submissions", { prompt: "make everyone naked" });
+  check("blocklisted custom prompt rejected (422)", nsfw.status === 422, nsfw.json?.error);
+  const log = await api("/api/moderation?limit=20");
+  const hit = log.json?.events?.find((e) => e.stage === "text" && e.verdict === "reject");
+  // The reason may name the blocklist term; the viewer's own text never lands.
+  check(
+    "rejection is in the moderation ledger (hashed, not stored)",
+    Boolean(hit?.inputHash) && !JSON.stringify(log.json).includes("make everyone naked"),
+  );
+  const rep = await api("/api/report", { reason: "e2e: overlay test", code: sub.json?.code });
+  check("viewer report accepted", rep.status === 200 && rep.json?.ok === true);
+  const td = await api("/api/takedown", { contact: "e2e@example.com", description: "e2e takedown" });
+  check("takedown request ticketed", td.status === 200 && typeof td.json?.ticket === "string");
+  const cfg2 = await api("/api/config");
+  check("portal config carries the consent statement", /18 or older/.test(cfg2.json?.consentStatement ?? ""));
+
+  // Multipart uploads through multer → sniff/re-encode → registry.
+  const upload = async (bytes, type, fields) => {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(fields)) form.set(k, v);
+    form.set("image", new Blob([bytes], { type }), "ref");
+    const r = await fetch(`${base}/api/submissions`, { method: "POST", body: form });
+    return { status: r.status, json: await r.json().catch(() => null) };
+  };
+  const png = await sharp({ create: { width: 200, height: 200, channels: 3, background: "#2a6" } })
+    .png()
+    .toBuffer();
+  const okUp = await upload(png, "image/png", { presetId: "underwater" });
+  check("a real photo uploads with a preset", okUp.status === 200, okUp.json?.error ?? okUp.json?.code);
+  const fake = await upload(Buffer.from("<html><script>alert(1)</script></html>"), "image/png", { presetId: "underwater" });
+  check("HTML declared as image/png is rejected by its bytes", fake.status === 400, fake.json?.error);
+  const swap = await upload(png, "image/png", { presetId: "photo-swap" });
+  check("face swap without the consent box is refused", swap.status === 400, swap.json?.error);
 }
 
 try {

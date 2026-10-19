@@ -76,6 +76,26 @@ export const submissionsLog = sqliteTable("submissions_log", {
   createdAt: integer("created_at").notNull(),
 });
 
+/** The moderation ledger (docs/CONTENT-SAFETY.md S5): every text/image
+ *  verdict, review decision, output-guard stop, viewer report and takedown.
+ *  Hashes only — never the moderated bytes or a raw IP. Same shape as
+ *  @rh/shared ModerationEvent; `categories` is a JSON array. */
+export const moderationEvents = sqliteTable("moderation_events", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull(),
+  ts: integer("ts").notNull(),
+  stage: text("stage").notNull(),
+  verdict: text("verdict").notNull(),
+  source: text("source").notNull(),
+  reason: text("reason").notNull(),
+  categoriesJson: text("categories_json").notNull().default("[]"),
+  code: text("code"),
+  jobId: text("job_id"),
+  inputHash: text("input_hash"),
+  ipHash: text("ip_hash"),
+  tipper: text("tipper"),
+});
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────
 
 const sqlite = new Database(env.databasePath);
@@ -126,6 +146,22 @@ CREATE TABLE IF NOT EXISTS submissions_log (
   has_image INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS moderation_events (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  stage TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  source TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  categories_json TEXT NOT NULL DEFAULT '[]',
+  code TEXT,
+  job_id TEXT,
+  input_hash TEXT,
+  ip_hash TEXT,
+  tipper TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_moderation_channel ON moderation_events(channel_id, ts);
 CREATE INDEX IF NOT EXISTS idx_hijacks_channel ON hijacks(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_mints_channel ON token_mints(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_refresh_channel ON refresh_tokens(channel_id);

@@ -2,13 +2,15 @@
 // viewers never author these directly (Layer-0 guardrail). Custom free-text is
 // a separate, streamer-gated path handled by moderation.
 
+import type { PresetCategory, Settings } from "./types.js";
+
 export interface Preset {
   id: string;
   label: string;
   /** Sent to Decart as initialState.prompt.text. */
   prompt: string;
   /** Category for streamer intensity filtering. */
-  category: "environment" | "character" | "horror" | "chaotic";
+  category: PresetCategory;
   /** 1 (mild) … 5 (wild). */
   intensity: number;
   /** Emoji used as a lightweight thumbnail in the portal UI. */
@@ -98,4 +100,22 @@ export function getPreset(id: string | null | undefined): Preset | undefined {
   // plain-object lookup of "__proto__" / "constructor" returns a truthy
   // prototype member instead of undefined (→ a job with prompt: undefined).
   return id && Object.hasOwn(PRESETS_BY_ID, id) ? PRESETS_BY_ID[id] : undefined;
+}
+
+/** Presets a streamer's content policy permits: enabled, under the intensity
+ *  ceiling, in an allowed category, and — for likeness swaps — only when the
+ *  policy allows face images at all. The portal renders this list and intake
+ *  enforces it, so the two can't disagree. */
+export function presetAllowed(
+  p: Preset,
+  s: Pick<
+    Settings,
+    "enabledPresetIds" | "maxIntensity" | "allowedCategories" | "referenceImages"
+  >,
+): boolean {
+  if (!s.enabledPresetIds.includes(p.id)) return false;
+  if (p.intensity > s.maxIntensity) return false;
+  if (!s.allowedCategories.includes(p.category)) return false;
+  if (p.needsImage && s.referenceImages !== "likeness") return false;
+  return true;
 }

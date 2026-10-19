@@ -12,17 +12,38 @@
 //                      onRotate, and retry; a second 401 surfaces as ApiError
 // Pages call typed methods and never see a header.
 
-import type { Settings, Preset } from "@rh/shared";
+import type {
+  ModerationEvent,
+  Preset,
+  ReferenceImageTier,
+  ReviewItem,
+  Settings,
+} from "@rh/shared";
 
 // ── Response shapes ───────────────────────────────────────────────────────
 
+/** Effective capabilities: the streamer's tiers AND the host's classifiers. */
 export interface PublicConfig {
   presets: Preset[];
   allowCustomPrompts: boolean;
+  customPromptsNeedApproval: boolean;
+  referenceImages: ReferenceImageTier;
+  consentStatement: string;
   minTipUSD: number;
   maxDurationSec: number;
   secondsPerUSD: number;
   decartEnabled: boolean;
+}
+
+export interface ModerationLog {
+  events: ModerationEvent[];
+  classifiers: {
+    text: string[];
+    image: string[];
+    devMode: boolean;
+    textReady: boolean;
+    imagesReady: boolean;
+  };
 }
 
 export interface RouterConfig {
@@ -175,7 +196,14 @@ export function createApiClient(opts: ApiClientOptions) {
     // public
     getConfig: () => request<PublicConfig>("/config"),
     submit: (form: FormData) =>
-      request<{ code: string; expiresAt: number }>("/submissions", { method: "POST", body: form }),
+      request<{ code: string; expiresAt: number; needsReview?: boolean }>("/submissions", {
+        method: "POST",
+        body: form,
+      }),
+    report: (reason: string, ref: { code?: string; jobId?: string } = {}) =>
+      request<{ ok: boolean; id: string }>("/report", json("POST", { reason, ...ref })),
+    takedown: (req: { contact: string; description: string; imageUrl?: string; code?: string }) =>
+      request<{ ok: boolean; ticket: string; removed: number }>("/takedown", json("POST", req)),
 
     // streamer-privileged (install token locally, session JWT hosted)
     getRouterConfig: () => request<RouterConfig>("/router-config"),
@@ -193,6 +221,13 @@ export function createApiClient(opts: ApiClientOptions) {
     obsToggle: (visible: boolean) =>
       request<{ ok: boolean; visible?: boolean; error?: string }>("/obs/toggle", json("POST", { visible })),
     panic: () => request<{ paused: boolean }>("/panic", { method: "POST" }),
+    reviews: () => request<ReviewItem[]>("/review"),
+    decideReview: (jobId: string, approve: boolean) =>
+      request<{ ok: boolean; approved: boolean }>(
+        `/review/${encodeURIComponent(jobId)}`,
+        json("POST", { approve }),
+      ),
+    moderationLog: (limit = 100) => request<ModerationLog>(`/moderation?limit=${limit}`),
 
     // hosted-only
     ledger: () => request<LedgerRow[]>("/ledger"),

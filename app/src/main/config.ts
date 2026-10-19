@@ -29,6 +29,8 @@ const keysPath = resolve(userData, "keys.json");
 const authTokenPath = resolve(userData, "auth-token");
 
 export const uploadsDir = resolve(userData, "uploads");
+/** Moderation ledger + suspected-CSAM quarantine. Never served. */
+export const safetyDir = resolve(userData, "safety");
 
 /** Repo root when running unpackaged from source (dev), else null. */
 function devRepoRoot(): string | null {
@@ -49,6 +51,23 @@ export interface Keys {
   /** OBS scene + Browser Source that hosts the hijack overlay. */
   obsScene: string;
   obsSource: string;
+  /** Content-safety classifiers (local mode only — in cloud mode the control
+   *  plane moderates). Without them, custom text / photo uploads stay off. */
+  openaiApiKey: string;
+  anthropicApiKey: string;
+  sightengineApiUser: string;
+  sightengineApiSecret: string;
+}
+
+/** Map stored keys to the env names core's moderationFromEnv reads. */
+export function moderationEnvFrom(k: Keys) {
+  return {
+    OPENAI_API_KEY: k.openaiApiKey,
+    ANTHROPIC_API_KEY: k.anthropicApiKey,
+    SIGHTENGINE_API_USER: k.sightengineApiUser,
+    SIGHTENGINE_API_SECRET: k.sightengineApiSecret,
+    RH_CLASSIFIER_MODEL: process.env.RH_CLASSIFIER_MODEL,
+  };
 }
 
 /** The per-install privilege token: gates the local bridge's privileged HTTP
@@ -131,6 +150,13 @@ export function loadKeys(): Keys {
     obsScene: String(saved.obsScene ?? "") || process.env.OBS_SCENE?.trim() || "Scene",
     obsSource:
       String(saved.obsSource ?? "") || process.env.OBS_SOURCE?.trim() || "AI Hijack",
+    openaiApiKey: String(saved.openaiApiKey ?? "") || process.env.OPENAI_API_KEY?.trim() || "",
+    anthropicApiKey:
+      String(saved.anthropicApiKey ?? "") || process.env.ANTHROPIC_API_KEY?.trim() || "",
+    sightengineApiUser:
+      String(saved.sightengineApiUser ?? "") || process.env.SIGHTENGINE_API_USER?.trim() || "",
+    sightengineApiSecret:
+      String(saved.sightengineApiSecret ?? "") || process.env.SIGHTENGINE_API_SECRET?.trim() || "",
   };
 }
 
@@ -165,6 +191,10 @@ export function keysStatus(): Record<keyof Keys, boolean> {
     obsWsPassword: Boolean(k.obsWsPassword),
     obsScene: Boolean(k.obsScene),
     obsSource: Boolean(k.obsSource),
+    openaiApiKey: Boolean(k.openaiApiKey),
+    anthropicApiKey: Boolean(k.anthropicApiKey),
+    sightengineApiUser: Boolean(k.sightengineApiUser),
+    sightengineApiSecret: Boolean(k.sightengineApiSecret),
   };
 }
 

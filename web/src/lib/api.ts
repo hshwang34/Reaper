@@ -13,6 +13,7 @@ export {
   createApiClient,
   type ApiClient,
   type LedgerRow,
+  type ModerationLog,
   type PublicConfig,
   type RouterConfig,
   type SessionTokens,

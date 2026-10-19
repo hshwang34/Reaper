@@ -98,13 +98,31 @@ These need a person with the right logins; none are code:
 3. **Streamlabs OAuth app** — replaces the pasted-token connect once approved
    (approval has a lead time; the pasted token works meanwhile).
 4. **Deploy the control plane**: `cd server && fly launch` (uses `fly.toml`),
-   then `fly secrets set DECART_API_KEY=… TWITCH_CLIENT_ID=… … RH_PUBLIC_URL=…`.
+   then `fly secrets set DECART_API_KEY=… TWITCH_CLIENT_ID=… … RH_PUBLIC_URL=…`
+   plus the content-safety classifier keys (`OPENAI_API_KEY`,
+   `ANTHROPIC_API_KEY`, `SIGHTENGINE_API_USER`, `SIGHTENGINE_API_SECRET`) and a
+   volume path for `RH_QUARANTINE_DIR`.
 5. **Human-at-rig**: run `docs/VERIFICATION.md` against the packaged app, and
    the one-time Decart `allowedOrigins` spike (needs a live in-app hijack).
 
 ## Business-model hooks still to build (post-alpha, per COMMERCIALIZATION §3)
 
-Stripe checkout on the viewer page (our own rail), the Twitch Bits Extension
-tier, and the LLM moderation upgrade are Phase 2/3 — deliberately out of this
-build, which targets the hand-recruited alpha cohort keeping 100% of their
-Streamlabs tips while we eat metered GPU under the per-channel monthly cap.
+Stripe checkout on the viewer page (our own rail) and the Twitch Bits
+Extension tier are Phase 2/3 — deliberately out of this build, which targets
+the hand-recruited alpha cohort keeping 100% of their Streamlabs tips while we
+eat metered GPU under the per-channel monthly cap.
+
+## Content safety — M6 (built 2026-10-19)
+
+The moderation layer was not left as a post-alpha hook. Decart's API terms put
+moderation on us and offer no server-side filter. `CONTENT-SAFETY.md` is the
+design, and its §10 records what was built: the policy model, the text and image
+classifier chains (fail-closed), image hardening and TTL deletion, likeness
+consent, the streamer approval queue, the in-browser output guard, the
+moderation ledger, report/takedown endpoints with runbooks, and on-stream chips.
+
+What's left needs accounts, not code. Before going live, add classifier keys to
+the plane's env (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SIGHTENGINE_API_USER` /
+`SIGHTENGINE_API_SECRET`; without them, hosted custom prompts and photos stay
+off). Then do Phase C (CSAM hash matching, NCMEC registration, legal review)
+before the Phase-2 rail opens public uploads.

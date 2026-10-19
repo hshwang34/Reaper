@@ -114,6 +114,17 @@ interface RtcBase {
 export interface RtcOfferMsg extends RtcBase {
   t: "rtc:offer";
   sdp: RtcSdp;
+  /** On-stream chips the viewer page draws over the effect (CONTENT-SAFETY
+   *  S6). Rides the offer because the offer is the one per-job message the
+   *  viewer always receives, and it never leaves the machine. */
+  overlay?: OverlayChips;
+}
+
+export interface OverlayChips {
+  /** "hijacked by <name>" — Twitch Extension §7.3-style attribution. */
+  attribution: string | null;
+  /** "AI-altered" — Kick's realistic-AI disclosure; YouTube disclosure aid. */
+  aiLabel: boolean;
 }
 export interface RtcAnswerMsg extends RtcBase {
   t: "rtc:answer";

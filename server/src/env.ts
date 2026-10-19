@@ -37,6 +37,10 @@ export const env = {
     process.env.RH_DATABASE_PATH?.trim() || resolve(serverRoot, "data.sqlite"),
   uploadsDir:
     process.env.RH_UPLOADS_DIR?.trim() || resolve(serverRoot, "uploads"),
+  /** Suspected-CSAM quarantine (docs/runbooks/csam.md). Outside uploadsDir
+   *  so it is never served; on Fly, a volume path. */
+  quarantineDir:
+    process.env.RH_QUARANTINE_DIR?.trim() || resolve(serverRoot, "safety", "quarantine"),
   /** Per-channel monthly GPU budget in seconds (hard mint stop). Default 1h
    *  ≈ $72 COGS — the alpha "we eat it, bounded" number. */
   monthlyGpuSecondsCap: Number(process.env.RH_MONTHLY_GPU_SECONDS_CAP ?? 3600),
