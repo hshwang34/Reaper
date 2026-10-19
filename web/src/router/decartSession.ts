@@ -97,6 +97,10 @@ export interface StartArgs {
   camera: MediaStream;
   /** Fires when the styled (or, in MOCK, raw) stream is available. */
   onRemoteStream: (stream: MediaStream) => void;
+  /** Fires when Decart reports it is actually generating. Its RTP starts
+   *  flowing *before* this (measured: ~1s normally, never on a bad session),
+   *  so a flowing track alone would put pre-generation frames on air. */
+  onGenerating: () => void;
 }
 
 export class DecartSession {
@@ -117,6 +121,7 @@ export class DecartSession {
       // No Decart: hand the raw camera straight through as the "AI" stream.
       this.mock = true;
       a.onRemoteStream(a.camera);
+      a.onGenerating();
       return;
     }
 
@@ -140,7 +145,10 @@ export class DecartSession {
         prompt: { text: a.prompt, enhance: a.enhance },
         image: a.imageBlob ?? undefined,
       },
-      onConnectionChange: (state) => debugLog("decart", "conn=", state),
+      onConnectionChange: (state) => {
+        debugLog("decart", "conn=", state);
+        if (state === "generating" && g === this.gen) a.onGenerating();
+      },
       onRemoteStream: (stream) => {
         const n = stream.getVideoTracks().length;
         debugLog("decart", "onRemoteStream — video tracks:", n);

@@ -87,8 +87,9 @@ and (iv) a **subsequent** tip still runs (the queue recovered).
   the router log does **not** say "reference image fetch failed". Requires
   `RH_PUBLIC_URL` to be the real public origin in production.
 - [ ] **Rapid-tip queue stress.** Fire six tips fast and watch FIFO order,
-  live queue-position updates on the portal, `queueDepth` rejection at the 6th
-  (default depth 5), and the cooldown gap between jobs:
+  live queue-position updates on the portal, `queueDepth` rejection at the 7th
+  (default depth 5 counts *queued* jobs; the active one is extra), and the
+  cooldown gap between jobs:
   ```bash
   for i in 1 2 3 4 5 6; do
     curl -s localhost:7712/api/dev/fake-tip \
@@ -169,13 +170,41 @@ ready to start commercialization.
 | Metric | Run 1 | Run 2 | Notes |
 |---|---|---|---|
 | Billed vs paid seconds (10 jobs) | | | |
-| Session-cap kill fired at | | | expect `duration + 15s` |
+| Session-cap kill fired at | ≈ duration + 15s (feed froze ~30s into a paused 15s job) | | observed on air; Decart dashboard has no per-session view |
 | Glass-to-glass: camera→OBS | | | ms |
 | Loopback added latency | | | camera→OBS minus camera→preview |
-| Tuned `WIPE_MS` | | | |
-| Kill-matrix a–f | | | all clean? |
+| Tuned `WIPE_MS` | n/a — glitch wipe replaced by blur-fade (`fadeOutMs` 400) | | |
+| Kill-matrix a–f | a ✅ b ✅ c ✅ d ✅ e ⚠ f ✅ | | e: frame-counter stall fix unit/e2e-tested, not yet re-run on the rig |
 | Streamlabs payload quirks | | | |
 | Reference-image effect | | | keep / hide |
 | Preset verdicts (6) | | | |
 | 3-hour soak | | | mem flat? leaks? |
 | `allowedOrigins` re-enabled? | | | yes / no + why |
+
+### Run 1 notes (2026-10-19)
+
+First real-credential pass. Every row below was a defect found at the rig and
+fixed in the same session (branch `worktree-rig-hardening`):
+
+- **Loopback quality** — OBS received 320x180–480x270 for the whole job while
+  Decart sent 1280x720: a fresh WebRTC peer starts at ~300 kbps. Pinned the
+  loopback encoder (SDP bitrate hints + `maintain-resolution`); now 1280x720
+  at ~9.5 Mbps from the first frame.
+- **Buffering gate** — RTP flows before Decart generates (≈1s normally, never
+  on a bad session), so frames-ok alone put black on air. Gate now requires
+  Decart `generating` AND viewer frames-ok.
+- **Overlay stuck on air** — only the router could hide OBS, so a frozen /
+  refreshed / closed router left the source up (3.5 min on a frozen frame;
+  the viewer's standby page over the webcam). The sidecar now hides on router
+  loss, engine cancel, and every OBS (re)connect.
+- **OBS restart mid-job** — cancelled (the reloaded Browser Source lost its
+  loopback); **sidecar restart mid-job** — router abandons on hub drop
+  (it billed 15s off air before).
+- **Network cut** — Decart's SDK keeps saying "generating" and its track never
+  mutes while 0 frames arrive (12–16s frozen, reported "completed"). Router now
+  fails the job when the Decart frame counter stalls for 3s.
+- **Overlay geometry** — a 4:3-era crop + stretch distorted the feed 1.33x, and
+  a stray drag misaligned it 3px. The sidecar now snaps the AI source exactly
+  onto the webcam's drawn pixels before every unhide (`sidecar/src/obsAlign.ts`).
+- **Queue stress** — 7 rapid tips: 1 active + 5 queued, 7th dropped, FIFO with
+  ≈4s cooldown, all completed. ✅

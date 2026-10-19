@@ -120,3 +120,15 @@ test("dispose cancels the active job and fails everything queued", () => {
   // Idempotent.
   engine.dispose();
 });
+
+test("cancelActive cancels the in-flight job without pausing; no-op when idle", () => {
+  const { engine, r } = build();
+  assert.equal(engine.cancelActive("nothing running"), false);
+  engine.setRouterState("IDLE");
+  engine.onTip(tip());
+  const jobId = engine.snapshot().activeJob!.jobId;
+  assert.equal(engine.cancelActive("OBS restarted mid-hijack"), true);
+  assert.deepEqual(r.cancelled.at(-1), { jobId, reason: "OBS restarted mid-hijack" });
+  assert.equal(engine.snapshot().paused, false);
+  engine.dispose();
+});

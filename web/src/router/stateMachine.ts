@@ -3,12 +3,15 @@
 // Decart session billing. See FEASIBILITY.md §3.
 //
 //   IDLE → AUTHORIZING → CONNECTING → BUFFERING → LIVE(D) → TEARDOWN → IDLE
-//     mint fail / >10s connect / >8s no frames → ABORT (never unhide OBS)
-//     any error / panic / watchdog(D+10) → TEARDOWN
+//     mint fail / >10s connect / >8s not generating or no frames → ABORT
+//     (never unhide OBS)
+//     any error / panic / watchdog(D+10) / media stall while LIVE → TEARDOWN
 //
-// The buffering gate is the crux: OBS is unhidden ONLY after the viewer page
-// reports N verified decoded frames (viewer:frames-ok), never on a timer or
-// onloadeddata — a WebRTC stream can fire those while still black.
+// The buffering gate is the crux: OBS is unhidden ONLY when BOTH Decart reports
+// it is generating AND the viewer page reports media flowing
+// (viewer:frames-ok) — never on a timer or onloadeddata. Either alone can be
+// black: Decart's RTP flows before generation starts (and on a bad session,
+// generation never starts at all), and a viewer can see RTP before pixels.
 //
 // Concurrency model: every async continuation (token mint, image fetch, Decart
 // connect, OBS toggle) captures the job *generation* it started under and bails
@@ -42,6 +45,9 @@ export class RouterMachine {
   private wentLive = false;
   private gotStream = false;
   private goingLive = false;
+  /** The two halves of the buffering gate; see header comment. */
+  private generating = false;
+  private framesOk = false;
   /** Bumped on every job start and every teardown; see header comment. */
   private gen = 0;
   private t: MachineTimeouts;
@@ -50,6 +56,7 @@ export class RouterMachine {
   private watchdog?: ReturnType<typeof setTimeout>;
   private bufferTimer?: ReturnType<typeof setTimeout>;
   private connectTimer?: ReturnType<typeof setTimeout>;
+  private stallPoll?: ReturnType<typeof setInterval>;
 
   constructor(
     private ports: MachinePorts,
@@ -110,6 +117,8 @@ export class RouterMachine {
     this.wentLive = false;
     this.gotStream = false;
     this.goingLive = false;
+    this.generating = false;
+    this.framesOk = false;
     this.cb.log(
       `job ${job.jobId.slice(0, 8)} — ${job.durationSec}s — "${job.prompt.slice(0, 48)}…"`,
     );
@@ -145,6 +154,12 @@ export class RouterMachine {
         onRemoteStream: (stream) => {
           if (!this.stale(g)) void this.onRemoteStream(stream);
         },
+        onGenerating: () => {
+          if (this.stale(g) || !this.job || this.generating) return;
+          this.generating = true;
+          this.cb.log("decart generating");
+          this.maybeGoLive();
+        },
       });
     } catch (e) {
       // A connect that fails *after* the timeout already aborted us is old
@@ -172,16 +187,29 @@ export class RouterMachine {
     );
     this.cb.onAiStream?.(stream);
 
-    // 3. BUFFERING — push to the viewer, wait for verified frames.
+    // 3. BUFFERING — push to the viewer, wait for generation + verified frames.
+    // Arm the timer BEFORE awaiting the sender, so a gate that closes during
+    // that await can't be followed by a timer that then aborts a LIVE job.
     this.setState("BUFFERING");
+    this.bufferTimer = setTimeout(
+      () => this.abort(this.generating ? "no verified frames" : "decart never started generating"),
+      this.t.bufferMs,
+    );
     await this.ports.sender.start(job.jobId, stream);
     if (this.stale(g)) return;
-    this.bufferTimer = setTimeout(() => this.abort("no verified frames"), this.t.bufferMs);
+    this.maybeGoLive(); // generation may have started before we got here
   }
 
   /** Called by RouterPage when the viewer confirms N decoded frames. */
   onFramesOk(jobId: string): void {
     if (!this.job || this.job.jobId !== jobId) return;
+    this.framesOk = true;
+    this.maybeGoLive();
+  }
+
+  /** Go LIVE once both halves of the gate are in, exactly once per job. */
+  private maybeGoLive(): void {
+    if (!this.job || !this.generating || !this.framesOk) return;
     // `goingLive` guards re-entry across goLive's await: a second frames-ok
     // (two viewer pages open — OBS source + a debug tab) would otherwise pass
     // the BUFFERING check too and start a second countdown + watchdog whose
@@ -209,6 +237,11 @@ export class RouterMachine {
       return;
     }
     this.wentLive = true;
+    // OBS is showing the (still transparent) viewer — start its fade-in now,
+    // not earlier: a hidden Browser Source isn't rendered, so a fade started
+    // during BUFFERING would play out off air. If this message is lost the
+    // viewer just stays transparent, i.e. the real camera shows — never black.
+    this.ports.sender.sendReveal();
 
     // Count down against an absolute wall-clock deadline, not a tick counter:
     // a backgrounded/occluded router tab throttles setInterval, so decrementing
@@ -240,9 +273,38 @@ export class RouterMachine {
       },
       job.durationSec * 1000 + this.t.watchdogExtraMs,
     );
+
+    // Stall detection: on a network cut Decart's SDK keeps claiming
+    // "generating" and its track never mutes, while zero frames arrive
+    // (measured: 12–16s of frozen frame on air, then reported "completed").
+    // The frame counter is the honest signal — if it hasn't moved for
+    // stallMs, fail the job (instant hide, no fade). Shorter gaps are
+    // hiccups and are forgiven. Skipped where the browser doesn't report it.
+    let lastFrames = -1;
+    let lastChange = Date.now();
+    this.stallPoll = setInterval(async () => {
+      const n = await this.ports.sender.framesIn();
+      if (this.stale(g) || n === null) return;
+      if (n !== lastFrames) {
+        lastFrames = n;
+        lastChange = Date.now();
+      } else if (Date.now() - lastChange >= this.t.stallMs) {
+        this.abort("decart stream stalled");
+      }
+    }, Math.min(500, this.t.stallMs / 2));
   }
 
   // ── Exit paths ─────────────────────────────────────────────────────────────
+
+  /** The hub connection dropped. The engine fails the active job the moment
+   *  its router socket closes (and a restarted sidecar has no record of it),
+   *  so carrying on would only bill Decart for a job nobody will see —
+   *  measured: 15s of off-air generation after a sidecar restart. */
+  abandon(reason: string): void {
+    if (!this.job) return;
+    this.cb.log(`ABANDON: ${reason}`);
+    void this.teardown(false, reason);
+  }
 
   /** Cancel from panic / hub job:cancel. */
   cancel(jobId: string, reason: string): void {
@@ -267,19 +329,25 @@ export class RouterMachine {
     clearTimeout(this.watchdog);
     clearTimeout(this.bufferTimer);
     clearTimeout(this.connectTimer);
+    clearInterval(this.stallPoll);
 
     this.setState("TEARDOWN");
 
-    // Cover the cut with the viewer's glitch-wipe, but only if something was
-    // actually on screen (i.e. we reached LIVE). Hide OBS BEFORE dropping the
-    // Decart session so the source never shows a dead stream.
+    // Only if something was actually on screen (i.e. we reached LIVE). Either
+    // way OBS is hidden BEFORE the Decart session drops, so the source never
+    // shows a dead stream.
     if (this.wentLive) {
-      this.ports.sender.sendReset();
-      await sleep(this.t.wipeMs);
-      try {
-        await this.ports.setObsVisible(false);
-      } catch {
-        /* best effort — never block teardown on OBS */
+      if (ok) {
+        // Graceful exit (time's up): the viewer fades back to the real camera
+        // underneath, and we hide OBS once it's fully transparent.
+        this.ports.sender.sendReset();
+        await sleep(this.t.fadeOutMs);
+        await this.hideObs();
+      } else {
+        // Panic / cancel / error: the streamer wants it gone NOW — no fade.
+        // Hide first, then tell the viewer to drop its peer.
+        await this.hideObs();
+        this.ports.sender.sendReset(true);
       }
     }
 
@@ -295,10 +363,20 @@ export class RouterMachine {
     this.wentLive = false;
     this.gotStream = false;
     this.goingLive = false;
+    this.generating = false;
+    this.framesOk = false;
     // If dispose() released the camera while we were mid-teardown, we are
     // OFFLINE, not IDLE — reporting IDLE would invite the engine to dispatch
     // the next job to a router that can't run it.
     this.setState(this.camera ? "IDLE" : "OFFLINE");
+  }
+
+  private async hideObs(): Promise<void> {
+    try {
+      await this.ports.setObsVisible(false);
+    } catch {
+      /* best effort — never block teardown on OBS */
+    }
   }
 
   /** Full stop: release the camera (page unload / disarm). Resolves once the

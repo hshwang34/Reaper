@@ -192,6 +192,11 @@ export class Hub {
         warn("hub", `dropped local-plane ${msg.t} from portal`);
         return;
       }
+      if (msg.t === "page:log") {
+        // Terminal only — never relayed. Coerce + clamp: the wire is untyped.
+        log(meta.role, String(msg.line).slice(0, 500));
+        return;
+      }
       if (isRtcMsg(msg)) {
         // Signaling only ever flows router ↔ viewer; a peer may not target
         // its own role (the type says PeerRole, the wire says anything), and

@@ -22,6 +22,10 @@ export interface RuntimeHooks {
    *  OFFLINE the hub raises when the last router socket drops. The Electron
    *  bridge forwards these to the cloud engine in cloud mode. */
   onRouterState?(state: RouterState, jobId?: string, remainingSec?: number): void;
+  /** The engine cancelled the active job (panic, or the deadline backstop).
+   *  The cancel is only *sent* to the router — a frozen router never acts on
+   *  it — so a host that can reach the output (OBS) hides it here itself. */
+  onCancelJob?(jobId: string, reason: string): void;
 }
 
 export interface RuntimeOptions {
@@ -58,7 +62,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       hooks.onDispatch?.(job);
       hub.dispatchJob(job);
     },
-    cancelJob: (jobId, reason) => hub.cancelJob(jobId, reason),
+    cancelJob: (jobId, reason) => {
+      hooks.onCancelJob?.(jobId, reason);
+      hub.cancelJob(jobId, reason);
+    },
     status: (snap) => hub.broadcastStatus(snap),
     submissionUpdate: (code, status) => hub.sendSubmissionUpdate(code, status),
   };

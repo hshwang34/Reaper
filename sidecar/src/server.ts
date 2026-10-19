@@ -117,6 +117,21 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   // Express resolves routes per request, so registration order below is free.
   const server = createServer(app);
 
+  // Fail-safe hide. Only the router unhides OBS (after the buffering gate),
+  // and normally only the router hides it again — but a router that froze,
+  // reloaded, or lost its socket can't, and the overlay would stay on air
+  // over the webcam (measured: 3.5 min on a frozen frame; the viewer's
+  // "standby" screen after a refresh). The sidecar holds the OBS connection
+  // too, so whenever the router is gone or the engine cancels a job, hide it
+  // from here. Idempotent and best-effort: hiding a hidden source is a no-op.
+  const failSafeHide = (why: string) => {
+    if (!obs.isConnected()) return;
+    obs
+      .setVisible(host.obsScene, host.obsSource, false)
+      .then(() => log("server", `fail-safe hide (${why})`))
+      .catch(() => {});
+  };
+
   // ── The money path ───────────────────────────────────────────────────────
   const runtime = createRuntime({
     getSettings: host.getSettings,
@@ -124,11 +139,29 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     hub: { authToken: host.authToken, verifyRequest: isLoopbackRequest },
     tag: "server",
     hooks: {
-      onRouterState: (s, j, r) => host.observer?.onRouterState(s, j, r),
+      onRouterState: (s, j, r) => {
+        if (s === "OFFLINE") failSafeHide("router offline");
+        host.observer?.onRouterState(s, j, r);
+      },
       onJobDone: (j, ok, r) => host.observer?.onJobDone(j, ok, r),
+      onCancelJob: (_j, reason) => failSafeHide(reason),
     },
   });
   const { engine, hub } = runtime;
+
+  // OBS restores a scene exactly as it was saved, so a source that was on air
+  // when OBS (or this sidecar) quit comes back on air — the viewer's "standby"
+  // page broadcasting over the webcam. On every (re)connect, clear it. A job
+  // still in flight can't survive the restart either: the Browser Source
+  // reloaded, so the loopback it was fed by is gone (measured: 5s of standby
+  // on air until the countdown ran out). Cancel it — onCancelJob hides OBS
+  // and the router tears down. Otherwise just hide.
+  obs.onConnected(() => {
+    if (!engine.cancelActive("OBS restarted mid-hijack")) failSafeHide("obs connected");
+    // Align now too, so the OBS preview is right before the first hijack
+    // (every unhide re-aligns anyway — see ObsController.setVisible).
+    obs.alignToCamera(host.obsScene, host.obsSource).catch(() => {});
+  });
 
   const togglePause = () =>
     host.moneyProxy ? host.moneyProxy.togglePause() : Promise.resolve(engine.togglePause());

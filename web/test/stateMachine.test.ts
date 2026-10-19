@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ClientMsg, HijackJob, JobDoneMsg, RouterState } from "@rh/shared";
 import { RouterMachine } from "../src/router/stateMachine.js";
-import type { MachinePorts, DecartPort } from "../src/router/ports.js";
+import type { MachinePorts, DecartPort, SenderPort } from "../src/router/ports.js";
 
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const fakeStream = () =>
@@ -36,19 +36,26 @@ interface Harness {
   calls: string[];
   states: RouterState[];
   sent: ClientMsg[];
-  /** Deliver the "Decart" remote stream to the machine. */
-  emitStream(): void;
+  /** Deliver the "Decart" remote stream to the machine, already generating. */
+  emitStream(stream?: MediaStream): void;
+  /** Deliver the stream with Decart NOT yet generating (RTP before pixels). */
+  emitStreamOnly(): void;
+  emitGenerating(): void;
   ports: MachinePorts;
   done(): JobDoneMsg | undefined;
 }
 
-type Overrides = Partial<Omit<MachinePorts, "decart">> & { decart?: Partial<DecartPort> };
+type Overrides = Partial<Omit<MachinePorts, "decart" | "sender">> & {
+  decart?: Partial<DecartPort>;
+  sender?: Partial<SenderPort>;
+};
 
 function harness(over: Overrides = {}, timeouts = {}): Harness {
   const calls: string[] = [];
   const states: RouterState[] = [];
   const sent: ClientMsg[] = [];
   let remote: ((s: MediaStream) => void) | null = null;
+  let generating: (() => void) | null = null;
   const ports: MachinePorts = {
     mintToken: async () => "MOCK",
     setObsVisible: async (v) => {
@@ -59,6 +66,7 @@ function harness(over: Overrides = {}, timeouts = {}): Harness {
       start: async (a) => {
         calls.push("decart:start");
         remote = a.onRemoteStream;
+        generating = a.onGenerating;
       },
       disconnect: () => {
         calls.push("decart:disconnect");
@@ -69,22 +77,27 @@ function harness(over: Overrides = {}, timeouts = {}): Harness {
       start: async () => {
         calls.push("sender:start");
       },
-      sendReset: () => {
-        calls.push("sender:reset");
+      sendReveal: () => {
+        calls.push("sender:reveal");
+      },
+      sendReset: (instant?: boolean) => {
+        calls.push(instant ? "sender:reset-instant" : "sender:reset");
       },
       stop: () => {
         calls.push("sender:stop");
       },
+      framesIn: async () => null, // no stall checks unless a test opts in
+      ...over.sender,
     },
     send: (m) => {
       sent.push(m);
     },
-    ...Object.fromEntries(Object.entries(over).filter(([k]) => k !== "decart")),
+    ...Object.fromEntries(Object.entries(over).filter(([k]) => k !== "decart" && k !== "sender")),
   };
   const machine = new RouterMachine(
     ports,
     { onState: (s) => states.push(s), log: () => {} },
-    { wipeMs: 10, connectMs: 200, bufferMs: 200, watchdogExtraMs: 500, ...timeouts },
+    { fadeOutMs: 10, connectMs: 200, bufferMs: 200, watchdogExtraMs: 500, ...timeouts },
   );
   machine.setCamera(fakeCamera());
   return {
@@ -93,7 +106,12 @@ function harness(over: Overrides = {}, timeouts = {}): Harness {
     states,
     sent,
     ports,
-    emitStream: () => remote?.(fakeStream()),
+    emitStream: (stream = fakeStream()) => {
+      remote?.(stream);
+      generating?.();
+    },
+    emitStreamOnly: () => remote?.(fakeStream()),
+    emitGenerating: () => generating?.(),
     done: () => sent.find((m): m is JobDoneMsg => m.t === "job:done"),
   };
 }
@@ -112,9 +130,25 @@ test("happy path: unhide only after frames-ok; hide → disconnect on completion
   assert.equal(h.machine.getState(), "LIVE");
   await tick(1300);
   assert.equal(h.machine.getState(), "IDLE");
-  const order = h.calls.filter((c) => c.startsWith("obs") || c === "sender:reset" || c === "decart:disconnect");
-  assert.deepEqual(order, ["obs:true", "sender:reset", "obs:false", "decart:disconnect"]);
+  const order = h.calls.filter((c) => c.startsWith("obs") || c.startsWith("sender:re") || c === "decart:disconnect");
+  // Reveal only once OBS is showing; fade out BEFORE the hide, hide before disconnect.
+  assert.deepEqual(order, ["obs:true", "sender:reveal", "sender:reset", "obs:false", "decart:disconnect"]);
   assert.deepEqual(h.done(), { t: "job:done", jobId: "job-1", ok: true, reason: "completed" });
+});
+
+test("panic while LIVE skips the fade: hide first, then instant reset, then disconnect", async () => {
+  const h = harness();
+  void h.machine.runJob(job({ durationSec: 30 }));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.equal(h.machine.getState(), "LIVE");
+  h.machine.cancel("job-1", "panic");
+  await tick();
+  const order = h.calls.filter((c) => c === "obs:false" || c.startsWith("sender:reset") || c === "decart:disconnect");
+  assert.deepEqual(order, ["obs:false", "sender:reset-instant", "decart:disconnect"]);
 });
 
 test("mint failure aborts without ever touching OBS", async () => {
@@ -274,3 +308,110 @@ test("the viewer's enhance choice and reference image reach the Decart session",
   h.machine.cancel("job-1", "test");
   await tick();
 });
+
+test("frames-ok without Decart generating never unhides OBS; aborts on the buffer timer", async () => {
+  const h = harness();
+  void h.machine.runJob(job());
+  await tick();
+  h.emitStreamOnly(); // RTP flowing, model not generating yet
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.equal(h.machine.getState(), "BUFFERING");
+  assert.ok(!h.calls.includes("obs:true"), "a flowing-but-not-generating stream must stay off air");
+  await tick(300); // past bufferMs
+  assert.equal(h.machine.getState(), "IDLE");
+  assert.ok(!h.calls.includes("obs:true"));
+  assert.deepEqual(h.done(), {
+    t: "job:done",
+    jobId: "job-1",
+    ok: false,
+    reason: "decart never started generating",
+  });
+});
+
+test("gate closes in either order: frames-ok first, then generating → LIVE", async () => {
+  const h = harness();
+  void h.machine.runJob(job());
+  await tick();
+  h.emitStreamOnly();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.equal(h.machine.getState(), "BUFFERING");
+  h.emitGenerating();
+  await tick();
+  assert.equal(h.machine.getState(), "LIVE");
+  assert.equal(h.calls.filter((c) => c === "obs:true").length, 1);
+});
+
+test("abandon mid-LIVE tears down (hide before disconnect); no-op when idle", async () => {
+  const h = harness({}, { watchdogExtraMs: 5000 });
+  h.machine.abandon("nothing to abandon");
+  assert.equal(h.done(), undefined);
+  void h.machine.runJob(job({ durationSec: 30 }));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.equal(h.machine.getState(), "LIVE");
+  h.machine.abandon("lost sidecar connection");
+  await tick(50);
+  assert.equal(h.machine.getState(), "IDLE");
+  const order = h.calls.filter((c) => c === "obs:false" || c === "decart:disconnect");
+  assert.deepEqual(order, ["obs:false", "decart:disconnect"]);
+  assert.deepEqual(h.done(), { t: "job:done", jobId: "job-1", ok: false, reason: "lost sidecar connection" });
+});
+
+test("frozen frame counter while LIVE fails the job after stallMs (hide before disconnect)", async () => {
+  let frames = 0;
+  let frozen = false;
+  const h = harness(
+    { sender: { framesIn: async () => (frozen ? frames : ++frames) } },
+    { stallMs: 60, watchdogExtraMs: 5000 },
+  );
+  await toLive(h);
+  await tick(100);
+  assert.equal(h.machine.getState(), "LIVE", "frames flowing → stays LIVE");
+  frozen = true;
+  await tick(200);
+  assert.equal(h.machine.getState(), "IDLE");
+  const order = h.calls.filter((c) => c === "obs:false" || c === "decart:disconnect");
+  assert.deepEqual(order, ["obs:false", "decart:disconnect"]);
+  assert.deepEqual(h.done(), { t: "job:done", jobId: "job-1", ok: false, reason: "decart stream stalled" });
+});
+
+test("a frame gap shorter than stallMs is forgiven; no counter → no stall checks", async () => {
+  let frames = 0;
+  let frozen = false;
+  const h = harness(
+    { sender: { framesIn: async () => (frozen ? frames : ++frames) } },
+    { stallMs: 150, watchdogExtraMs: 5000 },
+  );
+  await toLive(h);
+  frozen = true;
+  await tick(60);
+  frozen = false;
+  await tick(200);
+  assert.equal(h.machine.getState(), "LIVE");
+  h.machine.abandon("test cleanup");
+  await tick(50);
+
+  const n = harness({ sender: { framesIn: async () => null } }, { stallMs: 30, watchdogExtraMs: 5000 });
+  await toLive(n);
+  await tick(120);
+  assert.equal(n.machine.getState(), "LIVE");
+  n.machine.abandon("test cleanup");
+  await tick(50);
+});
+
+async function toLive(h: Harness) {
+  void h.machine.runJob(job({ durationSec: 30 }));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.equal(h.machine.getState(), "LIVE");
+}

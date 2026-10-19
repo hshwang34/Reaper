@@ -248,6 +248,16 @@ export class Engine {
 
   // ── Panic / pause ──────────────────────────────────────────────────────
 
+  /** Cancel the in-flight job (if any) without pausing — for host-detected
+   *  failures the router can't see, e.g. OBS restarting under a live job. The
+   *  router tears down and reports job:done; the queue then moves on. */
+  cancelActive(reason: string): boolean {
+    if (!this.active) return false;
+    warn("engine", `cancelling ${this.active.jobId.slice(0, 8)}: ${reason}`);
+    this.emit.cancelJob(this.active.jobId, reason);
+    return true;
+  }
+
   pause(): void {
     this.paused = true;
     if (this.active) {

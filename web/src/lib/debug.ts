@@ -13,9 +13,28 @@ const enabled: boolean = (() => {
   }
 })();
 
+let sink: ((line: string) => void) | null = null;
+
+/** Mirror every debug line to the local sidecar terminal (via `page:log`),
+ *  regardless of `?debug=1` — the console stays quiet, the terminal doesn't.
+ *  The viewer runs inside OBS where nobody can open DevTools. */
+export function setDebugSink(fn: ((line: string) => void) | null): void {
+  sink = fn;
+}
+
 /** Namespaced console logger. Silent unless debug is enabled for this page. */
 export function debugLog(scope: string, ...args: unknown[]): void {
   if (enabled) console.warn(`[${scope}]`, ...args);
+  sink?.(`[${scope}] ${args.map((a) => (typeof a === "string" ? a : safeJson(a))).join(" ")}`);
+}
+
+function safeJson(v: unknown): string {
+  if (v instanceof Error) return v.message;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
 }
 
 export const debugEnabled = enabled;

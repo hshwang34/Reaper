@@ -117,9 +117,12 @@ streamer's machine — the cloud front door rejects it (`rejectLocalPlane`).
   avoid a feedback loop) via `getUserMedia`.
 - **The AI feed re-enters OBS via a local WebRTC loopback** into the display-only `/viewer`
   page, which lives in a Browser Source. The hub relays RTC signaling by role.
-- **OBS is unhidden ONLY after `/viewer` reports N verified decoded frames**
-  (`viewer:frames-ok`), never on a timer or `onloadeddata` — a WebRTC stream can fire those
-  while still black. This is the "buffering gate."
+- **OBS is unhidden ONLY when Decart reports `generating` AND `/viewer` reports media
+  flowing** (`viewer:frames-ok`), never on a timer or `onloadeddata` — a WebRTC stream can
+  fire those while still black, and Decart's RTP flows before it generates. This is the
+  "buffering gate."
+- **The sidecar hides OBS on its own** whenever the router is lost, the engine cancels a job,
+  or OBS (re)connects — only the router unhides, but a frozen/reloaded router can't hide.
 
 ### Cost safety — three independent caps (FEASIBILITY §3)
 
