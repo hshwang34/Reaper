@@ -113,9 +113,16 @@ Still to do — this is where it becomes a business:
   platform cut, remainder to streamer — margin-positive by construction.
 - Dashboard additions: intensity ceiling, per-viewer rate limits, free-text
   approval queue, earnings, session replays.
-- Moderation upgrade: blocklist → LLM classifier scored against streamer
-  settings (FEASIBILITY Layer 2); image-upload moderation becomes mandatory
-  (CSAM scanning is a legal requirement once we host viewer uploads).
+- **Content-safety system** — designed in `CONTENT-SAFETY.md` (2026-10-19);
+  its Phase A (image hardening + TTL deletion, policy model, text/image
+  classifiers behind host-injected providers, consent attestation, decision
+  ledger, report/takedown endpoints, on-stream attribution + AI label) is a
+  **prerequisite for any viewer outside the alpha cohort**, not a Phase-2
+  nicety: Decart's API terms make moderation our contractual duty (§3.5) with
+  no server-side filter, and the TAKE IT DOWN Act's 48-hour takedown duty has
+  been enforced since 2026-05. Its Phase B (approval queue, output-frame
+  guard) runs during the alpha; Phase C (CSAM hash matching, NCMEC
+  registration, legal review) gates this phase's public uploads.
 - Signed/notarized macOS build (Apple Developer enrollment; the CI job is
   ready and gated on secrets).
 - **Exit criteria:** first $1k month across cohort; support load per streamer
@@ -160,7 +167,7 @@ in the repo and exercised by the test gate; it does not mean deployed.
 | Token minting | Decart key vault; per-job `ek_`, `maxSessionDuration` capped | **built** (job-gated, one per job, monthly budget) |
 | Trigger ingestion | Streamlabs per channel; EventSub webhooks | Streamlabs pasted-token **built**; OAuth connect + EventSub open |
 | Payments | Stripe Connect (checkout, splits, payouts, chargebacks) | open — Phase 2 |
-| Moderation | Text: blocklist → LLM classifier. Images: hash + CSAM scan | blocklist **built**; the rest open, and legally required before public uploads |
+| Moderation | Text: blocklist → floor + policy classifiers. Images: sniff/re-encode/hash → nudity/minor/celebrity → consent. Output guard. Ledger, takedown. See `CONTENT-SAFETY.md` | blocklist **built**; everything else designed, open — Phase A required before non-alpha viewers |
 | Uploads | S3-compatible store, signed URLs, TTL cleanup | local disk per channel; S3 open |
 | Observability | Per-hijack ledger, billing alarms | ledger **built** (SQLite); alarms open |
 | Admin/support | Session inspector, refund tooling, channel kill-switch | `suspended` flag only |
@@ -204,8 +211,10 @@ Decide at Phase 2 entry with alpha data on hijacks/streamer/month.
 2. **May 2026 Bits AUP** primary text unread — could constrain Phase 3; verify
    manually before any Bits build.
 3. ~~Tauri camera capture unverified~~ — resolved by choosing Electron.
-4. **T&S burden of image uploads** (CSAM scanning, DMCA on reference images) —
-   scope legal review before Phase 2 opens uploads beyond alpha.
+4. **T&S burden of image uploads** (CSAM reporting duty, TAKE IT DOWN 48h
+   takedowns, likeness consent under Decart §4.3, DMCA) — design and phasing
+   in `CONTENT-SAFETY.md`; legal review of "covered platform" status and
+   state likeness laws before Phase 2 opens uploads beyond alpha.
 5. **Decart platform risk** — single-vendor realtime model; fal.ai hosts
    lucy-2.5 too (second source), and the token-mint seam isolates vendor swap.
 6. **Chargebacks on tips** ($15 + amount per dispute) — Bits/Stripe Radar

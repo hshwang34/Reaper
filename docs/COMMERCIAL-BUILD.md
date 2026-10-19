@@ -104,7 +104,17 @@ These need a person with the right logins; none are code:
 
 ## Business-model hooks still to build (post-alpha, per COMMERCIALIZATION §3)
 
-Stripe checkout on the viewer page (our own rail), the Twitch Bits Extension
-tier, and the LLM moderation upgrade are Phase 2/3 — deliberately out of this
-build, which targets the hand-recruited alpha cohort keeping 100% of their
-Streamlabs tips while we eat metered GPU under the per-channel monthly cap.
+Stripe checkout on the viewer page (our own rail) and the Twitch Bits
+Extension tier are Phase 2/3 — deliberately out of this build, which targets
+the hand-recruited alpha cohort keeping 100% of their Streamlabs tips while we
+eat metered GPU under the per-channel monthly cap.
+
+## Content safety — the next code milestone (not post-alpha)
+
+The moderation layer is **not** a post-alpha hook. `CONTENT-SAFETY.md`
+(2026-10-19) is the design; its Phase A must land before any viewer outside
+the alpha cohort reaches the portal, because Decart's API terms put moderation
+on us with no server-side filter, and today's build has no image content
+check, no likeness consent, and never deletes uploads after a job. Order of
+work from here: Phase A (M6) → alpha with Phase B → Phase C before the
+Phase-2 rail.

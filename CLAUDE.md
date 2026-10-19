@@ -12,7 +12,10 @@ GPU billing, monetization policy, live-video latency, content safety).
 
 `FEASIBILITY.md` is the source of truth for *why* the design is shaped this way — read it
 before changing the pipeline, cost caps, or trigger layer. Section references (§3, §8, etc.)
-appear throughout the code comments.
+appear throughout the code comments. `docs/CONTENT-SAFETY.md` is the equivalent for the
+guardrail/moderation layer (stages S0–S6, policy model, implementation phases) — read it
+before touching `moderation.ts`, `submissions.ts`, uploads, or anything that puts viewer
+bytes in front of the model or on stream.
 
 ## Commands
 
