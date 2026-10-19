@@ -53,7 +53,7 @@ import {
   saveCloudConfig,
   type CloudConfig,
 } from "./cloudLink.js";
-import { discoverObsWebsocket } from "./obsDiscovery.js";
+import { discoverObsWebsocket, launchObs } from "./obsDiscovery.js";
 import { signInWithBrowser } from "./signIn.js";
 import { startAutoUpdate } from "./updater.js";
 
@@ -71,6 +71,11 @@ let viewerUrlGlobal = "";
 /** OBS scene + source the overlay lives in — resolved once at boot from
  *  keys.json / .env (machine wiring, not streamer Settings). */
 let obsWiring = { scene: "Scene", source: "AI Hijack" };
+
+// Windows keys taskbar grouping, notifications and the pinned shortcut on
+// this id; it must match electron-builder's appId or the installed shortcut
+// and the running window show up as two different apps.
+if (process.platform === "win32") app.setAppUserModelId("com.realityhijack.app");
 
 // ── Single instance ────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -248,11 +253,9 @@ async function boot(): Promise<void> {
       return { ok: false, detail: (e as Error).message };
     }
   });
-  ipcMain.handle("rh:launch-obs", async () => {
-    if (process.platform === "darwin") {
-      await shell.openPath("/Applications/OBS.app");
-    }
-  });
+  // Throws (→ the wizard shows the message) when OBS isn't where its
+  // installer puts it; the streamer can always start OBS themselves.
+  ipcMain.handle("rh:launch-obs", () => launchObs());
   ipcMain.handle("rh:test-hijack", async (_e, prompt: string, d: number) => {
     if (link) return link.devHijack(prompt, d);
     return local!.engine.manual(prompt, d);
@@ -269,6 +272,9 @@ async function boot(): Promise<void> {
     width: 1280,
     height: 840,
     title: "Reality Hijack",
+    // Windows/Linux draw Electron's default File/Edit/View bar inside the
+    // window; the router has no use for it (Alt still reveals it).
+    autoHideMenuBar: true,
     webPreferences: {
       // The countdown + teardown timers must run while minimized/occluded.
       backgroundThrottling: false,
@@ -404,10 +410,19 @@ async function provisionObs(viewerUrl: string): Promise<void> {
 // ── Tray ──────────────────────────────────────────────────────────────────
 
 function setupTray(port: number): void {
-  // Text-only tray (macOS): an empty image + a title glyph. A real template
-  // icon lands with M5 packaging.
-  tray = new Tray(nativeImage.createEmpty());
-  tray.setToolTip("Reality Hijack");
+  // macOS: a "Template" image, which the menu bar tints for light/dark mode.
+  // Windows: a full-colour icon (the notification area doesn't tint). The
+  // @2x variants beside each file are picked up automatically on HiDPI.
+  const assets = resolve(dirname(fileURLToPath(import.meta.url)), "..", "assets");
+  const icon = process.platform === "darwin" ? "trayTemplate.png" : "tray.png";
+  tray = new Tray(nativeImage.createFromPath(resolve(assets, icon)));
+  // Windows convention: left-click opens the app, right-click the menu
+  // (macOS opens the menu on any click by itself).
+  tray.on("click", () => {
+    if (process.platform === "darwin") return;
+    win?.show();
+    win?.focus();
+  });
   void port; // reserved: shown in a future tray "about" line
   refreshTray();
   // Cheap status poll — the tray is a glanceable, not a dashboard.
@@ -424,7 +439,13 @@ function refreshTray(): void {
       : snap.routerState === "OFFLINE"
         ? "○"
         : "●";
-  tray.setTitle(` ${stateGlyph} RH`);
+  // macOS shows a status glyph beside the icon; Windows has no tray title,
+  // so the state goes in the hover tooltip instead.
+  if (process.platform === "darwin") tray.setTitle(` ${stateGlyph}`);
+  tray.setToolTip(
+    `Reality Hijack — ${snap.paused ? "PAUSED" : snap.routerState}` +
+      (snap.queueLength ? ` · ${snap.queueLength} queued` : ""),
+  );
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {

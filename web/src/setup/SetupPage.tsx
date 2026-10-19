@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DesktopBridge, DesktopSetupState } from "@rh/shared";
 import { desktopBridge } from "../lib/desktop.js";
+import { PANIC_KEY, TRAY_NAME } from "../lib/platform.js";
 import { acquireCamera } from "../router/decartSession.js";
 
 // The wizard reads everything through the typed preload bridge
@@ -242,6 +243,12 @@ function CameraStep({ next }: { next: () => void }) {
   );
 }
 
+/** An error thrown in the main process, minus Electron's IPC wrapper
+ *  ("Error invoking remote method 'rh:…': Error: "). */
+function ipcMessage(e: unknown): string {
+  return (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+}
+
 // ── Step 3: OBS ───────────────────────────────────────────────────────────
 
 function ObsStep({
@@ -290,7 +297,7 @@ function ObsStep({
               void d
                 .launchObs()
                 .then(refresh)
-                .catch((e) => setResult(`Couldn't launch OBS: ${(e as Error).message}`))
+                .catch((e) => setResult(`Couldn't launch OBS: ${ipcMessage(e)}`))
             }
           >
             Launch OBS
@@ -368,7 +375,7 @@ const SAFETY_CHECKS = [
   },
   {
     id: "panic",
-    text: "I know my panic key (⌘⇧H, or the tray menu) cuts an effect instantly, and I'll use it if anything looks wrong.",
+    text: `I know my panic key (${PANIC_KEY}, or the ${TRAY_NAME}) cuts an effect instantly, and I'll use it if anything looks wrong.`,
   },
   {
     id: "disclosure",
@@ -483,7 +490,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
         </p>
       )}
       <p className="text-sm text-zinc-400">
-        Panic anytime with <b>⌘⇧H</b> (also in the menu-bar icon) — it kills
+        Panic anytime with <b>{PANIC_KEY}</b> (also in the {TRAY_NAME}) — it kills
         the live hijack and pauses the queue instantly.
       </p>
       <label className="flex items-center gap-2 text-sm text-zinc-300">

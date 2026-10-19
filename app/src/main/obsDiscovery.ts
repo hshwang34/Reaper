@@ -13,9 +13,11 @@
 // flipping server_enabled for the streamer is a consent-gated wizard action
 // (M4), never something a boot path does silently.
 
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { shell } from "electron";
 import { log, warn } from "@rh/core";
 
 export interface ObsDiscovery {
@@ -34,7 +36,7 @@ function configPath(): string {
       "config.json",
     );
   }
-  // darwin (linux uses ~/.config/obs-studio — out of scope, macOS-first)
+  // darwin (linux uses ~/.config/obs-studio — out of scope)
   return join(
     homedir(),
     "Library",
@@ -76,4 +78,36 @@ export function discoverObsWebsocket(): ObsDiscovery {
     warn("obs-discovery", "obs-websocket config unreadable");
     return { status: "unreadable" };
   }
+}
+
+/** Where OBS's own installer puts it. Steam/portable installs live elsewhere;
+ *  those streamers get the "start OBS yourself" message. */
+function obsExecutable(): string {
+  if (process.platform === "win32") {
+    return join(
+      process.env.ProgramFiles ?? "C:\\Program Files",
+      "obs-studio",
+      "bin",
+      "64bit",
+      "obs64.exe",
+    );
+  }
+  return "/Applications/OBS.app";
+}
+
+/** Start OBS for the wizard's "Launch OBS" button. Throws a human-readable
+ *  error when OBS isn't at its default install location. */
+export async function launchObs(): Promise<void> {
+  const target = obsExecutable();
+  if (!existsSync(target)) {
+    throw new Error("OBS isn't in its default install location — start it yourself and this page connects on its own.");
+  }
+  if (process.platform === "win32") {
+    // OBS must start with its own bin dir as the working directory, or it
+    // fails to find its locale files ("Failed to find locale/en-US.ini").
+    spawn(target, [], { cwd: dirname(target), detached: true, stdio: "ignore" }).unref();
+    return;
+  }
+  const err = await shell.openPath(target);
+  if (err) throw new Error(err);
 }

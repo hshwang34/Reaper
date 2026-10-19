@@ -1,9 +1,11 @@
-# electron-builder — macOS-first (plan M5; Windows is a post-M5 fast-follow).
+# electron-builder — macOS (Apple silicon + Intel DMGs) and Windows (x64
+# NSIS installer). docs/DISTRIBUTION.md is the release runbook.
 #
 # The app is a bundled main process (dist/main.mjs, dist/preload.cjs) plus
-# staged resources (web-dist + the one unbundled dep). Signing/notarization
-# are gated on the Apple Developer enrollment: with CSC_* env unset, builds
-# are unsigned (fine for the internal M5 dry-run); CI sets them for release.
+# staged resources (web-dist + the unbundled deps, incl. sharp's native
+# binaries for every target arch — scripts/stage-resources.mjs). Signing is
+# gated on secrets: with them unset, builds are unsigned (fine for testing,
+# but Gatekeeper / SmartScreen warn); CI sets them for release.
 appId: com.realityhijack.app
 productName: Reality Hijack
 copyright: © Reality Hijack
@@ -15,19 +17,36 @@ directories:
   output: release
   buildResources: build
 
+# electron-builder copies every production dependency into app.asar by
+# default, but esbuild already inlined them into dist/main.mjs — and the two
+# that can't be inlined ship in extraResources. Without the exclusion the asar
+# carried a second, unused copy of the whole tree (+30 MB) whose sharp was
+# built for the build host's arch only.
 files:
   - dist/**/*
+  - assets/**/*
   - package.json
+  - "!**/node_modules/**"
+# Nothing native left in the asar to rebuild against Electron's ABI (sharp
+# uses N-API prebuilts, valid across Node and Electron).
+npmRebuild: false
 
 extraResources:
   - from: build-resources
     to: .
 
+# Fixed, space-free names: GitHub Releases mangles spaces, and the download
+# page links to these.
+artifactName: Reality-Hijack-${version}-${arch}.${ext}
+
 mac:
   category: public.app-category.video
+  # dmg = the download; zip = what electron-updater installs from.
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -37,6 +56,24 @@ mac:
 
 dmg:
   title: Reality Hijack
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+# One-click, per-user install: no admin prompt, installs to
+# %LOCALAPPDATA%\Programs, launches when done — the fewest clicks between a
+# streamer and the setup wizard. Per-user also lets electron-updater update
+# silently without UAC.
+nsis:
+  oneClick: true
+  perMachine: false
+  artifactName: Reality-Hijack-Setup-${version}.${ext}
+  shortcutName: Reality Hijack
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
 
 # electron-updater feed (GitHub Releases). Enabled once the repo is public
 # and releases are cut in CI.

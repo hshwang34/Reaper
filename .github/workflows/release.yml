@@ -1,22 +1,70 @@
-# Signed + notarized macOS release. Gated on Apple Developer enrollment:
-# the secrets below are set once enrollment completes, then a tag ships a DMG
-# to GitHub Releases and electron-updater picks it up.
+# Desktop app release: macOS (Apple silicon + Intel DMGs) and Windows (x64
+# installer). docs/DISTRIBUTION.md is the runbook.
 #
-# Required repo secrets:
-#   CSC_LINK              base64 of the Developer ID Application .p12
-#   CSC_KEY_PASSWORD      the .p12 password
-#   APPLE_ID              notarization Apple ID
-#   APPLE_APP_SPECIFIC_PASSWORD  app-specific password for notarytool
-#   APPLE_TEAM_ID         the team id
+# Two ways in:
+#   · push a v* tag      → build on both OSes, sign whatever has secrets, and
+#                          upload into ONE draft GitHub Release (both jobs
+#                          add to the same draft). Publishing the draft is the
+#                          human step — it's what electron-updater sees.
+#   · Run workflow (UI)  → same builds (signed too, if secrets exist), nothing
+#                          published: the installers land as workflow
+#                          artifacts. This is how to get a Windows build to
+#                          test without a Windows dev machine.
+#
+# Signing is gated on secrets and degrades to unsigned builds when they're
+# absent (Gatekeeper / SmartScreen then warn on first launch):
+#   macOS   CSC_LINK, CSC_KEY_PASSWORD             Developer ID Application .p12 (base64)
+#           APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID   notarization
+#   Windows WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD     code-signing .pfx (base64)
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # upload to the draft release
 
 jobs:
-  mac:
-    runs-on: macos-14
+  # Create the draft up front: the two build jobs upload in parallel, and if
+  # each had to create the release itself they could race into two drafts.
+  draft:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # electron-builder uploads to the release named v<app version>, so a tag
+      # that doesn't match app/package.json would scatter assets elsewhere.
+      - name: Tag matches app version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          v="v$(node -p "require('./app/package.json').version")"
+          [ "$TAG" = "$v" ] || { echo "tag $TAG != app version $v"; exit 1; }
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$TAG" --generate-notes
+
+  build:
+    needs: draft
+    # Runs after `draft`, or without it on a manual run (where it's skipped).
+    if: ${{ !failure() && !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14 # Apple silicon runner; the Intel build is cross-packaged
+            platform: --mac
+            archs: arm64,x64
+          - os: windows-latest
+            platform: --win
+            archs: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,14 +72,34 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The suites run on both OSes: the Windows run is the only place
+      # Windows-specific breakage would show before a streamer hits it.
       - run: npm run check
-      - name: Build, sign, notarize, publish
+
+      - name: Build${{ startsWith(github.ref, 'refs/tags/') && ' + publish draft' || ' (artifacts only)' }}
         working-directory: app
+        shell: bash
         env:
+          RH_ARCHS: ${{ matrix.archs }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist -- --publish always
+        run: |
+          npm run prepackage
+          npx electron-builder ${{ matrix.platform }} \
+            --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
+
+      - name: Upload installers
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          path: |
+            app/release/*.dmg
+            app/release/*.exe
+          retention-days: 14
