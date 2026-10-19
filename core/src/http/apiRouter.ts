@@ -33,6 +33,10 @@ export interface UploadedFile {
 
 export interface ApiContext {
   runtime: Runtime;
+  /** Canonical channel id (hosted) — never the raw URL segment, which may
+   *  be a login or an id in any casing for the same channel. Absent on the
+   *  single-channel local rig. Strike / rate-limit keys use this. */
+  channelId?: string;
   updateSettings(patch: Partial<Settings>): Settings;
   /** True when a real dct_ key backs this context (else tokens are "MOCK"). */
   decartEnabled: boolean;
@@ -67,10 +71,12 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
   // context resolver needs that param.
   const r = Router({ mergeParams: true });
 
-  /** Strike / rate-limit identity: (channel, real client IP). `req.ip` is the
-   *  client only when the host set `trust proxy` correctly — see clientKey. */
-  const submitter = (req: Request) =>
-    clientKey(typeof req.params.channel === "string" ? req.params.channel : undefined, req.ip);
+  /** Strike / rate-limit identity: (canonical channel, real client IP). Keyed
+   *  on the RESOLVED channel id, not the URL segment: `/c/Alice`, `/c/alice`
+   *  and `/c/<id>` are one channel, and keying on the raw segment would hand
+   *  an abuser a fresh budget per spelling. `req.ip` is the client only when
+   *  the host set `trust proxy` correctly — see clientKey. */
+  const submitter = (req: Request) => clientKey(opts.context(req)?.channelId, req.ip);
 
   /** Resolve-or-404, so every handler below can assume a context. */
   const withCtx =
@@ -261,7 +267,10 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
       const imageUrl = field(b.imageUrl, 500) || undefined;
       const sha256 = /^[0-9a-f]{64}$/.test(field(b.sha256, 64)) ? field(b.sha256, 64) : undefined;
       if (!imageUrl && !sha256) return res.status(400).json({ error: "imageUrl or sha256 required" });
-      const removed = ctx.runtime.uploads.takedown({ url: imageUrl, sha256 }, { nearDuplicates: true });
+      const removed = ctx.runtime.uploads.takedown(
+        { url: imageUrl, sha256 },
+        { nearDuplicates: true, source: "streamer" },
+      );
       const ev = ctx.runtime.ledger.record({
         stage: "takedown",
         verdict: "info",

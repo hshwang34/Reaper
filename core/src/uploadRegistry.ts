@@ -24,7 +24,7 @@
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { hamming } from "./images.js";
-import { log } from "./log.js";
+import { log, warn } from "./log.js";
 
 export interface UploadEntry {
   url: string;
@@ -41,20 +41,29 @@ const NEAR_DUPLICATE = 6;
 /** Hard cap on how long any upload may exist (the job itself needs minutes). */
 export const UPLOAD_TTL_MS = 60 * 60 * 1000;
 
-/** Most block entries kept; the oldest non-pinned entry is evicted first. */
-export const MAX_BLOCKED = 5000;
+/** Budget for blocks created by ANONYMOUS takedown requests. When it's full,
+ *  new anonymous blocks are refused (the files are still deleted) — never
+ *  made room for by evicting older blocks, which would let anyone flood the
+ *  list to un-block a picture someone else had taken down. */
+export const MAX_ANONYMOUS_BLOCKS = 2000;
+
+/** Who created a block. Only "anonymous" is budgeted; "streamer" blocks need
+ *  the channel's credential and "csam" blocks come from our own classifier
+ *  (rate-limited by strikes), so both are kept for the runtime's life. */
+export type BlockSource = "anonymous" | "streamer" | "csam";
 
 interface BlockEntry {
   sha256: string;
   /** Present only for near-duplicate blocks. */
   dhash: string | null;
-  /** Never evicted by the cap (suspected CSAM). */
-  pinned: boolean;
+  source: BlockSource;
 }
 
 export interface TakedownOptions {
   /** Also remove/block dHash near-duplicates. Authenticated callers only. */
   nearDuplicates?: boolean;
+  /** Default "anonymous" — the public endpoint's trust level. */
+  source?: BlockSource;
 }
 
 export class UploadRegistry {
@@ -88,16 +97,22 @@ export class UploadRegistry {
 
   /**
    * Block a picture from being uploaded again. `dhash` widens the block to
-   * near-duplicates; pass null for an exact-only block. `pinned` entries
-   * (suspected CSAM) survive the cap.
+   * near-duplicates; pass null for an exact-only block. Nothing is ever
+   * evicted: an anonymous block past its budget is refused instead (returns
+   * false), so flooding the list can't undo an existing takedown.
    */
-  block(sha256: string, dhash: string | null, pinned = false): void {
-    if (this.blocked.some((b) => b.sha256 === sha256 && b.dhash === dhash)) return;
-    this.blocked.push({ sha256, dhash, pinned });
-    if (this.blocked.length > MAX_BLOCKED) {
-      const i = this.blocked.findIndex((b) => !b.pinned);
-      if (i >= 0) this.blocked.splice(i, 1);
+  block(sha256: string, dhash: string | null, source: BlockSource): boolean {
+    if (this.blocked.some((b) => b.sha256 === sha256 && b.dhash === dhash)) return true;
+    if (source === "anonymous" && this.anonymousBlocks() >= MAX_ANONYMOUS_BLOCKS) {
+      warn("uploads", "anonymous block budget full — new block refused (files still removed)");
+      return false;
     }
+    this.blocked.push({ sha256, dhash, source });
+    return true;
+  }
+
+  private anonymousBlocks(): number {
+    return this.blocked.reduce((n, b) => n + (b.source === "anonymous" ? 1 : 0), 0);
   }
 
   get blockedCount(): number {
@@ -129,6 +144,7 @@ export class UploadRegistry {
     opts: TakedownOptions = {},
   ): number {
     const near = opts.nearDuplicates === true;
+    const source = opts.source ?? "anonymous";
     const seeds = [...this.byUrl.values()].filter(
       (e) =>
         (target.url && e.url === target.url) ||
@@ -138,10 +154,10 @@ export class UploadRegistry {
     const shas = new Set(seeds.map((s) => s.sha256));
     if (target.sha256) shas.add(target.sha256);
     const dhashes = near ? seeds.map((s) => s.dhash) : [];
-    for (const s of seeds) this.block(s.sha256, near ? s.dhash : null);
+    for (const s of seeds) this.block(s.sha256, near ? s.dhash : null, source);
     // A hash-only request (nothing stored right now) still blocks re-upload —
     // exactly, never by a placeholder dHash that would match flat images.
-    if (target.sha256 && !seeds.length) this.block(target.sha256, null);
+    if (target.sha256 && !seeds.length) this.block(target.sha256, null, source);
 
     let n = 0;
     for (const e of [...this.byUrl.values()]) {

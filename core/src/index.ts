@@ -41,7 +41,14 @@ export {
   type ModerationEnv,
 } from "./moderationProviders.js";
 export { dHash, hamming, ImageRejected, prepareUpload, sha256Hex, sniffImage } from "./images.js";
-export { MAX_BLOCKED, sweepUploadDir, UPLOAD_TTL_MS, UploadRegistry, type TakedownOptions } from "./uploadRegistry.js";
+export {
+  MAX_ANONYMOUS_BLOCKS,
+  sweepUploadDir,
+  UPLOAD_TTL_MS,
+  UploadRegistry,
+  type BlockSource,
+  type TakedownOptions,
+} from "./uploadRegistry.js";
 export {
   clientKey,
   ipHash,

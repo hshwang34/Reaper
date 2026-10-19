@@ -263,7 +263,7 @@ export async function createSubmission(
         // CONTENT-SAFETY S5: we now have "actual knowledge" (18 U.S.C. §2258A).
         // Preserve, block, and follow docs/runbooks/csam.md — the bytes have
         // already stopped before any further vendor saw them.
-        deps.uploads.block(prepared.sha256, prepared.dhash, true); // near-dup, pinned
+        deps.uploads.block(prepared.sha256, prepared.dhash, "csam"); // near-dup, never evicted
         ledger.record({ stage: "image", verdict: "reject", source: step.source, reason: "suspected CSAM — runbook", categories: ["csam-suspected"], inputHash, ipHash, tipper: tipperName });
         warn("safety", `SUSPECTED CSAM upload quarantined (sha256 ${inputHash.slice(0, 12)}…) — follow docs/runbooks/csam.md`);
         strikes.strike(ipHash);

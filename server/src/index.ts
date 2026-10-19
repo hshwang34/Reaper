@@ -10,6 +10,7 @@
 //   /c/:login                                — hosted viewer portal (SPA)
 //   /uploads/:channel/*                      — reference images
 
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
@@ -180,7 +181,9 @@ const upload = multer({
     },
     filename: (_req, file, cb) => {
       const ext = ALLOWED_IMG.get(file.mimetype) ?? ".jpg";
-      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
+      // 128 random bits: the takedown endpoint treats possessing an upload URL
+      // as proof you saw the picture, so the name must not be guessable.
+      cb(null, `${randomBytes(16).toString("hex")}${ext}`);
     },
   }),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
@@ -200,6 +203,7 @@ app.use(
       if (!rt) return null;
       return {
         runtime: rt,
+        channelId: id, // resolved — login/id/casing variants share one key
         updateSettings: rt.updateSettings,
         decartEnabled: Boolean(env.decartApiKey),
         mint: (durationSec) => rt.mint(durationSec),

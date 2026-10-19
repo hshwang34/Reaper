@@ -24,7 +24,7 @@ import {
   clientKey,
   displayName,
   jsonForPrompt,
-  MAX_BLOCKED,
+  MAX_ANONYMOUS_BLOCKS,
   memorySafetyLedger,
 } from "../src/index.js";
 import { fakeText, imageFile, liveSuite, recorder, settings, tip } from "./helpers.js";
@@ -122,15 +122,27 @@ test("registry: the streamer's takedown fans out to near-duplicates", () => {
   assert.ok(deleted.includes("p4"), "dispose releases what's left");
 });
 
-test("registry: a hash-only takedown never blocks flat images; the block list is capped", () => {
+test("registry: a hash-only takedown never blocks flat images", () => {
   const reg = new UploadRegistry(() => {});
   reg.takedown({ sha256: "f".repeat(64) });
   // A flat image's dHash is all zeros — the old placeholder block matched it.
   assert.ok(!reg.isBlocked("other", "0000000000000000"));
-  reg.block("pinned-csam", "0123456789abcdef", true);
-  for (let i = 0; i < MAX_BLOCKED + 50; i++) reg.block(`h${i}`, null);
-  assert.equal(reg.blockedCount, MAX_BLOCKED);
-  assert.ok(reg.isBlocked("pinned-csam", "fedcba9876543210"), "pinned entries survive the cap");
+  reg.dispose();
+});
+
+test("registry: flooding anonymous blocks can't evict an earlier takedown", () => {
+  const reg = new UploadRegistry(() => {});
+  reg.block("victims-photo", null, "anonymous"); // the takedown that matters
+  reg.block("csam", "0123456789abcdef", "csam");
+  reg.block("streamer", null, "streamer");
+  for (let i = 0; i < MAX_ANONYMOUS_BLOCKS + 50; i++) reg.block(`flood${i}`, null, "anonymous");
+  assert.ok(reg.isBlocked("victims-photo", "1111111111111111"), "first takedown still holds");
+  assert.ok(reg.isBlocked("x", "0123456789abcdee"), "csam near-dup block holds");
+  assert.ok(reg.isBlocked("streamer", "2222222222222222"));
+  assert.equal(reg.blockedCount, MAX_ANONYMOUS_BLOCKS + 2, "the flood is refused, not admitted");
+  // Authenticated and CSAM blocks still land when the anonymous budget is full.
+  assert.ok(reg.block("later-streamer", null, "streamer"));
+  assert.equal(reg.block("later-anon", null, "anonymous"), false);
   reg.dispose();
 });
 
