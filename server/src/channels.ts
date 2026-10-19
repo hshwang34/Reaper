@@ -15,21 +15,90 @@
 // (`setStreamlabsToken`) — rebuilding the runtime would orphan the router
 // socket the front door already adopted into the old hub.
 
-import { and, eq, gte, sql } from "drizzle-orm";
-import { DEFAULT_SETTINGS, loadSettings, type Settings, type TipEvent } from "@rh/shared";
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import {
+  HOSTED_SETTINGS,
+  loadSettings,
+  type ModerationEvent,
+  type Settings,
+  type TipEvent,
+} from "@rh/shared";
 import {
   createRuntime,
   createStreamlabsAdapter,
   gatedMint,
   log,
   mintClientToken,
+  moderationFromEnv,
   warn,
   type MintLedger,
+  type ModerationSuite,
   type Runtime,
+  type SafetyLedger,
   type TriggerAdapter,
 } from "@rh/core";
-import { channels, db, hijacks, tokenMints } from "./db.js";
+import { channels, db, hijacks, moderationEvents, tokenMints } from "./db.js";
 import { env } from "./env.js";
+
+/** One classifier suite for every channel — it holds OUR vendor keys and is
+ *  stateless; per-channel policy is passed on each call. Dev mode only when
+ *  the plane has no Decart key (every token mints as MOCK). */
+let suite: ModerationSuite | null = null;
+function moderationSuite(): ModerationSuite {
+  suite ??= moderationFromEnv(process.env, !env.decartApiKey);
+  return suite;
+}
+
+/** The channel's moderation ledger, in SQLite. */
+function dbSafetyLedger(channelId: string): SafetyLedger {
+  return {
+    record(e) {
+      const ev: ModerationEvent = { id: randomUUID(), ts: Date.now(), ...e };
+      db.insert(moderationEvents)
+        .values({
+          id: ev.id,
+          channelId,
+          ts: ev.ts,
+          stage: ev.stage,
+          verdict: ev.verdict,
+          source: ev.source,
+          reason: ev.reason.slice(0, 1000),
+          categoriesJson: JSON.stringify(ev.categories),
+          code: ev.code ?? null,
+          jobId: ev.jobId ?? null,
+          inputHash: ev.inputHash ?? null,
+          ipHash: ev.ipHash ?? null,
+          tipper: ev.tipper ?? null,
+        })
+        .run();
+      return ev;
+    },
+    recent(limit = 100) {
+      return db
+        .select()
+        .from(moderationEvents)
+        .where(eq(moderationEvents.channelId, channelId))
+        .orderBy(desc(moderationEvents.ts))
+        .limit(limit)
+        .all()
+        .map((r) => ({
+          id: r.id,
+          ts: r.ts,
+          stage: r.stage as ModerationEvent["stage"],
+          verdict: r.verdict as ModerationEvent["verdict"],
+          source: r.source,
+          reason: r.reason,
+          categories: JSON.parse(r.categoriesJson) as string[],
+          code: r.code,
+          jobId: r.jobId,
+          inputHash: r.inputHash,
+          ipHash: r.ipHash,
+          tipper: r.tipper,
+        }));
+    },
+  };
+}
 
 export interface ChannelRuntime extends Runtime {
   channelId: string;
@@ -103,10 +172,12 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
       .from(channels)
       .where(eq(channels.id, channelId))
       .get();
+    // HOSTED_SETTINGS, not the local defaults: our key, our uploads, our
+    // liability — a new channel starts presets-only (CONTENT-SAFETY §5).
     try {
-      return loadSettings(JSON.parse(fresh?.settingsJson ?? "{}"));
+      return loadSettings(JSON.parse(fresh?.settingsJson ?? "{}"), HOSTED_SETTINGS);
     } catch {
-      return { ...DEFAULT_SETTINGS };
+      return { ...HOSTED_SETTINGS };
     }
   };
 
@@ -140,6 +211,7 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
           .run();
       },
     },
+    safety: { moderation: moderationSuite(), ledger: dbSafetyLedger(channelId) },
   });
   const ledger = dbLedger(channelId, row.monthlyGpuSecondsCap);
 

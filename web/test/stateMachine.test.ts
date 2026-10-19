@@ -9,7 +9,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ClientMsg, HijackJob, JobDoneMsg, RouterState } from "@rh/shared";
 import { RouterMachine } from "../src/router/stateMachine.js";
-import type { MachinePorts, DecartPort, SenderPort } from "../src/router/ports.js";
+import type { MachinePorts, DecartPort, SenderPort, GuardVerdict } from "../src/router/ports.js";
+import { verdictFrom } from "../src/router/frameGuard.js";
 
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const fakeStream = () =>
@@ -43,6 +44,8 @@ interface Harness {
   emitGenerating(): void;
   ports: MachinePorts;
   done(): JobDoneMsg | undefined;
+  /** Make the LIVE-phase guard sampler report a positive. */
+  guardFire(v?: GuardVerdict): void;
 }
 
 type Overrides = Partial<Omit<MachinePorts, "decart" | "sender">> & {
@@ -56,7 +59,20 @@ function harness(over: Overrides = {}, timeouts = {}): Harness {
   const sent: ClientMsg[] = [];
   let remote: ((s: MediaStream) => void) | null = null;
   let generating: (() => void) | null = null;
+  let onUnsafe: ((v: GuardVerdict) => void) | null = null;
   const ports: MachinePorts = {
+    guard: {
+      ready: async () => true,
+      check: async () => {
+        calls.push("guard:check");
+        return { unsafe: false, label: "ok", score: 0.01 };
+      },
+      watch: (_s, cb) => {
+        calls.push("guard:watch");
+        onUnsafe = cb;
+        return () => calls.push("guard:stop");
+      },
+    },
     mintToken: async () => "MOCK",
     setObsVisible: async (v) => {
       calls.push(`obs:${v}`);
@@ -74,8 +90,8 @@ function harness(over: Overrides = {}, timeouts = {}): Harness {
       ...over.decart,
     },
     sender: {
-      start: async () => {
-        calls.push("sender:start");
+      start: async (_id, _stream, overlay) => {
+        calls.push(overlay ? `sender:start:${JSON.stringify(overlay)}` : "sender:start");
       },
       sendReveal: () => {
         calls.push("sender:reveal");
@@ -113,8 +129,13 @@ function harness(over: Overrides = {}, timeouts = {}): Harness {
     emitStreamOnly: () => remote?.(fakeStream()),
     emitGenerating: () => generating?.(),
     done: () => sent.find((m): m is JobDoneMsg => m.t === "job:done"),
+    guardFire: (v = { unsafe: true, label: "Porn", score: 0.93 }) => onUnsafe?.(v),
   };
 }
+
+const guarded = (mode: "on" | "required", trusted = false): Partial<HijackJob> => ({
+  safety: { outputGuard: mode, trusted, attribution: "alice", aiLabel: true },
+});
 
 test("happy path: unhide only after frames-ok; hide → disconnect on completion", async () => {
   const h = harness();
@@ -415,3 +436,129 @@ async function toLive(h: Harness) {
   await tick();
   assert.equal(h.machine.getState(), "LIVE");
 }
+
+// ── Output guard (CONTENT-SAFETY S4) ─────────────────────────────────────
+
+test("guard: an unsafe first frame aborts inside the buffering gate — OBS never shown", async () => {
+  const h = harness({
+    guard: {
+      ready: async () => true,
+      check: async () => ({ unsafe: true, label: "Porn", score: 0.97 }),
+      watch: () => () => {},
+    },
+  });
+  void h.machine.runJob(job(guarded("on")));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.equal(h.machine.getState(), "IDLE");
+  assert.ok(!h.calls.includes("obs:true"), "never unhidden");
+  assert.match(String(h.done()?.reason), /^safety: output guard Porn 0\.97/);
+});
+
+test("guard: a positive during LIVE hides before disconnect and stops the sampler", async () => {
+  const h = harness();
+  void h.machine.runJob(job({ ...guarded("on"), durationSec: 5 }));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.equal(h.machine.getState(), "LIVE");
+  assert.ok(h.calls.includes("guard:check") && h.calls.includes("guard:watch"));
+  h.guardFire();
+  await tick(40);
+  assert.equal(h.machine.getState(), "IDLE");
+  const order = h.calls.filter((c) => ["obs:false", "decart:disconnect", "guard:stop"].includes(c));
+  assert.deepEqual(order, ["guard:stop", "obs:false", "decart:disconnect"]);
+  assert.match(String(h.done()?.reason), /^safety: output guard Porn/);
+  // A late sampler callback after teardown is inert.
+  h.guardFire();
+  await tick();
+  assert.equal(h.sent.filter((m) => m.t === "job:done").length, 1);
+});
+
+test("guard: required + viewer content + guard unavailable → abort; trusted presets still run", async () => {
+  const unavailable = {
+    guard: {
+      ready: async () => false,
+      check: async () => ({ unsafe: false, label: "ok", score: 0 }),
+      watch: () => () => {},
+    },
+  };
+  const h = harness(unavailable);
+  void h.machine.runJob(job(guarded("required", false)));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.ok(!h.calls.includes("obs:true"));
+  assert.match(String(h.done()?.reason), /^safety: output guard unavailable/);
+
+  const t = harness(unavailable);
+  void t.machine.runJob(job(guarded("required", true)));
+  await tick();
+  t.emitStream();
+  await tick();
+  t.machine.onFramesOk("job-1");
+  await tick();
+  assert.equal(t.machine.getState(), "LIVE", "a trusted preset runs without the guard");
+  t.machine.cancel("job-1", "test");
+  await tick(30);
+});
+
+test("guard: a hung model load can't stall the gate past its budget", async () => {
+  const h = harness(
+    {
+      guard: {
+        ready: () => new Promise<boolean>(() => {}),
+        check: async () => ({ unsafe: false, label: "ok", score: 0 }),
+        watch: () => () => {},
+      },
+    },
+    { guardMs: 20 },
+  );
+  void h.machine.runJob(job(guarded("on")));
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick(50);
+  assert.equal(h.machine.getState(), "LIVE", "'on' runs without the guard when it can't load");
+  h.machine.cancel("job-1", "test");
+  await tick(30);
+});
+
+test("guard off: no check, no watch; overlay chips ride the sender start", async () => {
+  const h = harness();
+  void h.machine.runJob(job());
+  await tick();
+  h.emitStream();
+  await tick();
+  h.machine.onFramesOk("job-1");
+  await tick();
+  assert.ok(!h.calls.some((c) => c.startsWith("guard")));
+  h.machine.cancel("job-1", "test");
+  await tick(30);
+
+  const o = harness();
+  void o.machine.runJob(job(guarded("on")));
+  await tick();
+  o.emitStream();
+  await tick();
+  assert.ok(o.calls.includes('sender:start:{"attribution":"alice","aiLabel":true}'));
+  o.machine.cancel("job-1", "test");
+  await tick(30);
+});
+
+test("verdictFrom: explicit classes sum; 'Sexy' alone needs high confidence; drawings are fine", () => {
+  const p = (o: Record<string, number>) =>
+    Object.entries(o).map(([className, probability]) => ({ className, probability }));
+  assert.equal(verdictFrom(p({ Porn: 0.4, Hentai: 0.3, Neutral: 0.3 })).unsafe, true);
+  assert.equal(verdictFrom(p({ Sexy: 0.7, Neutral: 0.3 })).unsafe, false);
+  assert.equal(verdictFrom(p({ Sexy: 0.9 })).label, "Sexy");
+  assert.equal(verdictFrom(p({ Drawing: 0.95, Hentai: 0.04 })).unsafe, false);
+});

@@ -5,7 +5,7 @@
 // machine (Chrome tab ↔ OBS CEF), where mDNS host candidates often fail to
 // resolve.
 
-import { isRtcMsg, type ServerMsg } from "@rh/shared";
+import { isRtcMsg, type OverlayChips, type ServerMsg } from "@rh/shared";
 import type { HubSocket } from "./ws.js";
 import { debugLog } from "./debug.js";
 
@@ -66,7 +66,7 @@ export class LoopbackSender {
     this.unsubscribe();
   }
 
-  async start(jobId: string, stream: MediaStream): Promise<void> {
+  async start(jobId: string, stream: MediaStream, overlay?: OverlayChips): Promise<void> {
     this.stop();
     this.jobId = jobId;
     const pc = new RTCPeerConnection(RTC_CONFIG);
@@ -102,7 +102,7 @@ export class LoopbackSender {
     const created = await pc.createOffer();
     const offer = { type: created.type, sdp: withLoopbackBitrate(created.sdp ?? "") };
     await pc.setLocalDescription(offer);
-    this.hub.send({ t: "rtc:offer", target: "viewer", jobId, sdp: offer });
+    this.hub.send({ t: "rtc:offer", target: "viewer", jobId, sdp: offer, overlay });
     this.watchStats(pc);
   }
 
@@ -191,7 +191,7 @@ export class LoopbackReceiver {
 
   constructor(
     private hub: HubSocket,
-    private onStream: (stream: MediaStream, jobId: string) => void,
+    private onStream: (stream: MediaStream, jobId: string, overlay?: OverlayChips) => void,
     private onReset: (jobId: string, instant: boolean) => void,
     private onReveal: (jobId: string) => void = () => {},
   ) {
@@ -221,7 +221,7 @@ export class LoopbackReceiver {
 
       pc.ontrack = (e) => {
         debugLog("loopback:viewer", "ontrack — stream received");
-        this.onStream(e.streams[0], rtc.jobId);
+        this.onStream(e.streams[0], rtc.jobId, rtc.overlay);
       };
       pc.onicecandidate = (e) => {
         if (e.candidate) {

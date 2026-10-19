@@ -59,6 +59,9 @@ export class CorrelationStore {
     imageUrl: string | null;
     /** Decart prompt enhancement; defaults to Decart's own default (on). */
     enhance?: boolean;
+    needsReview?: boolean;
+    reviewWhy?: string;
+    consent?: Submission["consent"];
   }): Submission {
     const now = Date.now();
     const sub: Submission = {
@@ -68,6 +71,9 @@ export class CorrelationStore {
       tipperName: input.tipperName,
       imageUrl: input.imageUrl,
       enhance: input.enhance ?? true,
+      needsReview: input.needsReview ?? false,
+      reviewWhy: input.reviewWhy,
+      consent: input.consent,
       createdAt: now,
       expiresAt: now + this.ttlMs,
     };

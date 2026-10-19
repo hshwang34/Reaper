@@ -16,6 +16,7 @@ import {
   env,
   getSettings,
   rootDir,
+  safetyDir,
   updateSettings,
   uploadsDir,
 } from "./config.js";
@@ -30,6 +31,9 @@ const local = createLocalServer({
   getSettings,
   updateSettings,
   uploadsDir,
+  // OPENAI_API_KEY / ANTHROPIC_API_KEY / SIGHTENGINE_API_USER+SECRET from .env
+  moderationEnv: process.env,
+  safetyDir,
   webDist: resolve(rootDir, "web", "dist"),
 });
 

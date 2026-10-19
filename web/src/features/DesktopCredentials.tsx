@@ -15,6 +15,10 @@ const EMPTY = {
   streamlabsToken: "",
   obsWsUrl: "",
   obsWsPassword: "",
+  openaiApiKey: "",
+  anthropicApiKey: "",
+  sightengineApiUser: "",
+  sightengineApiSecret: "",
 };
 
 export function DesktopCredentials() {
@@ -80,6 +84,20 @@ export function DesktopCredentials() {
         {field("streamlabsToken", "Streamlabs socket token", "eyJ…")}
         {field("obsWsUrl", "OBS WebSocket URL", "auto-discovered")}
         {field("obsWsPassword", "OBS WebSocket password", "auto-discovered")}
+      </div>
+      <h4 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-widest text-zinc-500">
+        Content-safety classifiers
+      </h4>
+      <p className="mb-3 text-xs text-zinc-500">
+        With a real Decart key, viewers' own text and photos only reach the
+        model through these. Custom prompts need OpenAI or Anthropic; photo
+        uploads need Sightengine (the minors check). Presets always work.
+      </p>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        {field("openaiApiKey", "OpenAI API key (free moderation)", "sk-…")}
+        {field("anthropicApiKey", "Anthropic API key (policy check)", "sk-ant-…")}
+        {field("sightengineApiUser", "Sightengine API user", "1234567")}
+        {field("sightengineApiSecret", "Sightengine API secret", "…")}
       </div>
       <button
         onClick={() => void save()}

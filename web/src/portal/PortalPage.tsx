@@ -7,7 +7,11 @@
 //
 // Product-design note: prompt text is resolved server-side from a preset id, or
 // moderated when custom — the viewer never controls raw prompt bytes that reach
-// the model unchecked. That guardrail is the heart of the project.
+// the model unchecked. That guardrail is the heart of the project. What this
+// page offers is the EFFECTIVE policy from /config (streamer tiers AND the
+// host's classifiers), so it never shows a control intake would refuse; a
+// photo of a person needs the consent box, whose text is exactly what the
+// server records (docs/CONTENT-SAFETY.md S2).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { computeDurationSec, type SubmissionStatus } from "@rh/shared";
@@ -42,6 +46,7 @@ export default function PortalPage() {
   // Decart prompt enhancement. Default ON (Decart's default, and what the
   // preset catalog is written for); OFF = literal prompt, for precise edits.
   const [enhance, setEnhance] = useState(true);
+  const [consent, setConsent] = useState(false);
   const [tipAmount, setTipAmount] = useState(8);
 
   const [submitting, setSubmitting] = useState(false);
@@ -124,6 +129,10 @@ export default function PortalPage() {
       setError(`"${selectedPreset.label}" needs a reference photo — add one below.`);
       return;
     }
+    if (selectedPreset?.needsImage && !consent) {
+      setError("Tick the consent box — you need permission to put someone's face on stream.");
+      return;
+    }
     setSubmitting(true);
     try {
       const form = new FormData();
@@ -136,11 +145,18 @@ export default function PortalPage() {
       if (imageFile) {
         const blob = await downscaleImage(imageFile);
         form.set("image", blob, "reference.jpg");
+        if (consent) form.set("consent", "1");
       }
       const res = await api.submit(form);
       setCode(res.code);
       setExpiresAt(res.expiresAt);
-      setStatus({ code: res.code, state: "pending" });
+      setStatus({
+        code: res.code,
+        state: "pending",
+        message: res.needsReview
+          ? "The streamer approves this kind of effect before it runs. If they decline (or don't answer within 2 minutes), it won't run."
+          : undefined,
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -164,6 +180,7 @@ export default function PortalPage() {
     setImageFile(null);
     replacePreview(null);
     setEnhance(true);
+    setConsent(false);
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -251,15 +268,18 @@ export default function PortalPage() {
                 className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-sm outline-none focus:border-cyan-500"
               />
               <p className="mt-1 text-xs text-zinc-600">
-                Custom prompts are checked against the streamer's guardrails
-                before they run.
+                Checked by an AI moderator against the streamer's rules before
+                you get a code — no nudity, real people, hate or gore.
+                {cfg.customPromptsNeedApproval &&
+                  " The streamer also approves each custom effect before it runs."}
               </p>
             </section>
           )}
 
           {/* Reference image — lucy-2.5 uses it as a character/style anchor.
-              Same File → downscale → multipart path as before; only the copy
-              and the remove affordance are new. */}
+              Only offered when the streamer's tier AND the host's classifiers
+              allow it (cfg.referenceImages is the effective tier). */}
+          {cfg.referenceImages !== "off" && (
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
               Reference photo{" "}
@@ -294,12 +314,31 @@ export default function PortalPage() {
               )}
             </div>
             <p className="mt-1 text-xs text-zinc-600">
-              The AI uses this as a character or style anchor — a clear,
-              well-lit photo of a face or outfit works best. Mention it in a
-              custom prompt (“the person in the reference image…”). JPEG, PNG
-              or WebP; resized to 720p before upload.
+              {cfg.referenceImages === "scenes"
+                ? "A scene or style to borrow from — a place, a painting, a texture. This stream doesn't allow photos of people."
+                : "The AI uses this as a character or style anchor — a clear, well-lit photo works best. Mention it in a custom prompt (“the person in the reference image…”)."}{" "}
+              Checked by a safety filter, then deleted after your effect runs.
+              JPEG, PNG or WebP; resized to 720p before upload.
             </p>
+            {imageFile && cfg.referenceImages === "likeness" && (
+              <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-700/50 bg-amber-950/30 p-3">
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-amber-500"
+                />
+                <span className="text-xs text-amber-100">
+                  {cfg.consentStatement}
+                  <span className="block text-amber-300/70">
+                    Required if the photo shows a person. Public figures and
+                    anyone under 18 are always refused.
+                  </span>
+                </span>
+              </label>
+            )}
           </section>
+          )}
 
           {/* Decart prompt enhancement — the last per-session knob lucy-2.5
               exposes. On = Decart rewrites/expands the prompt (its default);
@@ -317,6 +356,8 @@ export default function PortalPage() {
                 <span className="block text-xs text-zinc-500">
                   Let the AI expand your prompt for richer results. Turn off for
                   a literal, precise edit (e.g. “make the wall light blue”).
+                  Your own text may run literally either way — the moderator
+                  approves exactly what you wrote.
                 </span>
               </span>
             </label>
@@ -372,7 +413,98 @@ export default function PortalPage() {
           onReset={reset}
         />
       )}
+      <SafetyFooter code={code} />
     </div>
+  );
+}
+
+/** Report + removal request (CONTENT-SAFETY S5). Both land in the streamer's
+ *  moderation log; a removal request naming an image URL acts immediately,
+ *  and the 48-hour clock (TAKE IT DOWN Act) starts at submission. */
+function SafetyFooter({ code }: { code: string | null }) {
+  const [open, setOpen] = useState<null | "report" | "takedown">(null);
+  const [text, setText] = useState("");
+  const [contact, setContact] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [done, setDone] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function send() {
+    setErr(null);
+    try {
+      if (open === "report") {
+        await api.report(text.trim(), code ? { code } : {});
+        setDone("Thanks — the streamer's moderation log has your report.");
+      } else {
+        const r = await api.takedown({
+          contact: contact.trim(),
+          description: text.trim(),
+          imageUrl: imageUrl.trim() || undefined,
+        });
+        setDone(
+          `Request ${r.ticket.slice(0, 8)} received${r.removed ? ` — ${r.removed} file(s) removed now` : ""}. We act on removal requests within 48 hours.`,
+        );
+      }
+      setOpen(null);
+      setText("");
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+
+  return (
+    <footer className="mt-10 border-t border-zinc-900 pt-4 text-center text-xs text-zinc-600">
+      {done && <p className="mb-2 text-emerald-400">{done}</p>}
+      {!open ? (
+        <p className="space-x-3">
+          <button className="underline hover:text-zinc-300" onClick={() => setOpen("report")}>
+            Report a problem
+          </button>
+          <button className="underline hover:text-zinc-300" onClick={() => setOpen("takedown")}>
+            Request removal of an image of you
+          </button>
+        </p>
+      ) : (
+        <div className="space-y-2 text-left">
+          {open === "takedown" && (
+            <>
+              <input
+                value={contact}
+                onChange={(e) => setContact(e.target.value)}
+                placeholder="How we can reach you (email)"
+                className="w-full rounded bg-zinc-900 px-2 py-1 text-sm"
+              />
+              <input
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                placeholder="Image link, if you have it (optional)"
+                className="w-full rounded bg-zinc-900 px-2 py-1 text-sm"
+              />
+            </>
+          )}
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={2}
+            placeholder={open === "report" ? "What was wrong?" : "What should be removed, and when you saw it"}
+            className="w-full rounded bg-zinc-900 px-2 py-1 text-sm"
+          />
+          {err && <p className="text-red-400">{err}</p>}
+          <div className="flex justify-end gap-3">
+            <button className="text-zinc-500" onClick={() => setOpen(null)}>
+              Cancel
+            </button>
+            <button
+              className="rounded bg-zinc-800 px-3 py-1 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40"
+              disabled={!text.trim() || (open === "takedown" && !contact.trim())}
+              onClick={() => void send()}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      )}
+    </footer>
   );
 }
 
@@ -452,6 +584,7 @@ function StatusTimeline({
   const state = expired ? "expired" : (status?.state ?? "pending");
   const label: Record<string, string> = {
     pending: "Waiting for your tip…",
+    review: "Tip received — waiting for the streamer to approve…",
     matched: "Tip received — queued!",
     queued: `In queue${status?.queuePosition ? ` · position ${status.queuePosition}` : ""}`,
     live: `LIVE${status?.remainingSec != null ? ` · ${status.remainingSec}s left` : ""}`,

@@ -12,9 +12,9 @@
 // loopback bind, static serving, and the install-token auth gate.
 
 import { timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import express from "express";
 import type { RouterState, Settings, StatusSnapshot } from "@rh/shared";
 import {
@@ -22,13 +22,17 @@ import {
   createRuntime,
   createStreamlabsAdapter,
   gatedMint,
+  jsonlSafetyLedger,
   memoryLedger,
   mintClientToken,
+  moderationFromEnv,
+  sweepUploadDir,
   log,
   warn,
   type ApiContext,
   type Engine,
   type Hub,
+  type ModerationEnv,
   type TriggerAdapter,
 } from "@rh/core";
 import { ObsController } from "./obs.js";
@@ -50,6 +54,15 @@ export interface LocalServerHost {
   updateSettings(patch: Partial<Settings>): Settings;
   /** Where reference-image uploads land. */
   uploadsDir: string;
+  /** Classifier credentials (docs/CONTENT-SAFETY.md S1/S2). Missing keys
+   *  darken the matching untrusted tier — custom text needs a text
+   *  classifier, any upload needs a minors-covering image classifier —
+   *  unless no real model is behind this host (MOCK). */
+  moderationEnv?: ModerationEnv;
+  /** Directory for the moderation ledger (moderation.jsonl) and the
+   *  quarantine folder (suspected-CSAM preservation, docs/runbooks/csam.md).
+   *  Must NOT be served. */
+  safetyDir: string;
   /** Built web app to serve (absent/missing → dev mode, Vite provides pages). */
   webDist?: string;
   /** When set, privileged HTTP endpoints (mint/panic/OBS/settings/dev) and
@@ -102,6 +115,16 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
   const obs = new ObsController(host.obsWsUrl, host.obsWsPassword);
   const { upload, publicUploadUrl, deleteUpload } = createUploads(host.uploadsDir);
 
+  // ── Content safety ───────────────────────────────────────────────────────
+  // Dev mode only when NO real model is reachable from here: no local key
+  // and no cloud mint proxy. With a real model, the untrusted tiers need
+  // real classifiers or they stay dark.
+  const devMode = !decartEnabled && !host.mintProxy;
+  const moderation = moderationFromEnv(host.moderationEnv ?? {}, devMode);
+  if (!existsSync(host.safetyDir)) mkdirSync(host.safetyDir, { recursive: true });
+  const quarantineDir = resolve(host.safetyDir, "quarantine");
+  const safetyLedger = jsonlSafetyLedger(resolve(host.safetyDir, "moderation.jsonl"));
+
   const app = express();
   // Deliberately NO cors() here: every legitimate consumer is same-origin
   // (dev pages reach us through the Vite proxy; in production/Electron we
@@ -146,6 +169,7 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       onJobDone: (j, ok, r) => host.observer?.onJobDone(j, ok, r),
       onCancelJob: (_j, reason) => failSafeHide(reason),
     },
+    safety: { moderation, ledger: safetyLedger },
   });
   const { engine, hub } = runtime;
 
@@ -180,6 +204,16 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     togglePause,
     imageUrl: (f) => publicUploadUrl(f.filename),
     discardUpload: (f) => deleteUpload(publicUploadUrl(f.filename)),
+    // Out of the served tree, owner-only, kept for the preservation period.
+    quarantineUpload: (f) => {
+      try {
+        mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
+        renameSync(f.path, resolve(quarantineDir, `${Date.now()}-${basename(f.path)}`));
+      } catch (e) {
+        warn("safety", `quarantine failed (${(e as Error).message}) — deleting instead`);
+        deleteUpload(publicUploadUrl(f.filename));
+      }
+    },
   };
 
   /** Gate for privileged endpoints. Public surface stays: health, config,
@@ -276,6 +310,9 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     togglePause,
     status,
     start(port: number) {
+      // Uploads from a previous run lost their registry entries with the
+      // process; anything past the TTL goes now (CONTENT-SAFETY S2 step 9).
+      sweepUploadDir(host.uploadsDir);
       for (const t of triggers) {
         t.start((tip) => {
           const outcome = engine.onTip(tip);

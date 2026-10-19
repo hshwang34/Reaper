@@ -10,12 +10,50 @@
 // log sink is swappable via setLogger(). Anything that knows about .env,
 // settings.json, OBS, or a database stays in the host.
 
-export { Engine, type EngineEmit } from "./engine.js";
+export { Engine, REVIEW_TTL_MS, type EngineEmit } from "./engine.js";
 export { CorrelationStore, type MatchResult, type MatchOptions } from "./correlation.js";
-export { checkPrompt, type ModerationResult } from "./moderation.js";
+export {
+  checkPrompt,
+  emptySuite,
+  imagesReady,
+  moderateImage,
+  moderateText,
+  ModerationUnavailable,
+  textReady,
+  type ClassifierVerdict,
+  type ContentPolicy,
+  type ImageClassifier,
+  type ImageVerdict,
+  type ModerationResult,
+  type ModerationSuite,
+  type TextClassifier,
+} from "./moderation.js";
+export {
+  claudeClassifiers,
+  DEFAULT_CLASSIFIER_MODEL,
+  moderationFromEnv,
+  openAiImageClassifier,
+  openAiTextClassifier,
+  sightengineImageClassifier,
+  type ModerationEnv,
+} from "./moderationProviders.js";
+export { dHash, hamming, ImageRejected, prepareUpload, sha256Hex, sniffImage } from "./images.js";
+export { sweepUploadDir, UPLOAD_TTL_MS, UploadRegistry } from "./uploadRegistry.js";
+export {
+  ipHash,
+  jsonlSafetyLedger,
+  memorySafetyLedger,
+  RateLimiter,
+  StrikeTracker,
+  type ModerationEventInput,
+  type SafetyLedger,
+} from "./safetyLedger.js";
 export {
   createSubmission,
+  isBanned,
   parseEnhance,
+  type IntakeDeps,
+  type StoredImage,
   type SubmissionInput,
   type SubmissionOutcome,
 } from "./submissions.js";

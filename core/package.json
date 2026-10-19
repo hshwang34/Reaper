@@ -13,11 +13,14 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@decartai/sdk": "^0.1.14",
     "@rh/shared": "*",
     "express": "^5.2.1",
+    "sharp": "^0.35.5",
     "socket.io-client": "^2.5.0",
-    "ws": "^8.21.1"
+    "ws": "^8.21.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

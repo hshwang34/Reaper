@@ -9,7 +9,10 @@ import { randomUUID } from "node:crypto";
 import {
   computeDurationSec,
   getPreset,
+  SAFETY_REASON_PREFIX,
   type HijackJob,
+  type JobSafety,
+  type ReviewItem,
   type RouterState,
   type Settings,
   type StatusSnapshot,
@@ -17,6 +20,7 @@ import {
   type TipEvent,
 } from "@rh/shared";
 import { CorrelationStore } from "./correlation.js";
+import { isBanned } from "./submissions.js";
 import { log, warn } from "./log.js";
 
 export interface EngineEmit {
@@ -24,6 +28,24 @@ export interface EngineEmit {
   cancelJob(jobId: string, reason: string): void;
   status(snapshot: StatusSnapshot): void;
   submissionUpdate(code: string, status: Omit<SubmissionStatus, "code">): void;
+  /** A job left the engine for good — finished, failed, dropped, declined,
+   *  timed out in review, or cancelled on dispose. Hosts release its upload
+   *  and write safety records here. */
+  jobEnded?(job: HijackJob, ok: boolean, reason: string): void;
+  /** A submission expired with no tip (its upload can go). */
+  submissionExpired?(code: string): void;
+}
+
+/** How long a paid job may wait for the streamer's approval before it fails
+ *  (CONTENT-SAFETY S3). Long enough to glance at a card mid-stream. */
+export const REVIEW_TTL_MS = 120_000;
+
+interface Parked {
+  job: HijackJob;
+  code: string | null;
+  why: string;
+  expiresAt: number;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 // Engine-side backstop: how long past a job's paid duration we wait for the
@@ -51,6 +73,8 @@ export class Engine {
   private cooldownTimer?: ReturnType<typeof setTimeout>;
   /** jobId → originating submission code, for queued/active jobs only. */
   private jobCode = new Map<string, string>();
+  /** Paid jobs waiting on the streamer, by jobId. */
+  private parked = new Map<string, Parked>();
   private disposed = false;
 
   constructor(
@@ -61,11 +85,13 @@ export class Engine {
      *  userData). Read fresh on every use so live edits apply immediately. */
     private getSettings: () => Settings,
   ) {
-    correlation.onExpire = (code) =>
+    correlation.onExpire = (code) => {
       this.emit.submissionUpdate(code, {
         state: "expired",
         message: "No matching tip arrived in time.",
       });
+      this.emit.submissionExpired?.(code);
+    };
   }
 
   // ── Trigger entry point ────────────────────────────────────────────────
@@ -79,9 +105,14 @@ export class Engine {
     }
 
     const durationSec = computeDurationSec(tip.amount, s);
-    const { submission, matchedBy } = this.correlation.match(tip, {
-      allowSolePendingMatch: s.allowSolePendingMatch,
-    });
+    // A banned tipper's money still buys a hijack — the streamer's default
+    // preset, never their own content. Matching is skipped entirely so a
+    // banned tip can't consume (and burn) someone else's pending code.
+    const banned = isBanned(s, tip.username);
+    if (banned) warn("engine", `tip from banned viewer ${tip.username} → default preset`);
+    const { submission, matchedBy } = banned
+      ? { submission: null, matchedBy: "default-preset" as const }
+      : this.correlation.match(tip, { allowSolePendingMatch: s.allowSolePendingMatch });
 
     let prompt: string;
     let presetId: string | null;
@@ -109,7 +140,11 @@ export class Engine {
       durationSec,
       tip,
       matchedBy,
+      safety: jobSafety(s, presetId !== null && imageUrl === null, tip.username),
     };
+    if (submission?.needsReview) {
+      return this.park(job, submission.code, submission.reviewWhy || "needs approval");
+    }
     return this.enqueue(job, submission?.code ?? null);
   }
 
@@ -133,8 +168,78 @@ export class Engine {
         isTest: true,
       },
       matchedBy: "manual",
+      // The streamer typed it: trusted, and no attribution chip.
+      safety: { ...jobSafety(s, true, null), attribution: null },
     };
     return this.enqueue(job, null);
+  }
+
+  // ── Streamer approval (CONTENT-SAFETY S3) ──────────────────────────────
+
+  private park(job: HijackJob, code: string, why: string): string {
+    const s = this.getSettings();
+    if (this.parked.size >= Math.max(1, s.queueDepth)) {
+      warn("engine", "review backlog full — dropping job");
+      this.emit.submissionUpdate(code, { state: "failed", message: "The streamer's approval queue is full." });
+      this.emit.jobEnded?.(job, false, "review backlog full");
+      return "dropped: review backlog full";
+    }
+    const timer = setTimeout(() => {
+      if (!this.parked.has(job.jobId)) return;
+      this.decideReview(job.jobId, false, "not approved in time");
+    }, REVIEW_TTL_MS);
+    timer.unref?.();
+    this.parked.set(job.jobId, { job, code, why, expiresAt: Date.now() + REVIEW_TTL_MS, timer });
+    this.emit.submissionUpdate(code, {
+      state: "review",
+      message: "Tip received — waiting for the streamer to approve your effect.",
+    });
+    log("engine", `+review ${job.jobId.slice(0, 8)} (${why})`);
+    this.broadcast();
+    return `parked for streamer approval (${why})`;
+  }
+
+  /** Approve → the job joins the queue as if it had just arrived. Decline /
+   *  timeout → the viewer is told and the job ends (its upload is released). */
+  decideReview(jobId: string, approve: boolean, reason?: string): boolean {
+    const p = this.parked.get(jobId);
+    if (!p) return false;
+    clearTimeout(p.timer);
+    this.parked.delete(jobId);
+    if (approve) {
+      log("engine", `review ${jobId.slice(0, 8)} approved`);
+      this.enqueue(p.job, p.code);
+    } else {
+      const why = reason ?? "declined by the streamer";
+      log("engine", `review ${jobId.slice(0, 8)} rejected (${why})`);
+      if (p.code) {
+        this.emit.submissionUpdate(p.code, {
+          state: "failed",
+          message:
+            why === "not approved in time"
+              ? "The streamer didn't approve this effect in time."
+              : "The streamer declined this effect.",
+        });
+      }
+      this.emit.jobEnded?.(p.job, false, `review: ${why}`);
+      this.broadcast();
+    }
+    return true;
+  }
+
+  pendingReviews(): ReviewItem[] {
+    return [...this.parked.values()].map((p) => ({
+      jobId: p.job.jobId,
+      code: p.code,
+      prompt: p.job.prompt,
+      presetId: p.job.presetId,
+      imageUrl: p.job.imageUrl,
+      tipper: p.job.tip.username,
+      amount: p.job.tip.amount,
+      durationSec: p.job.durationSec,
+      why: p.why,
+      expiresAt: p.expiresAt,
+    }));
   }
 
   private enqueue(job: HijackJob, code: string | null): string {
@@ -145,6 +250,7 @@ export class Engine {
       if (code) {
         this.emit.submissionUpdate(code, { state: "failed", message: "Queue is full." });
       }
+      this.emit.jobEnded?.(job, false, "queue full");
       return "dropped: queue full";
     }
     if (code) this.jobCode.set(job.jobId, code);
@@ -210,9 +316,14 @@ export class Engine {
     this.jobDeadline = undefined;
     this.notify(job, {
       state: ok ? "done" : "failed",
-      message: ok ? "Hijack complete." : `Hijack failed: ${reason}`,
+      message: ok
+        ? "Hijack complete."
+        : reason.startsWith(SAFETY_REASON_PREFIX)
+          ? "The effect was stopped by the stream's safety filter."
+          : `Hijack failed: ${reason}`,
     });
     this.jobCode.delete(job.jobId);
+    this.emit.jobEnded?.(job, ok, reason);
     this.active = null;
     this.activeRemaining = 0;
     // Cooldown before the next job inits.
@@ -288,12 +399,13 @@ export class Engine {
       activeJob: this.active
         ? {
             jobId: this.active.jobId,
-            prompt: this.active.prompt,
+            prompt: publicLabel(this.active),
             remainingSec: this.activeRemaining,
           }
         : null,
       queueLength: this.queue.length,
       paused: this.paused,
+      reviewPending: this.parked.size,
     };
   }
 
@@ -324,7 +436,33 @@ export class Engine {
     for (const job of this.queue.splice(0)) {
       this.notify(job, { state: "failed", message: `Hijack cancelled: ${reason}` });
       this.jobCode.delete(job.jobId);
+      this.emit.jobEnded?.(job, false, reason);
+    }
+    for (const p of [...this.parked.values()]) {
+      clearTimeout(p.timer);
+      this.parked.delete(p.job.jobId);
+      if (p.code) {
+        this.emit.submissionUpdate(p.code, { state: "failed", message: `Hijack cancelled: ${reason}` });
+      }
+      this.emit.jobEnded?.(p.job, false, reason);
     }
     this.correlation.dispose();
   }
+}
+
+/** Stamp the streamer's safety policy onto a job (CONTENT-SAFETY S4/S6). */
+function jobSafety(s: Settings, trusted: boolean, tipper: string | null): JobSafety {
+  return {
+    outputGuard: s.outputGuard,
+    trusted,
+    attribution: s.showAttribution && tipper ? tipper.slice(0, 32) : null,
+    aiLabel: s.showAiLabel,
+  };
+}
+
+/** What every portal sees as "now playing": the preset's label, or a
+ *  neutral phrase — a custom prompt is the viewer's text and isn't broadcast. */
+function publicLabel(job: HijackJob): string {
+  if (job.matchedBy === "manual") return "a streamer effect";
+  return getPreset(job.presetId)?.label ?? "a custom effect";
 }

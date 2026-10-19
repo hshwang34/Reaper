@@ -10,11 +10,19 @@
 // and the dev triggers — is identical by construction.
 
 import { Router, type Request, type RequestHandler } from "express";
-import { PRESETS, sanitizeSettingsPatch, type Settings } from "@rh/shared";
+import {
+  CONSENT_STATEMENT,
+  PRESETS,
+  presetAllowed,
+  sanitizeSettingsPatch,
+  type Settings,
+} from "@rh/shared";
 import { MintError } from "../mintPolicy.js";
+import { imagesReady, textReady } from "../moderation.js";
+import { ipHash, RateLimiter } from "../safetyLedger.js";
 import { createSubmission } from "../submissions.js";
 import { parseFakeTip } from "../triggers/fake.js";
-import { log } from "../log.js";
+import { log, warn } from "../log.js";
 import type { Runtime } from "../runtime.js";
 
 /** The subset of a multer file the router needs (no @types/multer in core). */
@@ -36,6 +44,9 @@ export interface ApiContext {
   imageUrl(file: UploadedFile): string;
   /** Remove a stored upload whose submission was rejected. */
   discardUpload(file: UploadedFile): void;
+  /** Move a suspected-CSAM upload out of the served tree and keep it for the
+   *  preservation period (docs/runbooks/csam.md). Required by every host. */
+  quarantineUpload(file: UploadedFile): void;
   /** Optional audit hook after a submission was accepted. */
   onSubmission?(sub: { code: string; presetId: string | null; hasImage: boolean }): void;
 }
@@ -70,14 +81,23 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
 
   // ── Public (viewers) ──────────────────────────────────────────────────
 
-  /** What the portal needs to render, with no secrets. */
+  /** What the portal needs to render, with no secrets. Every capability here
+   *  is the EFFECTIVE one — the streamer's tier AND this host's classifiers —
+   *  so the portal never offers something intake would refuse. */
   r.get(
     "/config",
     withCtx((ctx, _req, res) => {
       const s = ctx.runtime.getSettings();
+      const m = ctx.runtime.moderation;
+      const images = s.referenceImages !== "off" && imagesReady(m) ? s.referenceImages : "off";
       res.json({
-        presets: PRESETS.filter((p) => s.enabledPresetIds.includes(p.id)),
-        allowCustomPrompts: s.allowCustomPrompts,
+        presets: PRESETS.filter(
+          (p) => presetAllowed(p, s) && (!p.needsImage || images === "likeness"),
+        ),
+        allowCustomPrompts: s.customPrompts !== "off" && textReady(m),
+        customPromptsNeedApproval: s.customPrompts === "classified+approval",
+        referenceImages: images,
+        consentStatement: CONSENT_STATEMENT,
         minTipUSD: s.minTipUSD,
         maxDurationSec: s.maxDurationSec,
         secondsPerUSD: s.secondsPerUSD,
@@ -110,23 +130,115 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
     });
   };
 
-  /** Viewer submission: prompt/preset + optional image, before tipping. */
+  /** Viewer submission: prompt/preset + optional image, before tipping.
+   *  The whole moderation chain runs here (see submissions.ts) — before a
+   *  claim code exists, so nothing the viewer sent can reach a job unchecked. */
   r.post(
     "/submissions",
     guardedUpload,
-    withCtx((ctx, req, res) => {
+    withCtx(async (ctx, req, res) => {
       const file = req.file;
-      const imageUrl = file ? ctx.imageUrl(file) : null;
-      const out = createSubmission(ctx.runtime.correlation, ctx.runtime.getSettings(), {
-        ...(req.body as Record<string, unknown>),
-        imageUrl,
-      });
-      if (!out.ok) {
+      const rt = ctx.runtime;
+      let out;
+      try {
+        out = await createSubmission(
+          {
+            store: rt.correlation,
+            settings: rt.getSettings(),
+            moderation: rt.moderation,
+            uploads: rt.uploads,
+            ledger: rt.ledger,
+            strikes: rt.strikes,
+          },
+          {
+            ...(req.body as Record<string, unknown>),
+            image: file ? { url: ctx.imageUrl(file), path: file.path } : null,
+            ipHash: ipHash(req.ip),
+          },
+        );
+      } catch (e) {
+        // Never leave an unvetted file on disk behind an unexpected throw.
         if (file) ctx.discardUpload(file);
+        throw e;
+      }
+      if (!out.ok) {
+        if (file) {
+          if (out.quarantine) ctx.quarantineUpload(file);
+          else ctx.discardUpload(file);
+        }
         return res.status(out.status).json({ error: out.error });
       }
       ctx.onSubmission?.({ code: out.code, presetId: out.presetId, hasImage: Boolean(file) });
-      res.json({ code: out.code, expiresAt: out.expiresAt });
+      res.json({ code: out.code, expiresAt: out.expiresAt, needsReview: out.needsReview });
+    }),
+  );
+
+  // Public safety surface (S5). Rate-limited per submitter; both land in the
+  // ledger the streamer reads, and a takedown acts immediately.
+  const publicLimiter = new RateLimiter(10, 60_000);
+  const limited: RequestHandler = (req, res, next) => {
+    if (publicLimiter.allow(ipHash(req.ip))) return next();
+    res.status(429).json({ error: "too many requests" });
+  };
+  const field = (v: unknown, max: number) =>
+    typeof v === "string" ? v.trim().slice(0, max) : "";
+
+  /** Viewer report: "this effect / this stream overlay was not OK". */
+  r.post(
+    "/report",
+    limited,
+    withCtx((ctx, req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const reason = field(b.reason, 500);
+      if (!reason) return res.status(400).json({ error: "tell us what was wrong" });
+      const ev = ctx.runtime.ledger.record({
+        stage: "report",
+        verdict: "info",
+        source: "viewer",
+        reason,
+        categories: [],
+        code: field(b.code, 8) || null,
+        jobId: field(b.jobId, 64) || null,
+        ipHash: ipHash(req.ip),
+      });
+      warn("safety", `viewer report ${ev.id.slice(0, 8)}: ${reason.slice(0, 80)}`);
+      res.json({ ok: true, id: ev.id });
+    }),
+  );
+
+  /** TAKE IT DOWN-style removal request (docs/runbooks/takedown.md). Deletes
+   *  the named upload and every identical / near-identical copy we hold now,
+   *  and blocks the picture from being uploaded again. The 48h SLA clock
+   *  starts at the ledger timestamp. */
+  r.post(
+    "/takedown",
+    limited,
+    withCtx((ctx, req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const contact = field(b.contact, 200);
+      const description = field(b.description, 2000);
+      const imageUrl = field(b.imageUrl, 500) || undefined;
+      const code = field(b.code, 8).toUpperCase() || undefined;
+      if (!contact || !description) {
+        return res.status(400).json({ error: "contact and description are required" });
+      }
+      // Only the image URL acts automatically: it carries a random filename,
+      // so possessing it means you saw the picture. A 4-character claim code
+      // is guessable — acting on it anonymously would let anyone delete
+      // strangers' pending uploads — so a code-only request is recorded for
+      // the operator to verify and action within the SLA.
+      const removed = imageUrl ? ctx.runtime.uploads.takedown({ url: imageUrl }) : 0;
+      const ev = ctx.runtime.ledger.record({
+        stage: "takedown",
+        verdict: "info",
+        source: "requester",
+        reason: `${description.slice(0, 300)} — contact: ${contact} — removed ${removed} file(s)`,
+        categories: ["takedown"],
+        code: code ?? null,
+        ipHash: ipHash(req.ip),
+      });
+      warn("safety", `TAKEDOWN request ${ev.id.slice(0, 8)} — removed ${removed}; 48h SLA (docs/runbooks/takedown.md)`);
+      res.json({ ok: true, ticket: ev.id, removed });
     }),
   );
 
@@ -145,6 +257,43 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
       const next = ctx.updateSettings(sanitizeSettingsPatch(req.body));
       ctx.runtime.broadcastStatus(); // reflect any wiring changes
       res.json(next);
+    }),
+  );
+
+  /** Paid jobs waiting on the streamer (S3). */
+  r.get(
+    "/review",
+    opts.requireAuth,
+    withCtx((ctx, _req, res) => res.json(ctx.runtime.engine.pendingReviews())),
+  );
+
+  r.post(
+    "/review/:jobId",
+    opts.requireAuth,
+    withCtx((ctx, req, res) => {
+      const approve = (req.body as { approve?: unknown } | undefined)?.approve === true;
+      const ok = ctx.runtime.engine.decideReview(String(req.params.jobId), approve);
+      if (!ok) return res.status(404).json({ error: "no such pending review" });
+      res.json({ ok: true, approved: approve });
+    }),
+  );
+
+  /** The moderation ledger, newest first (dashboard + router incident log). */
+  r.get(
+    "/moderation",
+    opts.requireAuth,
+    withCtx((ctx, req, res) => {
+      const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 100) || 100));
+      res.json({
+        events: ctx.runtime.ledger.recent(limit),
+        classifiers: {
+          text: ctx.runtime.moderation.text.map((c) => c.name),
+          image: ctx.runtime.moderation.image.map((c) => c.name),
+          devMode: ctx.runtime.moderation.devMode,
+          textReady: textReady(ctx.runtime.moderation),
+          imagesReady: imagesReady(ctx.runtime.moderation),
+        },
+      });
     }),
   );
 

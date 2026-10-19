@@ -10,7 +10,7 @@
 //   /c/:login                                — hosted viewer portal (SPA)
 //   /uploads/:channel/*                      — reference images
 
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import express from "express";
@@ -18,7 +18,7 @@ import multer from "multer";
 import { WebSocketServer } from "ws";
 import { eq } from "drizzle-orm";
 import type { HelloMsg } from "@rh/shared";
-import { buildApiRouter, log, warn } from "@rh/core";
+import { buildApiRouter, log, sweepUploadDir, warn } from "@rh/core";
 import { channels, db, hijacks, submissionsLog } from "./db.js";
 import { devAuthEnabled, env, repoRoot } from "./env.js";
 import {
@@ -201,6 +201,15 @@ app.use(
         // against that local origin and 404 — a silent prompt-only hijack.
         imageUrl: (f) => `${env.publicUrl}/uploads/${id}/${f.filename}`,
         discardUpload: (f) => rmSync(f.path, { force: true }),
+        quarantineUpload: (f) => {
+          try {
+            mkdirSync(env.quarantineDir, { recursive: true, mode: 0o700 });
+            renameSync(f.path, resolve(env.quarantineDir, `${id}-${Date.now()}-${f.filename}`));
+          } catch (e) {
+            warn("safety", `quarantine failed (${(e as Error).message}) — deleting instead`);
+            rmSync(f.path, { force: true });
+          }
+        },
         onSubmission: ({ code, presetId, hasImage }) => {
           db.insert(submissionsLog)
             .values({ channelId: id, code, presetId, hasImage: hasImage ? 1 : 0, createdAt: Date.now() })
@@ -241,6 +250,10 @@ app.get("/api/c/:channel/ledger", requireChannel, (req, res) => {
 // ── Uploads + hosted portal ───────────────────────────────────────────────
 
 if (!existsSync(env.uploadsDir)) mkdirSync(env.uploadsDir, { recursive: true });
+// Per-runtime registries delete uploads on expiry/job end/takedown; this
+// catches what a restart orphaned (CONTENT-SAFETY S2 step 9).
+sweepUploadDir(env.uploadsDir);
+setInterval(() => sweepUploadDir(env.uploadsDir), 15 * 60_000).unref();
 // Reference images are fetched by the router page on the streamer's machine
 // (a 127.0.0.1 origin) into a Blob for Decart — a cross-origin fetch the
 // browser only allows with CORS. Read-only, already-public files with

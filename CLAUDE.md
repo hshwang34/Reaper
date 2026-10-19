@@ -12,7 +12,10 @@ GPU billing, monetization policy, live-video latency, content safety).
 
 `FEASIBILITY.md` is the source of truth for *why* the design is shaped this way — read it
 before changing the pipeline, cost caps, or trigger layer. Section references (§3, §8, etc.)
-appear throughout the code comments.
+appear throughout the code comments. `docs/CONTENT-SAFETY.md` is the equivalent for the
+guardrail/moderation layer (stages S0–S6, policy model, implementation phases) — read it
+before touching `moderation.ts`, `submissions.ts`, uploads, or anything that puts viewer
+bytes in front of the model or on stream.
 
 ## Commands
 
@@ -26,7 +29,8 @@ cp .env.example .env      # leave keys blank → MOCK mode (camera passthrough, 
 npm run dev               # demo rig: concurrently sidecar :7712 + web :5173
 npm run typecheck         # tsc --noEmit across all SIX workspaces
 npm test                  # node --test: core/test (engine, correlation, hub, mint policy, submissions,
-                          #   settings), web/test (router state machine), server/test (auth)
+                          #   settings, safety), web/test (router state machine + output guard),
+                          #   server/test (auth)
 npm run check             # typecheck + test — the gate to run after edits
 npm run e2e               # mock-mode end-to-end: real sidecar + headless Chrome router/viewer +
                           #   a fake OBS; asserts what the audience sees (needs Google Chrome)
@@ -56,6 +60,17 @@ it fixed, and the migration to the target layout.
 3. Click **Send $N test tip** (or `POST /api/dev/fake-tip`) — the router runs the job for N seconds.
 
 `docs/PHASE0.md` covers the real-credential + OBS hardware path.
+
+### Content safety (docs/CONTENT-SAFETY.md)
+
+With a real Decart key, viewer-authored bytes reach the model only through classifiers:
+custom text needs `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`; **any** reference image needs
+Sightengine (`SIGHTENGINE_API_USER`/`SECRET`), the minors check. Missing keys switch the
+matching tier off (fail closed); presets always work. MOCK mode ("dev mode") runs blocklist +
+structural checks only. Invariants: the chain runs before a claim code exists; suspected CSAM
+stops before any further vendor and is quarantined, never deleted (`docs/runbooks/csam.md`);
+uploads are deleted at job end / expiry / 1h; output-guard stops are ordinary `teardown()`s
+whose `job:done` reason starts with `safety:`.
 
 ## Architecture
 
