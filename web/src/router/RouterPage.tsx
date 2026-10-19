@@ -10,8 +10,10 @@ import { HubSocket } from "../lib/ws.js";
 import { LoopbackSender } from "../lib/loopback.js";
 import { GuardrailsEditor } from "../features/GuardrailsEditor.js";
 import { DesktopCredentials } from "../features/DesktopCredentials.js";
+import { ModerationPanel, ReviewPanel } from "../features/SafetyPanels.js";
 import { RouterMachine } from "./stateMachine.js";
 import { browserPorts } from "./ports.js";
+import { FrameGuard } from "./frameGuard.js";
 import { acquireCamera, listCameras } from "./decartSession.js";
 
 const STATE_COLOR: Record<RouterState, string> = {
@@ -47,7 +49,11 @@ export default function RouterPage() {
     const hub = new HubSocket("router").connect();
     hubRef.current = hub;
     const sender = new LoopbackSender(hub);
-    const machine = new RouterMachine(browserPorts(hub, sender), {
+    // Output guard (CONTENT-SAFETY S4). Warm the model now so the first
+    // guarded job doesn't spend its pre-LIVE budget loading weights.
+    const guard = new FrameGuard(pushLog);
+    void guard.ready();
+    const machine = new RouterMachine(browserPorts(hub, sender, guard), {
       onState: (s, rem) => {
         setState(s);
         setRemaining(rem);
@@ -235,8 +241,9 @@ export default function RouterPage() {
           </dl>
         </section>
 
-        {/* Right: manual fire + guardrail settings + log */}
+        {/* Right: approvals + manual fire + guardrail settings + safety + log */}
         <section className="space-y-4">
+          <ReviewPanel client={api} pending={status?.reviewPending} />
           <ManualHijackPanel
             armed={state !== "OFFLINE"}
             busy={state !== "IDLE"}
@@ -244,6 +251,16 @@ export default function RouterPage() {
             onFired={(outcome) => pushLog(`manual hijack → ${outcome}`)}
           />
           <SettingsPanel onSaved={(s) => pushLog(`settings saved (min $${s.minTipUSD}, max ${s.maxDurationSec}s)`)} />
+          <ModerationPanel
+            client={api}
+            onBan={(name) =>
+              void api
+                .getSettings()
+                .then((s) => api.saveSettings({ bannedViewers: [...s.bannedViewers, name] }))
+                .then(() => pushLog(`banned ${name}`))
+                .catch((e) => pushLog(`ban failed: ${(e as Error).message}`))
+            }
+          />
           <DesktopCredentials />
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">

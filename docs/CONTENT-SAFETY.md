@@ -1,10 +1,15 @@
 # Content safety — the guardrail architecture
 
-**Status: design, 2026-10-19. Nothing below is built yet except the Layer-0/1
-pieces called out as "exists".** This is the FEASIBILITY-grade "why" for the
-safety system, plus the data model, stage contracts, protocol additions, and
-the implementation order. It supersedes the one-paragraph "LLM moderation
-upgrade" bullets in `COMMERCIALIZATION.md` §3 and `COMMERCIAL-BUILD.md`.
+**Status (2026-10-19): Phase A and Phase B are built.** All stages S0–S6 are
+implemented and covered by `npm run check` and `npm run e2e`. Phase C (CSAM
+hash-matching, NCMEC registration, legal review) needs accounts, not code.
+§10 lists where the build differs from the design below and what's still open.
+The design sections stay as written because they're the reasoning.
+
+This is the FEASIBILITY-grade "why" for the safety system, plus the data model,
+stage contracts, protocol additions and implementation order. It supersedes the
+one-paragraph "LLM moderation upgrade" bullets in `COMMERCIALIZATION.md` §3 and
+`COMMERCIAL-BUILD.md`.
 
 Read this the way you read `FEASIBILITY.md` §3 for cost: the money path has
 three independent caps because one hung session bills forever; the safety path
@@ -377,3 +382,74 @@ numbers in `VERIFICATION.md`.
   on-stream AI label satisfies anything on Twitch (it does on Kick).
 - Refund semantics when the streamer rejects a paid submission (S3) — a
   Phase-2 rail decision.
+
+---
+
+## 10. As built (2026-10-19)
+
+### Where it lives
+
+| Stage | Code | Tests |
+|---|---|---|
+| S0 policy | `shared/src/types.ts` (`Settings` content-policy fields, `JobSafety`, `ModerationEvent`, `ReviewItem`), `shared/src/settings.ts` (`DEFAULT_SETTINGS`, `HOSTED_SETTINGS`, legacy migration, sanitizer), `shared/src/presets.ts` (`presetAllowed`) | `core/test/safety.test.ts` (settings) |
+| S1 text | `core/src/moderation.ts` (blocklist, chain runner, fail-closed), `core/src/moderationProviders.ts` (OpenAI, Claude, `moderationFromEnv`) | `core/test/submissions.test.ts`, `safety.test.ts` |
+| S2 image | `core/src/images.ts` (sniff, re-encode, sha256 + dHash), `core/src/submissions.ts` (the ordered pipeline + consent), Sightengine provider, `core/src/uploadRegistry.ts` (TTL, takedown, block list) | same + e2e uploads |
+| S3 review | `core/src/engine.ts` (`park` / `decideReview` / `pendingReviews`, 2-min TTL), `GET/POST /review` in `core/src/http/apiRouter.ts`, `web/src/features/SafetyPanels.tsx` (`ReviewPanel`) | `safety.test.ts` (review) |
+| S4 guard | `web/src/router/frameGuard.ts` (nsfwjs MobileNetV2), `GuardPort` in `ports.ts`, `guardGate` + LIVE `watch` in `stateMachine.ts` | `web/test/stateMachine.test.ts` (6 guard tests); e2e loads the real model in Chrome |
+| S5 ledger | `core/src/safetyLedger.ts` (memory/JSONL ledger, `ipHash`, `StrikeTracker`, `RateLimiter`), `moderation_events` table + `dbSafetyLedger` (server), `/moderation`, `/report`, `/takedown`, `docs/runbooks/` | e2e (ledger, report, takedown) |
+| S6 on-stream | chips on `RtcOfferMsg.overlay` → `ViewerPage.tsx`; setup wizard "Stream safety" step; `ModerationPanel` | e2e (chips visible) |
+
+### Deviations from the design, and why
+
+- **Flat `Settings` fields, not a nested `contentPolicy` object.** Every host
+  applies patches as a shallow merge (`{...settings, ...patch}`), and a nested
+  object would have needed a deep-merge in three places. `ContentPolicy` is a
+  `Pick<Settings, …>` type for the classifiers. The intensity ceiling is 1–5,
+  matching the preset catalog (the design said 1–3).
+- **Guard modes are `off | on | required`.** "monitor" (log but don't stop)
+  became `on`, which stops and logs every score, because a guard that watches a
+  bad frame go out isn't a guard. The false-positive data the alpha needs still
+  comes from the logs.
+- **Sightengine instead of AWS Rekognition** for nudity + minors. It's one REST
+  call with no SDK and has a free tier. The public-figure check is the Claude
+  policy classifier's `public_figure` flag (best effort; Decart §4.1).
+  Sightengine's response field names were taken from its docs and **should be
+  confirmed on the first live call**: the parser fails closed on an unexpected
+  shape.
+- **No new WS messages.** Safety stops ride `job:done` with a reason starting
+  `safety:` (`SAFETY_REASON_PREFIX`). Every relay path, including the Electron
+  cloud link, carries that unchanged. Review uses HTTP polling (`/review`)
+  driven by the public `reviewPending` count in the status snapshot. In cloud
+  mode the approval queue is on the hosted dashboard, because the local bridge's
+  engine never holds the job.
+- **Takedown acts automatically only on the image URL.** Claim codes are 4
+  characters and guessable, so a code-only request is ticketed for an operator.
+- **Dev mode is precise.** The chain may run with no vendor classifiers only
+  when no real model is reachable from that host (no `dct_` key and no cloud
+  mint proxy). In MOCK mode nothing a viewer sends can reach a model.
+- **The public "now playing" label** shows the preset name or "a custom
+  effect", so custom prompt text is no longer broadcast to every portal.
+- Uploads have a **1-hour hard TTL** on every host (the design said 24h hosted),
+  plus a boot sweep and, hosted, a 15-minute sweep.
+
+### Operating it
+
+- Classifier keys: `.env.example` (rig and dev server) or the Electron app's App
+  credentials panel (local mode). Without keys on a live host, custom prompts and
+  photos switch off and presets keep working. The router page's Safety panel shows
+  which tiers are protected.
+- Default classifier model: `claude-haiku-5-5`, overridable with
+  `RH_CLASSIFIER_MODEL`.
+- The Electron bundle keeps `sharp` external and stages its prebuilt binaries
+  (`app/scripts/stage-resources.mjs`). Build the DMG on the target arch.
+
+### Still open
+
+- Phase C: known-CSAM hash matching (Cloudflare / PhotoDNA), NCMEC ESP
+  registration, legal review of "covered platform" status and state likeness laws.
+- Persist the takedown block list and strike state across restarts (both are
+  in memory per runtime today).
+- Benchmark the output guard on the recorded preset clips (`site/CLIPS.md`)
+  and an adversarial set, then tune `EXPLICIT_THRESHOLD` and `SUGGESTIVE_THRESHOLD`.
+- An operator console for code-only takedowns.
+- Refund semantics for declined approvals (Phase-2 rail).

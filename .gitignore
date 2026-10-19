@@ -4,6 +4,8 @@ dist/
 .env.local
 sidecar/uploads/
 sidecar/settings.json
+sidecar/safety/
+server/safety/
 *.log
 .DS_Store
 .claude/worktrees/

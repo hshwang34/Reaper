@@ -2,8 +2,8 @@
 //
 // The main process is bundled (esbuild) with all deps inlined EXCEPT
 // @decartai/sdk (lazy-imported, and its browser globals break at bundle
-// time) — so we copy that one package's node_modules subtree next to the
-// bundle. The web build goes to resources/web-dist (config.ts webDistDir()
+// time) and sharp (a native addon) — so we copy those packages'
+// node_modules subtrees next to the bundle. The web build goes to resources/web-dist (config.ts webDistDir()
 // reads process.resourcesPath/web-dist in production).
 
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
@@ -34,6 +34,21 @@ if (existsSync(sdk)) {
   cpSync(sdk, resolve(staging, "node_modules", "@decartai"), {
     recursive: true,
   });
+}
+
+// 3. sharp (content-safety image re-encoding) — a native addon, so it can't
+//    be inlined by esbuild. Copy it, its prebuilt platform binaries
+//    (@img/sharp-<platform>, @img/sharp-libvips-<platform>) and its three
+//    small JS deps. The build host's platform is what ships: run `dist` on
+//    the target OS/arch (CI does — macOS arm64 first).
+for (const pkg of ["sharp", "@img", "detect-libc", "semver"]) {
+  const from = resolve(repo, "node_modules", pkg);
+  if (existsSync(from)) {
+    cpSync(from, resolve(staging, "node_modules", pkg), { recursive: true });
+  } else if (pkg === "sharp") {
+    console.error("sharp missing from node_modules — run npm install");
+    process.exit(1);
+  }
 }
 
 console.log("staged resources → build-resources/");

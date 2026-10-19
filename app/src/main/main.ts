@@ -39,6 +39,8 @@ import {
   getSettings,
   keysStatus,
   loadKeys,
+  moderationEnvFrom,
+  safetyDir,
   saveKeys,
   updateSettings,
   uploadsDir,
@@ -129,6 +131,10 @@ async function boot(): Promise<void> {
     getSettings,
     updateSettings,
     uploadsDir,
+    // Cloud mode: viewers submit to the control plane, which moderates; the
+    // local bridge holds no classifier keys either.
+    moderationEnv: cloudMode ? {} : moderationEnvFrom(keys),
+    safetyDir,
     webDist: webDistDir(),
     authToken,
     observer: cloudMode
@@ -188,6 +194,10 @@ async function boot(): Promise<void> {
     if (k.obsWsPassword) patch.obsWsPassword = k.obsWsPassword;
     if (k.obsScene) patch.obsScene = k.obsScene;
     if (k.obsSource) patch.obsSource = k.obsSource;
+    if (k.openaiApiKey) patch.openaiApiKey = k.openaiApiKey;
+    if (k.anthropicApiKey) patch.anthropicApiKey = k.anthropicApiKey;
+    if (k.sightengineApiUser) patch.sightengineApiUser = k.sightengineApiUser;
+    if (k.sightengineApiSecret) patch.sightengineApiSecret = k.sightengineApiSecret;
     saveKeys(patch);
   });
   ipcMain.handle("rh:relaunch", () => {

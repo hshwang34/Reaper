@@ -20,6 +20,7 @@ import {
   type SessionTokens,
 } from "../lib/apiClient.js";
 import { GuardrailsEditor } from "../features/GuardrailsEditor.js";
+import { ModerationPanel, ReviewPanel } from "../features/SafetyPanels.js";
 
 const REFRESH_KEY = "rhDashRefresh";
 
@@ -186,6 +187,10 @@ function Dashboard({
         {error && <span className="text-sm text-red-400">{error}</span>}
       </header>
 
+      {/* In cloud mode the approval queue lives here (the control plane's
+          engine holds parked jobs, not the streamer's local bridge). */}
+      <ReviewPanel client={client} />
+
       {settings && (
         <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
@@ -196,6 +201,14 @@ function Dashboard({
           <GuardrailsEditor settings={settings} onChange={(p) => void save(p)} columns={4} />
         </section>
       )}
+
+      <ModerationPanel
+        client={client}
+        settings={settings}
+        onBan={(name) =>
+          settings && void save({ bannedViewers: [...settings.bannedViewers, name] })
+        }
+      />
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">

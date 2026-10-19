@@ -113,16 +113,16 @@ Still to do — this is where it becomes a business:
   platform cut, remainder to streamer — margin-positive by construction.
 - Dashboard additions: intensity ceiling, per-viewer rate limits, free-text
   approval queue, earnings, session replays.
-- **Content-safety system** — designed in `CONTENT-SAFETY.md` (2026-10-19);
-  its Phase A (image hardening + TTL deletion, policy model, text/image
-  classifiers behind host-injected providers, consent attestation, decision
-  ledger, report/takedown endpoints, on-stream attribution + AI label) is a
-  **prerequisite for any viewer outside the alpha cohort**, not a Phase-2
-  nicety: Decart's API terms make moderation our contractual duty (§3.5) with
-  no server-side filter, and the TAKE IT DOWN Act's 48-hour takedown duty has
-  been enforced since 2026-05. Its Phase B (approval queue, output-frame
-  guard) runs during the alpha; Phase C (CSAM hash matching, NCMEC
-  registration, legal review) gates this phase's public uploads.
+- **Content-safety system** — `CONTENT-SAFETY.md`. Phases A and B were
+  **built 2026-10-19**: policy model, fail-closed text/image classifier chains,
+  image hardening + TTL deletion, likeness consent, approval queue, output-frame
+  guard, decision ledger, report/takedown endpoints + runbooks, on-stream
+  attribution + AI label. It shipped ahead of the alpha because Decart's API
+  terms make moderation our contractual duty (§3.5) with no server-side filter,
+  and the TAKE IT DOWN Act's 48-hour takedown duty has been enforced since
+  2026-05. Phase C (CSAM hash matching, NCMEC registration, legal review) still
+  gates this phase's public uploads. The alpha's job is to benchmark the output
+  guard's false-positive rate on stylized presets.
 - Signed/notarized macOS build (Apple Developer enrollment; the CI job is
   ready and gated on secrets).
 - **Exit criteria:** first $1k month across cohort; support load per streamer
@@ -167,7 +167,7 @@ in the repo and exercised by the test gate; it does not mean deployed.
 | Token minting | Decart key vault; per-job `ek_`, `maxSessionDuration` capped | **built** (job-gated, one per job, monthly budget) |
 | Trigger ingestion | Streamlabs per channel; EventSub webhooks | Streamlabs pasted-token **built**; OAuth connect + EventSub open |
 | Payments | Stripe Connect (checkout, splits, payouts, chargebacks) | open — Phase 2 |
-| Moderation | Text: blocklist → floor + policy classifiers. Images: sniff/re-encode/hash → nudity/minor/celebrity → consent. Output guard. Ledger, takedown. See `CONTENT-SAFETY.md` | blocklist **built**; everything else designed, open — Phase A required before non-alpha viewers |
+| Moderation | Text: blocklist → floor + policy classifiers. Images: sniff/re-encode/hash → nudity/minor/public-figure → consent. Output guard. Ledger, takedown. See `CONTENT-SAFETY.md` | **built** (Phases A+B); Phase C (known-CSAM hashing, NCMEC) open |
 | Uploads | S3-compatible store, signed URLs, TTL cleanup | local disk per channel; S3 open |
 | Observability | Per-hijack ledger, billing alarms | ledger **built** (SQLite); alarms open |
 | Admin/support | Session inspector, refund tooling, channel kill-switch | `suspended` flag only |

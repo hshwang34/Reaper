@@ -1,7 +1,9 @@
 // The onboarding wizard — the "≤5 minutes to live" flow (plan M4).
-// Renders only inside the Electron shell (window.rhDesktop). Six steps, each
+// Renders only inside the Electron shell (window.rhDesktop). Seven steps, each
 // skippable where the plan allows; every step reads real state from the main
-// process and deep-links back when something fails.
+// process and deep-links back when something fails. "Stream safety" is the one
+// step that can't be skipped: it's where the streamer acknowledges the
+// platform obligations the product can't carry for them (CONTENT-SAFETY S6).
 
 import { useCallback, useEffect, useState } from "react";
 import type { DesktopBridge, DesktopSetupState } from "@rh/shared";
@@ -20,6 +22,7 @@ const STEPS = [
   "Camera",
   "Connect OBS",
   "Connect tips",
+  "Stream safety",
   "Test hijack",
   "Done",
 ] as const;
@@ -85,8 +88,9 @@ export default function SetupPage() {
         <ObsStep d={d} state={state} refresh={refresh} next={next} />
       )}
       {step === 3 && <TipsStep state={state} next={next} />}
-      {step === 4 && <TestStep d={d} next={next} />}
-      {step === 5 && <DoneStep d={d} state={state} />}
+      {step === 4 && <SafetyStep state={state} next={next} />}
+      {step === 5 && <TestStep d={d} next={next} />}
+      {step === 6 && <DoneStep d={d} state={state} />}
 
       {step > 0 && step < STEPS.length - 1 && (
         <button
@@ -352,7 +356,69 @@ function TipsStep({ state, next }: { state: SetupState; next: () => void }) {
   );
 }
 
-// ── Step 5: Test hijack ───────────────────────────────────────────────────
+// ── Step 5: Stream safety ─────────────────────────────────────────────────
+
+/** What each platform asks of the streamer when viewers can restyle their
+ *  stream with AI (docs/CONTENT-SAFETY.md §1). Plain-language, and every box
+ *  must be ticked — this is the step that can't be skipped. */
+const SAFETY_CHECKS = [
+  {
+    id: "own-content",
+    text: "Whatever the AI shows on my stream counts as my content under Twitch, YouTube and Kick rules — nudity or sexual content can get my channel banned even if a viewer asked for it.",
+  },
+  {
+    id: "panic",
+    text: "I know my panic key (⌘⇧H, or the tray menu) cuts an effect instantly, and I'll use it if anything looks wrong.",
+  },
+  {
+    id: "disclosure",
+    text: "I'll disclose AI effects where my platform asks: Kick needs it in my title or on screen (the \"AI-altered\" label covers this), and YouTube asks me to tick its altered-content box for realistic changes.",
+  },
+  {
+    id: "likeness",
+    text: "Face swaps only use photos viewers have consent for, and never of anyone under 18 or of real public figures. I can require my own approval for every swap.",
+  },
+] as const;
+
+function SafetyStep({ state, next }: { state: SetupState; next: () => void }) {
+  const [ticked, setTicked] = useState<Record<string, boolean>>({});
+  const all = SAFETY_CHECKS.every((c) => ticked[c.id]);
+  return (
+    <Card>
+      <p className="text-zinc-300">
+        Viewers' own words and photos are checked by AI moderators before
+        anything reaches the model, and an on-device safety guard watches the
+        output and cuts it if it turns explicit. Presets are always safe. A
+        few things are still on you:
+      </p>
+      <div className="space-y-2">
+        {SAFETY_CHECKS.map((c) => (
+          <label key={c.id} className="flex cursor-pointer items-start gap-3 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={Boolean(ticked[c.id])}
+              onChange={(e) => setTicked({ ...ticked, [c.id]: e.target.checked })}
+              className="mt-1"
+            />
+            <span>{c.text}</span>
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-zinc-500">
+        {state.cloudMode
+          ? "New channels start presets-only. Open custom prompts and photos from the dashboard's Content policy when you're ready."
+          : "In local mode you supply the moderation keys (router page → App credentials). Without them, custom prompts and photos stay off."}
+      </p>
+      <div className="flex items-center gap-4">
+        <Primary onClick={next} disabled={!all}>
+          I understand — continue
+        </Primary>
+      </div>
+    </Card>
+  );
+}
+
+// ── Step 6: Test hijack ───────────────────────────────────────────────────
 
 function TestStep({ d, next }: { d: RhDesktopSetup; next: () => void }) {
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -386,7 +452,7 @@ function TestStep({ d, next }: { d: RhDesktopSetup; next: () => void }) {
   );
 }
 
-// ── Step 6: Done ──────────────────────────────────────────────────────────
+// ── Step 7: Done ──────────────────────────────────────────────────────────
 
 function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
   const [auto, setAuto] = useState(state.autoLaunch);

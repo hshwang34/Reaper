@@ -19,9 +19,24 @@
 //
 // Side effects go through MachinePorts (ports.ts) so all of the above is
 // asserted by web/test/stateMachine.test.ts rather than promised in prose.
+//
+// Output guard (docs/CONTENT-SAFETY.md S4) — two hooks, no new states:
+//   · inside the buffering gate, after frames-ok and BEFORE the OBS unhide,
+//     one frame of the model's output must pass. Positive → abort (OBS never
+//     shown). Guard unavailable → abort only when the job is `required` AND
+//     carries viewer bytes; otherwise run without it.
+//   · during LIVE, the guard samples continuously; a positive is a teardown
+//     like any other — hide first, then disconnect.
+// Safety stops report `job:done` with a reason starting "safety:", which the
+// engine and ledger key on (SAFETY_REASON_PREFIX).
 
-import type { HijackJob, RouterState } from "@rh/shared";
-import { DEFAULT_TIMEOUTS, type MachinePorts, type MachineTimeouts } from "./ports.js";
+import { SAFETY_REASON_PREFIX, type HijackJob, type RouterState } from "@rh/shared";
+import {
+  DEFAULT_TIMEOUTS,
+  type GuardVerdict,
+  type MachinePorts,
+  type MachineTimeouts,
+} from "./ports.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -42,6 +57,10 @@ export class RouterMachine {
   private wentLive = false;
   private gotStream = false;
   private goingLive = false;
+  /** The model's output stream for the current job (guard input). */
+  private aiStream: MediaStream | null = null;
+  /** Stops the LIVE-phase guard sampler, when one is running. */
+  private stopGuard?: () => void;
   /** Bumped on every job start and every teardown; see header comment. */
   private gen = 0;
   private t: MachineTimeouts;
@@ -171,10 +190,17 @@ export class RouterMachine {
       }`,
     );
     this.cb.onAiStream?.(stream);
+    this.aiStream = stream;
 
     // 3. BUFFERING — push to the viewer, wait for verified frames.
     this.setState("BUFFERING");
-    await this.ports.sender.start(job.jobId, stream);
+    await this.ports.sender.start(
+      job.jobId,
+      stream,
+      job.safety
+        ? { attribution: job.safety.attribution, aiLabel: job.safety.aiLabel }
+        : undefined,
+    );
     if (this.stale(g)) return;
     this.bufferTimer = setTimeout(() => this.abort("no verified frames"), this.t.bufferMs);
   }
@@ -192,8 +218,45 @@ export class RouterMachine {
     void this.goLive(this.job);
   }
 
+  /** The output guard's pre-LIVE gate. Resolves true to proceed; false when
+   *  it has aborted the job (or the job went stale while it ran). */
+  private async guardGate(job: HijackJob, g: number): Promise<{ proceed: boolean; watch: boolean }> {
+    const mode = job.safety?.outputGuard ?? "off";
+    if (mode === "off" || !this.aiStream) return { proceed: true, watch: false };
+    const stream = this.aiStream;
+    const mustHave = mode === "required" && !job.safety!.trusted;
+
+    const verdict = await new Promise<GuardVerdict | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), this.t.guardMs);
+      this.ports.guard
+        .ready()
+        .then((ok) => (ok ? this.ports.guard.check(stream) : null))
+        .then(resolve, () => resolve(null))
+        .finally(() => clearTimeout(timer));
+    });
+    if (this.stale(g)) return { proceed: false, watch: false };
+
+    if (!verdict || verdict.label === "unavailable") {
+      if (mustHave) {
+        this.abort(`${SAFETY_REASON_PREFIX} output guard unavailable (required for viewer content)`);
+        return { proceed: false, watch: false };
+      }
+      this.cb.log("output guard unavailable — running without it");
+      return { proceed: true, watch: false };
+    }
+    if (verdict.unsafe) {
+      this.abort(`${SAFETY_REASON_PREFIX} output guard ${verdict.label} ${verdict.score.toFixed(2)}`);
+      return { proceed: false, watch: false };
+    }
+    return { proceed: true, watch: true };
+  }
+
   private async goLive(job: HijackJob): Promise<void> {
     const g = this.gen;
+    // 3b. Output guard: the first frame must pass before anyone sees it.
+    const gate = await this.guardGate(job, g);
+    if (!gate.proceed || this.stale(g)) return;
+
     // 4. LIVE — unhide OBS, start the strict countdown.
     try {
       await this.ports.setObsVisible(true);
@@ -240,6 +303,15 @@ export class RouterMachine {
       },
       job.durationSec * 1000 + this.t.watchdogExtraMs,
     );
+
+    // Keep watching the output for the whole paid window.
+    if (gate.watch && this.aiStream) {
+      this.stopGuard = this.ports.guard.watch(this.aiStream, (v) => {
+        if (this.stale(g)) return;
+        this.cb.log(`SAFETY STOP: output guard ${v.label} ${v.score.toFixed(2)}`);
+        void this.teardown(false, `${SAFETY_REASON_PREFIX} output guard ${v.label} ${v.score.toFixed(2)}`);
+      });
+    }
   }
 
   // ── Exit paths ─────────────────────────────────────────────────────────────
@@ -267,6 +339,8 @@ export class RouterMachine {
     clearTimeout(this.watchdog);
     clearTimeout(this.bufferTimer);
     clearTimeout(this.connectTimer);
+    this.stopGuard?.();
+    this.stopGuard = undefined;
 
     this.setState("TEARDOWN");
 
@@ -295,6 +369,7 @@ export class RouterMachine {
     this.wentLive = false;
     this.gotStream = false;
     this.goingLive = false;
+    this.aiStream = null;
     // If dispose() released the camera while we were mid-teardown, we are
     // OFFLINE, not IDLE — reporting IDLE would invite the engine to dispatch
     // the next job to a router that can't run it.

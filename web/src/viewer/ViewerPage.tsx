@@ -4,8 +4,15 @@
 //
 // This page needs NO camera/mic permission (it only *receives* video), which is
 // why it works inside OBS's CEF where the capturing router page cannot.
+//
+// It also draws the on-stream chips (docs/CONTENT-SAFETY.md S6) that ride the
+// job's offer: "hijacked by <name>" (Twitch Extension §7.3-style attribution)
+// and "AI-altered" (Kick's realistic-AI disclosure; helps YouTube's). They
+// are part of the broadcast picture, so they can't be cropped out by accident
+// of a separate overlay source.
 
 import { useEffect, useRef, useState } from "react";
+import type { OverlayChips } from "@rh/shared";
 import { HubSocket } from "../lib/ws.js";
 import { LoopbackReceiver } from "../lib/loopback.js";
 import { debugLog } from "../lib/debug.js";
@@ -17,6 +24,7 @@ export default function ViewerPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [wipe, setWipe] = useState<"in" | "out" | null>(null);
   const [connected, setConnected] = useState(false);
+  const [chips, setChips] = useState<OverlayChips | null>(null);
 
   useEffect(() => {
     const hub = new HubSocket("viewer").connect();
@@ -28,8 +36,9 @@ export default function ViewerPage() {
       setTimeout(() => setWipe(null), WIPE_MS);
     };
 
-    const onStream = (stream: MediaStream, jobId: string) => {
+    const onStream = (stream: MediaStream, jobId: string, overlay?: OverlayChips) => {
       setConnected(true);
+      setChips(overlay ?? null);
       video.srcObject = stream;
       void video.play().catch(() => {});
       flashWipe("in");
@@ -72,6 +81,7 @@ export default function ViewerPage() {
     const onReset = () => {
       flashWipe("out");
       setConnected(false);
+      setChips(null);
       setTimeout(() => {
         video.srcObject = null;
       }, WIPE_MS);
@@ -118,6 +128,20 @@ export default function ViewerPage() {
             mixBlendMode: "screen",
           }}
         />
+      )}
+      {connected && chips && (chips.aiLabel || chips.attribution) && (
+        <div className="pointer-events-none absolute bottom-4 left-4 flex gap-2 font-semibold">
+          {chips.aiLabel && (
+            <span className="rounded-md bg-black/70 px-2.5 py-1 text-sm tracking-wide text-white ring-1 ring-white/25">
+              AI-altered
+            </span>
+          )}
+          {chips.attribution && (
+            <span className="rounded-md bg-black/70 px-2.5 py-1 text-sm text-fuchsia-200 ring-1 ring-fuchsia-300/30">
+              hijacked by {chips.attribution}
+            </span>
+          )}
+        </div>
       )}
       {!connected && (
         <div className="absolute inset-0 grid place-items-center text-zinc-700">

@@ -13,6 +13,9 @@
   "dependencies": {
     "@decartai/sdk": "^0.1.14",
     "@rh/shared": "*",
+    "@tensorflow/tfjs": "^4.22.0",
+    "buffer": "^6.0.3",
+    "nsfwjs": "^4.4.0",
     "obs-websocket-js": "^5.0.8",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

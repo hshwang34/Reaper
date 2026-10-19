@@ -31,6 +31,8 @@ export const env = {
 export const decartEnabled = env.decartApiKey.startsWith("dct_");
 
 export const uploadsDir = resolve(__dirname, "..", "uploads");
+/** Moderation ledger + quarantine (gitignored, never served). */
+export const safetyDir = resolve(__dirname, "..", "safety");
 const settingsPath = resolve(__dirname, "..", "settings.json");
 
 let settings: Settings = loadSettings();

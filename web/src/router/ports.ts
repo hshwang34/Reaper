@@ -6,7 +6,7 @@
 // machine runs under node:test against fakes (web/test/stateMachine.test.ts);
 // `browserPorts()` is the one real implementation the /router page uses.
 
-import type { ClientMsg } from "@rh/shared";
+import type { ClientMsg, OverlayChips } from "@rh/shared";
 import { api } from "../lib/api.js";
 import type { HubSocket } from "../lib/ws.js";
 import type { LoopbackSender } from "../lib/loopback.js";
@@ -18,9 +18,28 @@ export interface DecartPort {
 }
 
 export interface SenderPort {
-  start(jobId: string, stream: MediaStream): Promise<void>;
+  /** `overlay` rides the offer to the viewer page (attribution / AI label). */
+  start(jobId: string, stream: MediaStream, overlay?: OverlayChips): Promise<void>;
   sendReset(): void;
   stop(): void;
+}
+
+export interface GuardVerdict {
+  unsafe: boolean;
+  /** Classifier class that decided ("Porn", "Hentai", "Sexy", "ok", …). */
+  label: string;
+  score: number;
+}
+
+/** The output guard (CONTENT-SAFETY S4) — frameGuard.ts in the browser. */
+export interface GuardPort {
+  /** Load the model if needed; false when it can't run on this machine. */
+  ready(): Promise<boolean>;
+  /** Classify one frame of `stream` now. */
+  check(stream: MediaStream): Promise<GuardVerdict>;
+  /** Sample continuously; calls onUnsafe once after consecutive positives.
+   *  Returns the stop function. */
+  watch(stream: MediaStream, onUnsafe: (v: GuardVerdict) => void): () => void;
 }
 
 export interface MachinePorts {
@@ -32,6 +51,7 @@ export interface MachinePorts {
   fetchImage(url: string): Promise<Blob | null>;
   decart: DecartPort;
   sender: SenderPort;
+  guard: GuardPort;
   /** Uplink to the hub (router:state, job:done). */
   send(msg: ClientMsg): void;
 }
@@ -44,6 +64,8 @@ export interface MachineTimeouts {
   watchdogExtraMs: number;
   /** Glitch-wipe cover between the cut and the OBS hide. */
   wipeMs: number;
+  /** Budget for the guard's model load + first-frame check before LIVE. */
+  guardMs: number;
 }
 
 export const DEFAULT_TIMEOUTS: MachineTimeouts = {
@@ -51,10 +73,15 @@ export const DEFAULT_TIMEOUTS: MachineTimeouts = {
   bufferMs: 8_000,
   watchdogExtraMs: 10_000,
   wipeMs: 420,
+  guardMs: 4_000,
 };
 
 /** The real thing: HTTP API + Decart SDK + WebRTC loopback + hub socket. */
-export function browserPorts(hub: HubSocket, sender: LoopbackSender): MachinePorts {
+export function browserPorts(
+  hub: HubSocket,
+  sender: LoopbackSender,
+  guard: GuardPort,
+): MachinePorts {
   return {
     mintToken: (d) => api.mintToken(d).then((r) => r.token),
     setObsVisible: (visible) => api.obsToggle(visible).then(() => undefined),
@@ -64,6 +91,7 @@ export function browserPorts(hub: HubSocket, sender: LoopbackSender): MachinePor
         .catch(() => null),
     decart: new DecartSession(),
     sender,
+    guard,
     send: (m) => hub.send(m),
   };
 }
