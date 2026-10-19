@@ -80,7 +80,12 @@ export default function RouterPage() {
       }
     });
 
-    api.getRouterConfig().then(setCfg).catch(() => {});
+    // The OBS tile must track the live connection (OBS is often launched
+    // after this page, and can drop mid-stream), so poll the cheap local
+    // config endpoint rather than fetching it once at mount.
+    const refreshCfg = () => api.getRouterConfig().then(setCfg).catch(() => {});
+    void refreshCfg();
+    const cfgTimer = window.setInterval(refreshCfg, 5000);
 
     // Panic hotkey: Escape toggles pause on the sidecar (which cancels any
     // active job). The streamer's face is the canvas — this must be instant.
@@ -93,6 +98,7 @@ export default function RouterPage() {
 
     return () => {
       off();
+      window.clearInterval(cfgTimer);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pagehide", onUnload);
       void machine.dispose();
