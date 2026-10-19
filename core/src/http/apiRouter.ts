@@ -241,18 +241,29 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
       // is guessable — acting on it anonymously would let anyone delete
       // strangers' pending uploads — so a code-only request is recorded for
       // the operator to verify and action within the SLA.
-      const removed = imageUrl ? ctx.runtime.uploads.takedown({ url: imageUrl }) : 0;
+      const { removed, blocked } = imageUrl
+        ? ctx.runtime.uploads.takedown({ url: imageUrl }, { requester: submitter(req) })
+        : { removed: 0, blocked: true };
+      // A refused re-upload block (anonymous budget full) is escalated, never
+      // reported as blocked: the streamer re-files it via /moderation/takedown,
+      // which is unbudgeted.
       const ev = ctx.runtime.ledger.record({
         stage: "takedown",
-        verdict: "info",
+        verdict: blocked ? "info" : "review",
         source: "requester",
-        reason: `${description.slice(0, 300)} — removed ${removed} exact copy(ies)${imageUrl ? "" : " — code/description only: operator to verify"}`,
-        categories: ["takedown"],
+        reason:
+          `${description.slice(0, 300)} — removed ${removed} exact copy(ies)` +
+          (imageUrl ? "" : " — code/description only: operator to verify") +
+          (blocked ? "" : " — re-upload NOT blocked (anonymous budget full): re-file as a streamer takedown"),
+        categories: blocked ? ["takedown"] : ["takedown", "block-refused"],
         code: code ?? null,
         ipHash: submitter(req),
       });
       ctx.runtime.ledger.recordContact(ev.id, contact);
-      warn("safety", `TAKEDOWN request ${ev.id.slice(0, 8)} — removed ${removed}; 48h SLA (docs/runbooks/takedown.md)`);
+      warn(
+        "safety",
+        `TAKEDOWN request ${ev.id.slice(0, 8)} — removed ${removed}${blocked ? "" : ", block REFUSED"}; 48h SLA (docs/runbooks/takedown.md)`,
+      );
       res.json({ ok: true, ticket: ev.id, removed });
     }),
   );
@@ -267,7 +278,7 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
       const imageUrl = field(b.imageUrl, 500) || undefined;
       const sha256 = /^[0-9a-f]{64}$/.test(field(b.sha256, 64)) ? field(b.sha256, 64) : undefined;
       if (!imageUrl && !sha256) return res.status(400).json({ error: "imageUrl or sha256 required" });
-      const removed = ctx.runtime.uploads.takedown(
+      const { removed } = ctx.runtime.uploads.takedown(
         { url: imageUrl, sha256 },
         { nearDuplicates: true, source: "streamer" },
       );

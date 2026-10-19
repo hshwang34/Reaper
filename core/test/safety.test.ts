@@ -25,6 +25,7 @@ import {
   displayName,
   jsonForPrompt,
   MAX_ANONYMOUS_BLOCKS,
+  MAX_BLOCKS_PER_REQUESTER,
   memorySafetyLedger,
 } from "../src/index.js";
 import { fakeText, imageFile, liveSuite, recorder, settings, tip } from "./helpers.js";
@@ -105,7 +106,7 @@ function seeded() {
 
 test("registry: an anonymous takedown removes and blocks EXACT copies only", () => {
   const { reg, deleted } = seeded();
-  assert.equal(reg.takedown({ url: "/u/1.jpg" }), 2);
+  assert.equal(reg.takedown({ url: "/u/1.jpg" }).removed, 2);
   assert.deepEqual(deleted.sort(), ["p1", "p2"], "a look-alike someone else uploaded survives");
   assert.ok(reg.isBlocked("aa", "1234123412341234"), "the exact picture can't come back");
   assert.ok(!reg.isBlocked("zz", "00000000000000fd"), "similar pictures aren't blocked");
@@ -114,7 +115,7 @@ test("registry: an anonymous takedown removes and blocks EXACT copies only", () 
 
 test("registry: the streamer's takedown fans out to near-duplicates", () => {
   const { reg, deleted } = seeded();
-  assert.equal(reg.takedown({ url: "/u/1.jpg" }, { nearDuplicates: true }), 3);
+  assert.equal(reg.takedown({ url: "/u/1.jpg" }, { nearDuplicates: true }).removed, 3);
   assert.deepEqual(deleted.sort(), ["p1", "p2", "p3"]);
   assert.ok(reg.isBlocked("zz", "00000000000000fd"));
   assert.ok(!reg.isBlocked("cc", "ffffffffffffff00"));
@@ -143,6 +144,16 @@ test("registry: flooding anonymous blocks can't evict an earlier takedown", () =
   // Authenticated and CSAM blocks still land when the anonymous budget is full.
   assert.ok(reg.block("later-streamer", null, "streamer"));
   assert.equal(reg.block("later-anon", null, "anonymous"), false);
+  // takedown() reports the refusal so the route escalates instead of claiming success.
+  assert.deepEqual(reg.takedown({ sha256: "a".repeat(64) }), { removed: 0, blocked: false });
+  reg.dispose();
+});
+
+test("registry: one requester can't spend the whole anonymous budget", () => {
+  const reg = new UploadRegistry(() => {});
+  for (let i = 0; i < MAX_BLOCKS_PER_REQUESTER; i++) assert.ok(reg.block(`a${i}`, null, "anonymous", "attacker"));
+  assert.equal(reg.block("one-more", null, "anonymous", "attacker"), false);
+  assert.ok(reg.block("victims-photo", null, "anonymous", "victim"), "a different requester still gets a block");
   reg.dispose();
 });
 

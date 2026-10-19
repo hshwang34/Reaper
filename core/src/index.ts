@@ -43,6 +43,7 @@ export {
 export { dHash, hamming, ImageRejected, prepareUpload, sha256Hex, sniffImage } from "./images.js";
 export {
   MAX_ANONYMOUS_BLOCKS,
+  MAX_BLOCKS_PER_REQUESTER,
   sweepUploadDir,
   UPLOAD_TTL_MS,
   UploadRegistry,
