@@ -15,33 +15,46 @@ import { useEffect, useRef, useState } from "react";
 import type { OverlayChips } from "@rh/shared";
 import { HubSocket } from "../lib/ws.js";
 import { LoopbackReceiver } from "../lib/loopback.js";
-import { debugLog } from "../lib/debug.js";
+import { debugLog, setDebugSink } from "../lib/debug.js";
 
 const FRAMES_REQUIRED = 10; // consecutive decoded frames before we call it "up"
-const WIPE_MS = 420;
+// The hijack dissolves in from a blur over the real camera (this page is
+// transparent, and OBS stacks it on top of the camera), then dissolves back
+// out. The fade softens the cut AND hides the AI feed's few-hundred-ms lag
+// behind the camera, which a plain crossfade would show as a ghosted double.
+const FADE_IN_MS = 500;
+const FADE_OUT_MS = 400; // keep in sync with DEFAULT_TIMEOUTS.fadeOutMs (router/ports.ts)
+const FADE_BLUR_PX = 24;
+// Only a direct browser preview shows the "standby" label — inside OBS it
+// could flash on stream in the instant between the fade-out and the hide.
+const IN_OBS = typeof window !== "undefined" && "obsstudio" in window;
+
+type Fade = { shown: boolean; ms: number };
 
 export default function ViewerPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [wipe, setWipe] = useState<"in" | "out" | null>(null);
+  const [fade, setFade] = useState<Fade>({ shown: false, ms: 0 });
   const [connected, setConnected] = useState(false);
   const [chips, setChips] = useState<OverlayChips | null>(null);
 
   useEffect(() => {
+    // Transparent page: whatever isn't the (faded-in) AI feed shows the real
+    // camera underneath in OBS. The shared stylesheet paints body dark.
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
     const hub = new HubSocket("viewer").connect();
+    setDebugSink((line) => hub.send({ t: "page:log", line }));
     const video = videoRef.current!;
     let sentOkForJob = "";
-
-    const flashWipe = (dir: "in" | "out") => {
-      setWipe(dir);
-      setTimeout(() => setWipe(null), WIPE_MS);
-    };
 
     const onStream = (stream: MediaStream, jobId: string, overlay?: OverlayChips) => {
       setConnected(true);
       setChips(overlay ?? null);
+      // Start invisible. The fade-in waits for rtc:reveal (sent once OBS has
+      // actually unhidden us) — the source is hidden and unrendered until then.
+      setFade({ shown: false, ms: 0 });
       video.srcObject = stream;
       void video.play().catch(() => {});
-      flashWipe("in");
 
       // Frame gate — must work while this source is HIDDEN in OBS. A hidden
       // browser source is not rendered, so rendering-based signals
@@ -60,6 +73,10 @@ export default function ViewerPage() {
       if (track) {
         if (!track.muted) sendOk("track already unmuted");
         else track.onunmute = () => sendOk("track unmuted (media flowing)");
+        // Media stopping mid-job is the one signal that survives a frozen
+        // router tab — it's how the Decart session cap is observed firing.
+        track.onmute = () => debugLog("viewer", "track muted (media stopped)");
+        track.onended = () => debugLog("viewer", "track ended");
       }
       // Belt-and-suspenders: if the tab IS rendering (e.g. previewed in a
       // normal browser), decoded frames confirm too — whichever fires first.
@@ -78,27 +95,35 @@ export default function ViewerPage() {
       }
     };
 
-    const onReset = () => {
-      flashWipe("out");
-      setConnected(false);
-      setChips(null);
-      setTimeout(() => {
-        video.srcObject = null;
-      }, WIPE_MS);
+    const onReveal = () => {
+      debugLog("viewer", "reveal — fading in");
+      setFade({ shown: true, ms: FADE_IN_MS });
     };
 
-    const receiver = new LoopbackReceiver(hub, onStream, onReset);
+    // instant = panic/cancel: the router already hid OBS; just vanish.
+    const onReset = (_jobId: string, instant: boolean) => {
+      const ms = instant ? 0 : FADE_OUT_MS;
+      setFade({ shown: false, ms });
+      setTimeout(() => {
+        setConnected(false);
+        setChips(null);
+        video.srcObject = null;
+      }, ms);
+    };
+
+    const receiver = new LoopbackReceiver(hub, onStream, onReset, onReveal);
 
     return () => {
       // StrictMode double-mounts effects in dev: without this the first
       // receiver would keep its peer + hub listener alive alongside the second.
+      setDebugSink(null);
       receiver.dispose();
       hub.close();
     };
   }, []);
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-black">
+    <div className="relative h-screen w-screen overflow-hidden">
       <video
         ref={videoRef}
         autoPlay
@@ -109,28 +134,37 @@ export default function ViewerPage() {
           // Exact frame size — the OBS-side crop calibration depends on this.
           debugLog("viewer", `frame ${v.videoWidth}x${v.videoHeight}`);
         }}
+        // Fires on every mid-stream resolution change — the loopback's
+        // quality ramp (or collapse) shows up here, as OBS actually sees it.
+        onResize={(e) => {
+          const v = e.currentTarget;
+          debugLog("viewer", `resized ${v.videoWidth}x${v.videoHeight}`);
+        }}
         // object-fill maps the frame 1:1 onto the 1280x720 page, so OBS-side
         // pixel crops line up with frame pixels. (cover would re-crop/scale
         // whenever the frame isn't exactly 16:9, silently shifting geometry.)
         className="h-full w-full"
-        style={{ objectFit: "fill" }}
+        style={{
+          objectFit: "fill",
+          opacity: fade.shown ? 1 : 0,
+          filter: `blur(${fade.shown ? 0 : FADE_BLUR_PX}px)`,
+          // ease-out in (lands softly), ease-in out (lets go gradually).
+          transition:
+            fade.ms > 0
+              ? `opacity ${fade.ms}ms ${fade.shown ? "ease-out" : "ease-in"}, filter ${fade.ms}ms ${fade.shown ? "ease-out" : "ease-in"}`
+              : "none",
+        }}
       />
-      {/* Glitch wipe covers the cut in/out so the latency-jump reads as an
-          intentional effect rather than a stutter. */}
-      {wipe && (
-        <div
-          className={`pointer-events-none absolute inset-0 ${
-            wipe === "in" ? "animate-[wipeIn_420ms_ease-out]" : "animate-[wipeOut_420ms_ease-in]"
-          }`}
-          style={{
-            background:
-              "repeating-linear-gradient(0deg, rgba(255,0,120,0.35) 0px, rgba(0,255,220,0.35) 3px, rgba(0,0,0,0.6) 6px)",
-            mixBlendMode: "screen",
-          }}
-        />
-      )}
+      {/* The chips are part of the hijacked picture, so they fade with it —
+          never on air before the reveal or after the fade-out. */}
       {connected && chips && (chips.aiLabel || chips.attribution) && (
-        <div className="pointer-events-none absolute bottom-4 left-4 flex gap-2 font-semibold">
+        <div
+          className="pointer-events-none absolute bottom-4 left-4 flex gap-2 font-semibold"
+          style={{
+            opacity: fade.shown ? 1 : 0,
+            transition: fade.ms > 0 ? `opacity ${fade.ms}ms ${fade.shown ? "ease-out" : "ease-in"}` : "none",
+          }}
+        >
           {chips.aiLabel && (
             <span className="rounded-md bg-black/70 px-2.5 py-1 text-sm tracking-wide text-white ring-1 ring-white/25">
               AI-altered
@@ -143,17 +177,13 @@ export default function ViewerPage() {
           )}
         </div>
       )}
-      {!connected && (
+      {!connected && !IN_OBS && (
         <div className="absolute inset-0 grid place-items-center text-zinc-700">
           {/* Invisible in OBS until a hijack starts; handy when previewing the
               page directly in a browser. */}
           <span className="text-sm tracking-widest uppercase">standby</span>
         </div>
       )}
-      <style>{`
-        @keyframes wipeIn { from { opacity: 1; transform: translateY(-100%); } to { opacity: 0; transform: translateY(0); } }
-        @keyframes wipeOut { from { opacity: 0; transform: translateY(0); } to { opacity: 1; transform: translateY(100%); } }
-      `}</style>
     </div>
   );
 }

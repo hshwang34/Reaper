@@ -13,10 +13,47 @@ const RTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
 
+// The loopback never leaves the machine, so bandwidth is effectively free —
+// but WebRTC doesn't know that. A fresh peer starts its bandwidth estimate at
+// ~300kbps and ramps over tens of seconds, which for a 5–30s hijack means the
+// whole paid window goes out at 320x180–480x270 (measured) while Decart is
+// handing us sharp 720p. Pin the encoder high from the first frame instead.
+const LOOPBACK_KBPS = { min: 4000, start: 8000, max: 12000 };
+
+/** Add Chrome's x-google-*-bitrate fmtp hints to every video codec, so the
+ *  bandwidth estimator starts (and stays) at loopback rates. Chrome reads
+ *  these from the SDP; other engines ignore unknown fmtp params. */
+function withLoopbackBitrate(sdp: string): string {
+  const hint = `x-google-min-bitrate=${LOOPBACK_KBPS.min};x-google-start-bitrate=${LOOPBACK_KBPS.start};x-google-max-bitrate=${LOOPBACK_KBPS.max}`;
+  const lines = sdp.split("\r\n");
+  const videoPts = new Set<string>();
+  const hasFmtp = new Set<string>();
+  let inVideo = false;
+  for (const line of lines) {
+    if (line.startsWith("m=")) inVideo = line.startsWith("m=video");
+    const rtp = inVideo && /^a=rtpmap:(\d+) (VP8|VP9|H264|AV1)\//i.exec(line);
+    if (rtp) videoPts.add(rtp[1]);
+    const fmtp = /^a=fmtp:(\d+) /.exec(line);
+    if (fmtp) hasFmtp.add(fmtp[1]);
+  }
+  return lines
+    .flatMap((line) => {
+      const fmtp = /^a=fmtp:(\d+) /.exec(line);
+      if (fmtp && videoPts.has(fmtp[1]) && !line.includes("x-google-")) return [`${line};${hint}`];
+      // VP8 usually ships with no fmtp line at all — add one after its rtpmap.
+      const rtp = /^a=rtpmap:(\d+) /.exec(line);
+      if (rtp && videoPts.has(rtp[1]) && !hasFmtp.has(rtp[1])) return [line, `a=fmtp:${rtp[1]} ${hint}`];
+      return [line];
+    })
+    .join("\r\n");
+}
+
 /** Router side: pushes the AI stream to the viewer. */
 export class LoopbackSender {
   private pc: RTCPeerConnection | null = null;
   private jobId = "";
+  private statsTimer: ReturnType<typeof setInterval> | undefined;
+  private warnedNoFrames = false;
   private unsubscribe: () => void;
 
   constructor(private hub: HubSocket) {
@@ -39,7 +76,17 @@ export class LoopbackSender {
     pc.onconnectionstatechange = () =>
       debugLog("loopback:sender", "conn=", pc.connectionState);
 
-    for (const track of stream.getVideoTracks()) pc.addTrack(track, stream);
+    for (const track of stream.getVideoTracks()) {
+      const sender = pc.addTrack(track, stream);
+      // Belt to the SDP hints' braces: cap high, and under any pressure drop
+      // frame rate rather than resolution — a stuttery frame reads as an
+      // effect, a blurry one reads as broken.
+      const params = sender.getParameters();
+      if (!params.encodings?.length) params.encodings = [{}];
+      params.encodings[0].maxBitrate = LOOPBACK_KBPS.max * 1000;
+      params.degradationPreference = "maintain-resolution";
+      void sender.setParameters(params).catch((e) => debugLog("loopback:sender", "setParameters failed", e));
+    }
 
     pc.onicecandidate = (e) => {
       if (e.candidate) {
@@ -52,19 +99,70 @@ export class LoopbackSender {
       }
     };
 
-    const offer = await pc.createOffer();
+    const created = await pc.createOffer();
+    const offer = { type: created.type, sdp: withLoopbackBitrate(created.sdp ?? "") };
     await pc.setLocalDescription(offer);
     this.hub.send({ t: "rtc:offer", target: "viewer", jobId, sdp: offer, overlay });
+    this.watchStats(pc);
   }
 
-  /** Tell the viewer to play its out-wipe and tear down its peer. */
-  sendReset(): void {
+  /** Quality trace: what Decart hands us (media-source) vs. what the loopback
+   *  actually encodes (outbound-rtp), every 2s. Separates "the model output is
+   *  soft" from "our re-encode is starving it". */
+  private watchStats(pc: RTCPeerConnection): void {
+    let lastBytes = 0;
+    let lastTs = 0;
+    this.statsTimer = setInterval(async () => {
+      if (this.pc !== pc) return;
+      const report = await pc.getStats().catch(() => null);
+      if (!report) return;
+      let src = "";
+      let out = "";
+      report.forEach((r) => {
+        if (r.type === "media-source" && r.kind === "video") {
+          src = `${r.width}x${r.height}@${r.framesPerSecond ?? "?"}`;
+        } else if (r.type === "outbound-rtp" && r.kind === "video") {
+          const kbps = lastTs ? Math.round(((r.bytesSent - lastBytes) * 8) / (r.timestamp - lastTs)) : 0;
+          lastBytes = r.bytesSent;
+          lastTs = r.timestamp;
+          out = `${r.frameWidth}x${r.frameHeight}@${r.framesPerSecond ?? "?"} ${kbps}kbps limit=${r.qualityLimitationReason}`;
+        }
+      });
+      debugLog("loopback:stats", `decart-in ${src} → encoded ${out}`);
+    }, 2000);
+  }
+
+  /** Total frames Decart has delivered into the loopback (media-source
+   *  stats), or null if unavailable. */
+  async framesIn(): Promise<number | null> {
+    const report = await this.pc?.getStats().catch(() => null);
+    let frames: number | null = null;
+    report?.forEach((r) => {
+      if (r.type === "media-source" && r.kind === "video" && typeof r.frames === "number") frames = r.frames;
+    });
+    if (frames === null && report && !this.warnedNoFrames) {
+      this.warnedNoFrames = true; // stall detection is off — say so, once
+      debugLog("loopback:sender", "media-source frame counter unavailable — stall detection disabled");
+    }
+    return frames;
+  }
+
+  /** Tell the viewer OBS is showing it — start the fade-in. */
+  sendReveal(): void {
     if (this.jobId) {
-      this.hub.send({ t: "rtc:reset", target: "viewer", jobId: this.jobId });
+      this.hub.send({ t: "rtc:reveal", target: "viewer", jobId: this.jobId });
+    }
+  }
+
+  /** Tell the viewer to fade out (or vanish, when `instant`) and tear down its peer. */
+  sendReset(instant = false): void {
+    if (this.jobId) {
+      this.hub.send({ t: "rtc:reset", target: "viewer", jobId: this.jobId, instant });
     }
   }
 
   stop(): void {
+    clearInterval(this.statsTimer);
     this.pc?.close();
     this.pc = null;
   }
@@ -72,7 +170,9 @@ export class LoopbackSender {
   private async onMessage(m: ServerMsg): Promise<void> {
     if (!this.pc || !isRtcMsg(m) || m.jobId !== this.jobId) return;
     if (m.t === "rtc:answer") {
-      await this.pc.setRemoteDescription(m.sdp);
+      // The sender's encoder reads the hints off the *remote* (answer) SDP —
+      // munging here keeps the viewer page (inside OBS) untouched.
+      await this.pc.setRemoteDescription({ type: m.sdp.type, sdp: withLoopbackBitrate(m.sdp.sdp ?? "") });
     } else if (m.t === "rtc:candidate") {
       try {
         await this.pc.addIceCandidate(m.candidate);
@@ -92,7 +192,8 @@ export class LoopbackReceiver {
   constructor(
     private hub: HubSocket,
     private onStream: (stream: MediaStream, jobId: string, overlay?: OverlayChips) => void,
-    private onReset: (jobId: string) => void,
+    private onReset: (jobId: string, instant: boolean) => void,
+    private onReveal: (jobId: string) => void = () => {},
   ) {
     this.unsubscribe = hub.on((m) => void this.onMessage(m).catch(() => {}));
   }
@@ -148,8 +249,10 @@ export class LoopbackReceiver {
       } catch {
         /* ignore */
       }
+    } else if (rtc.t === "rtc:reveal" && rtc.jobId === this.jobId) {
+      this.onReveal(rtc.jobId);
     } else if (rtc.t === "rtc:reset" && rtc.jobId === this.jobId) {
-      this.onReset(rtc.jobId);
+      this.onReset(rtc.jobId, rtc.instant === true);
       this.pc?.close();
       this.pc = null;
     }

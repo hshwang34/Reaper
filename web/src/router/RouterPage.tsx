@@ -15,6 +15,7 @@ import { RouterMachine } from "./stateMachine.js";
 import { browserPorts } from "./ports.js";
 import { FrameGuard } from "./frameGuard.js";
 import { acquireCamera, listCameras } from "./decartSession.js";
+import { setDebugSink } from "../lib/debug.js";
 
 const STATE_COLOR: Record<RouterState, string> = {
   OFFLINE: "bg-zinc-600",
@@ -42,12 +43,15 @@ export default function RouterPage() {
   const [camId, setCamId] = useState<string>("auto");
   const camStreamRef = useRef<MediaStream | null>(null);
 
-  const pushLog = (line: string) =>
+  const pushLog = (line: string) => {
     setLogLines((prev) => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev].slice(0, 40));
+    hubRef.current?.send({ t: "page:log", line });
+  };
 
   useEffect(() => {
     const hub = new HubSocket("router").connect();
     hubRef.current = hub;
+    setDebugSink((line) => hub.send({ t: "page:log", line }));
     const sender = new LoopbackSender(hub);
     // Output guard (CONTENT-SAFETY S4). Warm the model now so the first
     // guarded job doesn't spend its pre-LIVE budget loading weights.
@@ -67,6 +71,7 @@ export default function RouterPage() {
       },
     });
     machineRef.current = machine;
+    const offDrop = hub.onDrop(() => machine.abandon("lost sidecar connection"));
 
     const off = hub.on((m) => {
       const msg = m as AnyMsg;
@@ -104,6 +109,8 @@ export default function RouterPage() {
 
     return () => {
       off();
+      offDrop();
+      setDebugSink(null);
       window.clearInterval(cfgTimer);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pagehide", onUnload);
@@ -177,33 +184,30 @@ export default function RouterPage() {
         </div>
       </header>
 
+      {/* Hero: the AI output is what the streamer is judging, so it gets the
+          full width; the camera input is just an "am I armed?" inset. */}
+      <div className="relative mb-6 overflow-hidden rounded-xl border border-fuchsia-900 bg-black">
+        <p className="absolute left-3 top-2 z-10 text-xs text-zinc-400">AI output (Decart)</p>
+        <video
+          ref={aiPreviewRef}
+          muted
+          playsInline
+          className="aspect-video w-full object-contain"
+        />
+        <div className="absolute bottom-3 right-3 w-48 overflow-hidden rounded-lg border border-zinc-700 bg-black shadow-lg">
+          <video
+            ref={previewRef}
+            muted
+            playsInline
+            className="aspect-video w-full object-cover"
+          />
+          <p className="absolute left-1.5 top-1 text-[10px] text-zinc-400">Camera</p>
+        </div>
+      </div>
+
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Left: camera + status */}
+        {/* Left: arm + status */}
         <section className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <p className="mb-1 text-xs text-zinc-500">Camera (input)</p>
-              <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
-                <video
-                  ref={previewRef}
-                  muted
-                  playsInline
-                  className="aspect-video w-full object-cover"
-                />
-              </div>
-            </div>
-            <div>
-              <p className="mb-1 text-xs text-zinc-500">AI output (Decart)</p>
-              <div className="overflow-hidden rounded-xl border border-fuchsia-900 bg-black">
-                <video
-                  ref={aiPreviewRef}
-                  muted
-                  playsInline
-                  className="aspect-video w-full object-cover"
-                />
-              </div>
-            </div>
-          </div>
           {!machineRef.current?.hasCamera() && state === "OFFLINE" && (
             <button
               onClick={() => void arm()}

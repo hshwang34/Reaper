@@ -7,6 +7,7 @@ import { channelSlug } from "./channel.js";
 export class HubSocket {
   private ws: WebSocket | null = null;
   private listeners = new Set<(m: ServerMsg) => void>();
+  private dropListeners = new Set<() => void>();
   private outbox: ClientMsg[] = [];
   private closed = false;
   private attempt = 0;
@@ -45,6 +46,7 @@ export class HubSocket {
     };
     ws.onclose = () => {
       if (this.closed) return;
+      this.dropListeners.forEach((l) => l());
       // Backoff with jitter (1s → 15s): during a server restart every open
       // router/viewer/portal tab would otherwise redial in lockstep each
       // second. Capped low because the router/viewer are live-stream critical.
@@ -55,6 +57,13 @@ export class HubSocket {
     };
     ws.onerror = () => ws.close();
     return this;
+  }
+
+  /** Fires when an established-or-attempted connection drops (not on our own
+   *  close()). Reconnect still happens automatically. */
+  onDrop(l: () => void): () => void {
+    this.dropListeners.add(l);
+    return () => this.dropListeners.delete(l);
   }
 
   on(l: (m: ServerMsg) => void): () => void {

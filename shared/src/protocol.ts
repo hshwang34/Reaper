@@ -134,9 +134,17 @@ export interface RtcCandidateMsg extends RtcBase {
   t: "rtc:candidate";
   candidate: RtcCandidate;
 }
-/** Router tells the viewer to play its out-wipe and drop its peer. */
+/** Router tells the viewer OBS is now showing it: run the fade-in. Sent only
+ *  AFTER the OBS unhide resolves — a hidden Browser Source isn't rendered, so
+ *  a transition started earlier would finish off air. */
+export interface RtcRevealMsg extends RtcBase {
+  t: "rtc:reveal";
+}
+/** Router tells the viewer to fade out (or, when `instant`, vanish) and drop
+ *  its peer. */
 export interface RtcResetMsg extends RtcBase {
   t: "rtc:reset";
+  instant?: boolean;
 }
 
 /** Viewer confirms media is flowing — the buffering gate. */
@@ -145,8 +153,16 @@ export interface ViewerFramesOkMsg {
   jobId: string;
 }
 
-export type RtcMsg = RtcOfferMsg | RtcAnswerMsg | RtcCandidateMsg | RtcResetMsg;
-export type LocalPlaneMsg = RtcMsg | ViewerFramesOkMsg;
+/** Router/viewer mirror their event-log lines to the local sidecar's terminal,
+ *  so the whole pipeline (page + sidecar) reads as one log. Logged by the hub,
+ *  never forwarded — and, being local plane, never accepted by the cloud. */
+export interface PageLogMsg {
+  t: "page:log";
+  line: string;
+}
+
+export type RtcMsg = RtcOfferMsg | RtcAnswerMsg | RtcCandidateMsg | RtcRevealMsg | RtcResetMsg;
+export type LocalPlaneMsg = RtcMsg | ViewerFramesOkMsg | PageLogMsg;
 
 // ── Unions ───────────────────────────────────────────────────────────────
 
@@ -167,11 +183,12 @@ export function isRtcMsg(m: AnyMsg): m is RtcMsg {
     m.t === "rtc:offer" ||
     m.t === "rtc:answer" ||
     m.t === "rtc:candidate" ||
+    m.t === "rtc:reveal" ||
     m.t === "rtc:reset"
   );
 }
 
 /** Everything that must never leave the streamer's machine. */
 export function isLocalPlaneMsg(m: AnyMsg): m is LocalPlaneMsg {
-  return isRtcMsg(m) || m.t === "viewer:frames-ok";
+  return isRtcMsg(m) || m.t === "viewer:frames-ok" || m.t === "page:log";
 }

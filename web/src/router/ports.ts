@@ -20,7 +20,13 @@ export interface DecartPort {
 export interface SenderPort {
   /** `overlay` rides the offer to the viewer page (attribution / AI label). */
   start(jobId: string, stream: MediaStream, overlay?: OverlayChips): Promise<void>;
-  sendReset(): void;
+  /** OBS is showing the source — viewer runs its fade-in. */
+  sendReveal(): void;
+  /** Viewer fades out (or vanishes, when `instant`) and drops its peer. */
+  sendReset(instant?: boolean): void;
+  /** Total frames received from Decart so far (the sender's media-source),
+   *  or null when the browser doesn't report it. Stall detection watches it. */
+  framesIn(): Promise<number | null>;
   stop(): void;
 }
 
@@ -62,18 +68,25 @@ export interface MachineTimeouts {
   bufferMs: number;
   /** Beyond the paid duration, before the watchdog fires. */
   watchdogExtraMs: number;
-  /** Glitch-wipe cover between the cut and the OBS hide. */
-  wipeMs: number;
+  /** The viewer's fade-out, waited out between the reset and the OBS hide on a
+   *  graceful exit. Must match FADE_OUT_MS in ViewerPage. */
+  fadeOutMs: number;
   /** Budget for the guard's model load + first-frame check before LIVE. */
   guardMs: number;
+  /** How long Decart may deliver zero new frames while LIVE before the job
+   *  is failed as stalled. Covers a network cut: Decart's SDK keeps reporting
+   *  "generating" and its track never mutes while zero frames arrive
+   *  (measured), so the frame counter is the only honest signal. */
+  stallMs: number;
 }
 
 export const DEFAULT_TIMEOUTS: MachineTimeouts = {
   connectMs: 10_000,
   bufferMs: 8_000,
   watchdogExtraMs: 10_000,
-  wipeMs: 420,
+  fadeOutMs: 400,
   guardMs: 4_000,
+  stallMs: 3_000,
 };
 
 /** The real thing: HTTP API + Decart SDK + WebRTC loopback + hub socket. */

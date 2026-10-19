@@ -9,12 +9,14 @@
 
 import OBSWebSocket from "obs-websocket-js";
 import { log, warn } from "./log.js";
+import { CAMERA_INPUT_KINDS, coverTransform, drawnRect, type ObsTransform } from "./obsAlign.js";
 
 export class ObsController {
   private obs = new OBSWebSocket();
   private connected = false;
   private connecting: Promise<void> | null = null;
   private itemCache = new Map<string, number>();
+  private connectListeners = new Set<() => void>();
 
   constructor(
     private url: string,
@@ -26,6 +28,13 @@ export class ObsController {
     });
   }
 
+  /** Run after every successful (re)connect — OBS is often launched, quit,
+   *  and relaunched independently of us. Returns an unsubscribe. */
+  onConnected(fn: () => void): () => void {
+    this.connectListeners.add(fn);
+    return () => this.connectListeners.delete(fn);
+  }
+
   async ensureConnected(): Promise<void> {
     if (this.connected) return;
     if (this.connecting) return this.connecting;
@@ -34,6 +43,7 @@ export class ObsController {
         await this.obs.connect(this.url, this.password || undefined);
         this.connected = true;
         log("obs", `connected ${this.url}`);
+        for (const fn of this.connectListeners) fn();
       } catch (e) {
         warn("obs", `connect failed: ${(e as Error).message}`);
         throw e;
@@ -63,12 +73,44 @@ export class ObsController {
   ): Promise<void> {
     await this.ensureConnected();
     const id = await this.sceneItemId(scene, source);
+    // Re-align at the moment it matters: the webcam may have moved since the
+    // last hijack. Never let alignment trouble block the unhide itself.
+    if (visible) await this.alignToCamera(scene, source).catch((e) => warn("obs", `align failed: ${(e as Error).message}`));
     await this.obs.call("SetSceneItemEnabled", {
       sceneName: scene,
       sceneItemId: id,
       sceneItemEnabled: visible,
     });
     log("obs", `${source} → ${visible ? "VISIBLE" : "hidden"}`);
+  }
+
+  /** Snap `source` exactly over the scene's (visible) camera item. No-op when
+   *  the scene has no camera, or its geometry can't be reproduced exactly. */
+  async alignToCamera(scene: string, source: string): Promise<void> {
+    await this.ensureConnected();
+    const { sceneItems } = await this.obs.call("GetSceneItemList", { sceneName: scene });
+    const cam = sceneItems.find(
+      (it) =>
+        it.sourceName !== source &&
+        it.sceneItemEnabled === true &&
+        CAMERA_INPUT_KINDS.has(String(it.inputKind)),
+    );
+    if (!cam) return;
+    const camId = Number(cam.sceneItemId);
+    const { sceneItemTransform } = await this.obs.call("GetSceneItemTransform", {
+      sceneName: scene,
+      sceneItemId: camId,
+    });
+    const rect = drawnRect(sceneItemTransform as unknown as ObsTransform);
+    if (!rect) {
+      warn("obs", `"${cam.sourceName}" is rotated/flipped — overlay not auto-aligned`);
+      return;
+    }
+    await this.obs.call("SetSceneItemTransform", {
+      sceneName: scene,
+      sceneItemId: await this.sceneItemId(scene, source),
+      sceneItemTransform: coverTransform(rect),
+    });
   }
 
   isConnected(): boolean {
