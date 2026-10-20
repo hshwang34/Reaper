@@ -61,9 +61,39 @@ which builds Windows on Windows.
 The app is hosted-first: it is useful to a streamer only once `server/` is
 deployed and its public URL is set as the `RH_CLOUD_URL` repository variable
 (Settings → Secrets and variables → Actions → Variables). Every build after
-that signs in against it; builds before it carry no sign-in. Deploying the
-server (a host, a domain, a Twitch developer application) is its own project
-and is not covered here.
+that signs in against it; builds before it carry no sign-in.
+
+The server code is complete (`server/`, with `Dockerfile` and `fly.toml`).
+Deploying it is account work, in this order:
+
+1. **Fly.io account** (personal), `brew install flyctl`, `fly auth login`.
+   One shared-cpu machine + a 1 GB volume is ~$5–10/month.
+2. **Twitch developer application** at dev.twitch.tv/console → Register Your
+   Application. Category "Application Integration", OAuth redirect URL
+   `https://reality-hijack.fly.dev/auth/twitch/callback` (adjust if the app
+   name changes). Note the Client ID and generate a Client Secret.
+3. From the **repo root** (the image needs `shared/`, `core/` and `web/`;
+   `.dockerignore` keeps the context small):
+   ```bash
+   fly launch --config server/fly.toml --dockerfile server/Dockerfile --no-deploy --copy-config
+   fly volumes create rh_data --size 1 --region iad --config server/fly.toml
+   fly secrets set --config server/fly.toml \
+     DECART_API_KEY=… TWITCH_CLIENT_ID=… TWITCH_CLIENT_SECRET=… \
+     RH_JWT_SECRET="$(openssl rand -hex 32)" \
+     RH_PUBLIC_URL=https://reality-hijack.fly.dev
+   fly deploy --config server/fly.toml --dockerfile server/Dockerfile .
+   curl https://reality-hijack.fly.dev/healthz
+   ```
+   Content-safety classifier keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+   `SIGHTENGINE_API_USER`, `SIGHTENGINE_API_SECRET`) go in the same way;
+   without them hosted custom prompts and photos stay off (presets work).
+4. Set the GitHub repository variable `RH_CLOUD_URL=https://reality-hijack.fly.dev`
+   and cut a build. That build's wizard signs in for real.
+5. Sign in from the packaged app on the rig; a test hijack from the wizard
+   then runs through the cloud engine end to end.
+
+The server refuses to look like production without a Twitch app: with no
+`TWITCH_CLIENT_ID` it boots in DEV AUTH (fake accounts) and says so loudly.
 
 ## Releasing
 

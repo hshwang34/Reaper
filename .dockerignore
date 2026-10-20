@@ -1,0 +1,21 @@
+# Build context for server/Dockerfile (built from the REPO ROOT — the image
+# needs shared/, core/, web/ and server/). Without this the context was
+# 3.4 GB: node_modules, packaged installers, worktrees.
+node_modules
+**/node_modules
+app/release
+app/build-resources
+app/dist
+web/dist
+site
+.claude
+.git
+.github
+docs
+*.md
+.env
+.env.*
+sidecar/settings.json
+server/data.sqlite*
+server/uploads
+server/safety
