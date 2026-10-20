@@ -17,6 +17,7 @@
 //    countdown honest; this kills the tab-throttling failure mode that a
 //    Chrome-tab router suffers.
 
+import "./userDataOverride.js"; // must stay first — see the module
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -426,20 +427,25 @@ function listenOnFirstFreePort(
         reject(new Error("no free local port"));
         return;
       }
+      // Both handlers are per-attempt and each removes the other: a
+      // 'listening' left over from a failed attempt would fire on the NEXT
+      // attempt's success and report the busy port — the window and the OBS
+      // source would then point at whatever else owns it.
+      const onListening = () => {
+        srv.server.removeListener("error", onError);
+        resolvePort(ports[i]);
+      };
       const onError = (e: NodeJS.ErrnoException) => {
+        srv.server.removeListener("listening", onListening);
         if (e.code === "EADDRINUSE") {
           warn("app", `port ${ports[i]} busy — trying ${ports[i + 1]}`);
-          srv.server.removeListener("error", onError);
           tryAt(i + 1);
         } else {
           reject(e);
         }
       };
       srv.server.once("error", onError);
-      srv.server.once("listening", () => {
-        srv.server.removeListener("error", onError);
-        resolvePort(ports[i]);
-      });
+      srv.server.once("listening", onListening);
       srv.start(ports[i]);
     };
     tryAt(0);

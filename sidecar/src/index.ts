@@ -37,4 +37,14 @@ const local = createLocalServer({
   webDist: resolve(rootDir, "web", "dist"),
 });
 
+// The CLI has one port (SIDECAR_PORT) and no fallback: a busy port is fatal,
+// and should say so rather than crash with a stack (or sit there silently).
+local.server.once("error", (e: NodeJS.ErrnoException) => {
+  console.error(
+    e.code === "EADDRINUSE"
+      ? `port ${env.port} is already in use — is another sidecar running? (set SIDECAR_PORT to change it)`
+      : `local server failed: ${e.message}`,
+  );
+  process.exit(1);
+});
 local.start(env.port);
