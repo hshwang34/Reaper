@@ -30,6 +30,7 @@ const STATE_COLOR: Record<RouterState, string> = {
 export default function RouterPage() {
   const machineRef = useRef<RouterMachine | null>(null);
   const hubRef = useRef<HubSocket | null>(null);
+  const guardRef = useRef<FrameGuard | null>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
   const aiPreviewRef = useRef<HTMLVideoElement>(null);
 
@@ -53,10 +54,15 @@ export default function RouterPage() {
     hubRef.current = hub;
     setDebugSink((line) => hub.send({ t: "page:log", line }));
     const sender = new LoopbackSender(hub);
-    // Output guard (CONTENT-SAFETY S4). Warm the model now so the first
-    // guarded job doesn't spend its pre-LIVE budget loading weights.
+    // Output guard (CONTENT-SAFETY S4) is opt-in. When it's on, warm the
+    // model now so the first guarded job doesn't spend its pre-LIVE budget
+    // loading weights; when it's off, never download it.
     const guard = new FrameGuard(pushLog);
-    void guard.ready();
+    guardRef.current = guard;
+    api
+      .getSettings()
+      .then((s) => s.outputGuard !== "off" && void guard.ready())
+      .catch(() => {});
     const machine = new RouterMachine(browserPorts(hub, sender, guard), {
       onState: (s, rem) => {
         setState(s);
@@ -254,7 +260,12 @@ export default function RouterPage() {
             state={state}
             onFired={(outcome) => pushLog(`manual hijack → ${outcome}`)}
           />
-          <SettingsPanel onSaved={(s) => pushLog(`settings saved (min $${s.minTipUSD}, max ${s.maxDurationSec}s)`)} />
+          <SettingsPanel
+            onSaved={(s) => {
+              pushLog(`settings saved (min $${s.minTipUSD}, max ${s.maxDurationSec}s)`);
+              if (s.outputGuard !== "off") void guardRef.current?.ready();
+            }}
+          />
           <ModerationPanel
             client={api}
             onBan={(name) =>

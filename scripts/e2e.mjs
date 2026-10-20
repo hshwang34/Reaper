@@ -14,9 +14,10 @@
 // audience would see. Needs Google Chrome installed (CHROME_PATH to override).
 
 import { spawn, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { encode, decode } from "@msgpack/msgpack";
@@ -86,7 +87,7 @@ function startFakeObs(port) {
 }
 
 // ── run ─────────────────────────────────────────────────────────────────────
-let sidecar, browser, obs;
+let sidecar, browser, obs, settingsDir;
 async function main() {
   if (!existsSync(CHROME)) throw new Error(`Chrome not found at ${CHROME} (set CHROME_PATH)`);
 
@@ -102,6 +103,8 @@ async function main() {
   // E2E_REAL_DECART=1 opts into the .env Decart key: same checks, real lucy
   // sessions (a few seconds of billed GPU time per run).
   const realDecart = process.env.E2E_REAL_DECART === "1";
+  settingsDir = mkdtempSync(join(tmpdir(), "rh-e2e-"));
+  const settingsFile = join(settingsDir, "settings.json");
   sidecar = spawn("npm", ["run", "start", "--workspace", "sidecar"], {
     cwd: root,
     env: {
@@ -115,6 +118,8 @@ async function main() {
       ...(realDecart
         ? {}
         : { OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", SIGHTENGINE_API_USER: "", SIGHTENGINE_API_SECRET: "" }),
+      // A fresh settings file: DEFAULT_SETTINGS, never the developer's own.
+      SIDECAR_SETTINGS_PATH: settingsFile,
       OBS_WS_URL: `ws://127.0.0.1:${obsPort}`,
       OBS_WS_PASSWORD: "",
       OBS_SCENE: "Scene",
@@ -135,6 +140,12 @@ async function main() {
   const up = await waitFor(async () => (await api("/api/health").catch(() => ({}))).status === 200, 30_000, 300);
   check("sidecar boots", up);
   if (!up) return;
+
+  // The output guard is opt-in (CONTENT-SAFETY §5) — off by default. Turn it
+  // on explicitly so the run still proves the real nsfwjs guard loads in
+  // Chrome and passes the first frame.
+  const guard = await api("/api/settings", { outputGuard: "on" });
+  check("output guard opted in via settings", guard.json?.outputGuard === "on");
 
   const cfg = await api("/api/router-config");
   check(realDecart ? "runs in LIVE Decart mode" : "runs in MOCK mode", cfg.json?.decartEnabled === realDecart);
@@ -172,7 +183,7 @@ async function main() {
   const shown = await waitFor(() => obsCalls.some((c) => c.visible === true), 20_000);
   check("OBS source unhidden after the buffering gate", shown, shown ? `${Date.now() - t0} ms after tip` : "");
   // CONTENT-SAFETY S4/S6: the real nsfwjs guard loaded in Chrome and passed
-  // the first frame (the default policy runs it), and the viewer draws the
+  // the first frame (opted in above), and the viewer draws the
   // on-stream chips over the effect.
   check(
     "output guard loaded in the router and passed the first frame",
@@ -309,6 +320,7 @@ try {
   await browser?.close().catch(() => {});
   sidecar?.kill("SIGTERM");
   obs?.close();
+  if (settingsDir) rmSync(settingsDir, { recursive: true, force: true });
 }
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

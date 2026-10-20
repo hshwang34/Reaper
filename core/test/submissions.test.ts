@@ -102,15 +102,24 @@ test("classifier reject → 422 + ledger + strike; error → 503; review → par
   assert.equal(!e.ok && e.status, 503);
   assert.equal(broken.ledger.recent(1)[0].verdict, "error");
 
-  const borderline = intakeDeps(
-    settings(),
-    liveSuite([fakeText(() => ({ verdict: "review", categories: [], reason: "ambiguous" }))]),
-  );
+  // Approval is opt-in: with no approval tier on, borderline is refused (no
+  // strike) rather than parked in a queue nobody is watching.
+  const ambiguous = () => liveSuite([fakeText(() => ({ verdict: "review", categories: [], reason: "ambiguous" }))]);
+  const noApproval = intakeDeps(settings(), ambiguous());
+  const rr = await createSubmission(noApproval, { ...noImage, prompt: "a spooky clown" });
+  assert.ok(!rr.ok && rr.status === 422 && rr.error === "ambiguous", "refused up front");
+  assert.deepEqual(!rr.ok && rr.findings, [], "borderline, not a finding");
+  assert.equal(noApproval.ledger.recent(1)[0].verdict, "reject");
+  for (let i = 0; i < 3; i++) await createSubmission(noApproval, { ...noImage, prompt: "a spooky clown" });
+  assert.ok(!noApproval.strikes.blocked(ip), "borderline is not a strike");
+
+  const borderline = intakeDeps(settings({ customPrompts: "classified+approval" }), ambiguous());
   const rv = await createSubmission(borderline, { ...noImage, prompt: "a spooky clown" });
   assert.ok(rv.ok && rv.needsReview);
   assert.equal(borderline.store.get(rv.code)?.reviewWhy, "classifier: ambiguous");
   d.dispose();
   broken.dispose();
+  noApproval.dispose();
   borderline.dispose();
 });
 
@@ -334,7 +343,8 @@ test("progress: the plan comes first, then each check's state; the outcome carri
   const floor = fakeText(undefined, "floor");
   const llm = fakeText(() => ({ verdict: "review", categories: [], reason: "borderline" }), "llm", "policy");
   const gate = fakeImage({ faces: 0 }, { name: "gate" });
-  const d = intakeDeps(settings(), liveSuite([floor, llm], [gate]));
+  // Approval on, so the borderline verdict parks instead of refusing.
+  const d = intakeDeps(settings({ customPrompts: "classified+approval" }), liveSuite([floor, llm], [gate]));
   const events: SubmitProgress[] = [];
   const out = await createSubmission(
     d,

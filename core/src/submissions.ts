@@ -192,6 +192,10 @@ export async function createSubmission(
   let finalPresetId: string | null;
   let needsReview = false;
   let reviewWhy = "";
+  // Approval is opt-in (CONTENT-SAFETY §5). With no approval tier on, nobody
+  // is watching the queue, so a borderline classifier result is rejected
+  // up front — never parked, where a paid tip would wait on no one.
+  const approvalOn = approvalEnabled(s);
   const preset = presetId ? getPreset(presetId) : undefined;
 
   if (presetId) {
@@ -287,8 +291,17 @@ export async function createSubmission(
   }
   for (const r of [text, photo]) {
     if (r?.verdict === "review") {
+      // Approval is opt-in (CONTENT-SAFETY §5). With no approval tier on,
+      // nobody is watching the queue, so a borderline result is refused up
+      // front — never parked where a paid tip would wait on no one. It's
+      // borderline, not abusive: no strike.
+      if (!approvalOn) {
+        return { ok: false, status: 422, error: r.reason, findings: [], checks: checks() };
+      }
       needsReview = true;
-      reviewWhy ||= `classifier: ${r.reason}`;
+      // The classifier's reason is more useful to the reviewer than the
+      // generic "approval tier" set earlier, so it wins.
+      reviewWhy = `classifier: ${r.reason}`;
     }
   }
 
@@ -366,7 +379,7 @@ async function runTextChecks(
   const inputHash = sha256Hex(prompt);
   try {
     const r = await moderateText(prompt, s, s.blocklistExtra, moderation, report);
-    recordChain(ledger, "text", r, inputHash, ipHash, tipper);
+    recordChain(ledger, "text", r, inputHash, ipHash, tipper, approvalEnabled(s));
     return r;
   } catch (e) {
     recordUnavailable(ledger, "text", e, inputHash, ipHash);
@@ -434,7 +447,7 @@ async function runPhotoChecks(
       ledger.record({ stage: "image", verdict: "reject", source: decidingStep(r.steps).source, reason: "suspected CSAM — runbook", categories: ["csam-suspected"], inputHash, ipHash, tipper });
       warn("safety", `SUSPECTED CSAM upload quarantined (sha256 ${inputHash.slice(0, 12)}…) — follow docs/runbooks/csam.md`);
     } else {
-      recordChain(ledger, "image", r, inputHash, ipHash, tipper);
+      recordChain(ledger, "image", r, inputHash, ipHash, tipper, approvalEnabled(s));
     }
     return { ...r, prepared };
   } catch (e) {
@@ -443,7 +456,16 @@ async function runPhotoChecks(
   }
 }
 
-/** One ledger line per chain: the deciding step, and every category found. */
+/** Is anyone watching the approval queue? Approval is opt-in
+ *  (CONTENT-SAFETY §5): with no tier on, a borderline result is refused
+ *  rather than parked. */
+function approvalEnabled(s: Settings): boolean {
+  return s.customPrompts === "classified+approval" || s.reviewLikeness;
+}
+
+/** One ledger line per chain: the deciding step, and every category found.
+ *  A "review" verdict is logged as the refusal it becomes when approval is
+ *  off, so the streamer's log says what actually happened. */
 function recordChain(
   ledger: SafetyLedger,
   stage: "text" | "image",
@@ -451,11 +473,13 @@ function recordChain(
   inputHash: string,
   ipHash: string,
   tipper: string | null,
+  approvalOn: boolean,
 ): void {
   const step = decidingStep(r.steps);
   ledger.record({
     stage,
-    verdict: r.verdict === "unavailable" ? "error" : r.verdict,
+    verdict:
+      r.verdict === "unavailable" ? "error" : r.verdict === "review" && !approvalOn ? "reject" : r.verdict,
     source: step.source,
     reason: r.reason,
     categories: r.findings.length ? [...new Set(r.findings.map((f) => f.category))] : step.categories,
