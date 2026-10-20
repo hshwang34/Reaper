@@ -357,6 +357,25 @@ export class Engine {
     this.broadcast();
   }
 
+  /** Remove queued (not yet dispatched) jobs matching `match`, ending each
+   *  as failed — so hosts settle them (a paid one is refunded) and the job
+   *  can never run afterwards. The active job is never touched. Returns how
+   *  many were dropped. */
+  dropQueued(match: (job: HijackJob) => boolean, reason: string): number {
+    const dropped = this.queue.filter(match);
+    if (dropped.length === 0) return 0;
+    this.queue = this.queue.filter((j) => !match(j));
+    for (const job of dropped) {
+      warn("engine", `dropped queued ${job.jobId.slice(0, 8)}: ${reason}`);
+      this.notify(job, { state: "failed", message: reason });
+      this.jobCode.delete(job.jobId);
+      this.emit.jobEnded?.(job, false, reason);
+    }
+    this.queue.forEach((q, i) => this.notify(q, { state: "queued", queuePosition: i + 1 }));
+    this.broadcast();
+    return dropped.length;
+  }
+
   // ── Panic / pause ──────────────────────────────────────────────────────
 
   /** Cancel the in-flight job (if any) without pausing — for host-detected

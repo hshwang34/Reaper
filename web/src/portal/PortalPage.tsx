@@ -423,8 +423,8 @@ export default function PortalPage() {
           {error && <p className="text-sm text-red-400">{error}</p>}
           {paid && !pay!.live && (
             <p className="rounded-lg bg-amber-900/30 px-3 py-2 text-sm text-amber-300">
-              The streamer's Reality Hijack app isn't running right now, so
-              hijacks are paused. Check back when they're live.
+              Hijacks are paused right now — the streamer's Reality Hijack
+              app isn't live. Check back when they're streaming.
             </p>
           )}
 

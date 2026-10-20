@@ -41,7 +41,7 @@ import {
 } from "@rh/core";
 import { channels, db, hijacks, moderationEvents, tokenMints } from "./db.js";
 import { env, isProduction } from "./env.js";
-import { settleJob } from "./payments.js";
+import { dropQueuedPaid, OFFLINE_GRACE_MS, settleJob } from "./payments.js";
 
 /** One classifier suite for every channel — it holds OUR vendor keys and is
  *  stateless; per-channel policy is passed on each call. Dev mode only when
@@ -189,6 +189,24 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
 
   const tag = `engine:${row.login}`;
 
+  // The streamer's app dropped off with paid hijacks waiting: give it a short
+  // grace (a laptop blip or app restart reconnects in seconds), then refund
+  // them rather than leave viewers waiting on an app that may never return.
+  let offlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const onRouterState = (state: string) => {
+    if (state !== "OFFLINE") {
+      clearTimeout(offlineTimer);
+      offlineTimer = undefined;
+      return;
+    }
+    offlineTimer ??= setTimeout(() => {
+      offlineTimer = undefined;
+      const n = dropQueuedPaid(channelId, "the streamer's app went offline — you've been refunded");
+      if (n) warn(tag, `app offline ${OFFLINE_GRACE_MS / 1000}s — refunded ${n} queued paid hijack(s)`);
+    }, OFFLINE_GRACE_MS);
+    offlineTimer.unref?.();
+  };
+
   const getSettings = (): Settings => {
     const fresh = db
       .select()
@@ -229,6 +247,7 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
       },
       // Money: a viewer-paid job settles exactly once, whatever ended it.
       onJobEnded: (job, ok, reason) => settleJob(job, ok, reason),
+      onRouterState: (state) => onRouterState(state),
       onJobDone: (jobId, ok, reason) => {
         db.update(hijacks)
           .set({ outcome: ok ? "completed" : "failed", reason: reason ?? null })
@@ -318,6 +337,7 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
       return { ok: true, outcome };
     },
     stop() {
+      clearTimeout(offlineTimer);
       streamlabs?.stop();
       streamlabs = null;
       core.dispose("channel runtime stopped"); // cancels the active job via the hub

@@ -10,6 +10,9 @@ import { getRuntime } from "../src/channels.js";
 import { channels, db, payments, tokenMints } from "../src/db.js";
 import { splitPayment } from "../src/fees.js";
 import {
+  dropQueuedPaid,
+  sweepStalePaid,
+  START_DEADLINE_MS,
   onboardingLink,
   createCheckout,
   handleWebhook,
@@ -302,5 +305,50 @@ test("no payment is taken while the streamer's app is offline", async () => {
     (e) => e instanceof PaymentError && e.status === 409,
   );
   assert.equal(calls.sessions, before, "no Stripe session created");
+  rt.stop();
+});
+
+/** Pay for an effect on a channel whose router is up but BUSY, so the paid
+ *  job waits in the queue (it can't dispatch while a job is active). */
+async function queuedPaidJob(id: string) {
+  const rt = payableChannel(id);
+  rt.engine.setRouterState("LIVE"); // busy: queued jobs wait
+  const sub = rt.correlation.add({ prompt: "lava", presetId: "lava-room", tipperName: null, imageUrl: null });
+  await createCheckout(id, { code: sub.code, amountUsd: 5, viewerName: "w", returnUrl: "https://x/c/q" });
+  const sessionId = `cs_test_${calls.sessions}`;
+  await handleWebhook(paidEvent(`evt_${id}`, sessionId), "ok");
+  assert.equal(statusOf(sessionId), "paid");
+  assert.equal(rt.engine.snapshot().queueLength, 1);
+  return { rt, sessionId };
+}
+
+test("streamer's app gone: queued paid hijacks are dropped AND refunded, and can't run later", async () => {
+  const { rt, sessionId } = await queuedPaidJob("dev:gone");
+  assert.equal(dropQueuedPaid("dev:gone", "the streamer's app went offline"), 1);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(statusOf(sessionId), "refunded");
+  assert.equal(rt.engine.snapshot().queueLength, 0, "removed from the queue before refunding");
+  rt.stop();
+});
+
+test("backstop: a paid hijack that hasn't started within 15 minutes is dropped and refunded", async () => {
+  const { rt, sessionId } = await queuedPaidJob("dev:stale");
+  assert.equal(await sweepStalePaid(Date.now()), 0, "not stale yet");
+  assert.equal(statusOf(sessionId), "paid");
+  assert.ok((await sweepStalePaid(Date.now() + START_DEADLINE_MS + 1000)) >= 1);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(statusOf(sessionId), "refunded");
+  assert.equal(rt.engine.snapshot().queueLength, 0);
+  rt.stop();
+});
+
+test("no payment is taken while the streamer has paused (panic)", async () => {
+  const rt = payableChannel("dev:paused");
+  rt.engine.pause();
+  const sub = rt.correlation.add({ prompt: "lava", presetId: "lava-room", tipperName: null, imageUrl: null });
+  await assert.rejects(
+    createCheckout("dev:paused", { code: sub.code, amountUsd: 10, viewerName: "v", returnUrl: "https://x/c/p" }),
+    (e) => e instanceof PaymentError && e.status === 409,
+  );
   rt.stop();
 });
