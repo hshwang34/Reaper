@@ -1,7 +1,8 @@
-# Never ship secrets or local state into the image.
+# Build context for the root Dockerfile (the image needs shared/, core/, web/
+# and server/). Never ship secrets or local state; without this the context
+# was 3.4 GB (node_modules, packaged installers, worktrees).
 .env
 .env.*
-!.env.example
 **/settings.json
 server/data.sqlite*
 server/uploads
@@ -11,11 +12,15 @@ sidecar/uploads
 sidecar/safety
 
 # Rebuilt inside the image / irrelevant to the server.
+node_modules
 **/node_modules
 web/dist
 app/release
 app/build-resources
 app/dist
 site
+docs
+*.md
 .git
+.github
 .claude

@@ -9,5 +9,5 @@
       "@rh/sidecar": ["../sidecar/src/server.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }

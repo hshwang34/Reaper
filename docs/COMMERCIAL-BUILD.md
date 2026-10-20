@@ -97,10 +97,12 @@ These need a person with the right logins; none are code:
    DEV AUTH. Redirect URL: `<RH_PUBLIC_URL>/auth/twitch/callback`.
 3. **Streamlabs OAuth app** — replaces the pasted-token connect once approved
    (approval has a lead time; the pasted token works meanwhile).
-4. **Deploy the control plane** from the **repo root** (the image needs the
-   whole workspace): `fly launch --no-deploy` (adopts `fly.toml`), create the
-   volume (`fly volumes create rh_data --size 3`), `fly secrets set` the list
-   in `fly.toml`'s header, then `fly deploy`. The image runs with
+4. **Deploy the control plane** — DONE 2026-10-20: live at
+   https://reality-hijack.fly.dev (Fly app `reality-hijack`, personal org,
+   `iad`, 3 GB volume `rh_data`). From the **repo root** (the image needs
+   `shared/`, `core/`, `web/`, `server/`): `fly deploy --remote-only`
+   (`fly.toml` + `Dockerfile` at the root). Secrets are the list in
+   `fly.toml`'s header. The image runs with
    `RH_ENV=production`: it **refuses to boot** if any required secret is
    missing, never enables DEV AUTH, and doesn't mount the unpaid console
    routes. Data, uploads, the CSAM quarantine and nightly backups all live on
@@ -110,8 +112,10 @@ These need a person with the right logins; none are code:
 
 ## Business-model hooks still to build (post-alpha, per COMMERCIALIZATION §3)
 
-Stripe checkout on the viewer page (our own rail) and the Twitch Bits
-Extension tier are Phase 2/3 — deliberately out of this build, which targets
+Stripe checkout on the viewer page (our own rail) is now BUILT — viewer
+payments via Stripe Connect direct charges with Managed Risk
+(`server/src/payments.ts`). The Twitch Bits Extension tier remains Phase 3 —
+out of this build, which targets
 the hand-recruited alpha cohort keeping 100% of their Streamlabs tips while we
 eat metered GPU under the per-channel monthly cap.
 

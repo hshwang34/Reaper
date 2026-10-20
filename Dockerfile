@@ -16,12 +16,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# The workspace includes the Electron app; its binary (~100 MB) is useless
-# on a server, so skip the download its postinstall would do.
-ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
-
-# Manifests first for layer caching. A full `npm ci` (dev deps included):
-# tsx runs the server and vite builds the portal, both dev dependencies.
+# Install only the workspaces the image runs: server, its two source deps,
+# and web (whose portal bundle the server serves). Not sidecar or app — the
+# latter would pull Electron and electron-builder. No --omit=dev: tsx (the
+# runtime) and vite (the portal build) are devDependencies. Manifests first
+# for layer caching.
 COPY package.json package-lock.json ./
 COPY shared/package.json shared/
 COPY core/package.json core/
@@ -29,9 +28,14 @@ COPY sidecar/package.json sidecar/
 COPY web/package.json web/
 COPY server/package.json server/
 COPY app/package.json app/
-RUN npm ci --no-audit --no-fund
+RUN npm ci --no-audit --no-fund --workspace server --workspace @rh/core --workspace @rh/shared --workspace @rh/web --include-workspace-root
 
-COPY . .
+# Only what the image runs. (The workspaces' tsconfigs extend the root one.)
+COPY tsconfig.base.json ./
+COPY shared shared
+COPY core core
+COPY web web
+COPY server server
 RUN npm run build
 
 ENV RH_ENV=production \

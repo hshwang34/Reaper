@@ -43,8 +43,10 @@ npm run dev:server        # the hosted control plane on :8790 (DEV AUTH if no Tw
 
 Cloud-mode dev loop: run `dev:server`, then launch the app with
 `RH_CLOUD_URL=http://127.0.0.1:8790 RH_CLOUD_LOGIN=<name>` — it dev-signs-in and links.
-Package the app: `npm run package --workspace app` (unsigned `--dir`) or `dist` (dmg;
-signing/notarization gated on Apple secrets, see `.github/workflows/release.yml`).
+Package the app: `npm run package --workspace app` (unsigned `--dir`) or `dist` (macOS
+arm64+x64 DMGs / Windows x64 NSIS installer). Releases are cut by tagging `v<app version>`;
+`docs/DISTRIBUTION.md` covers cross-packaging (`RH_ARCHS`/`RH_PLATFORM`), signing, and what's
+manual.
 
 Per-workspace dev: `npm run dev:sidecar`, `npm run dev:web`. There is **no linter**. Tests are
 plain `node:test` run through `tsx` (no framework) in `core/test`, `web/test`, `server/test`;

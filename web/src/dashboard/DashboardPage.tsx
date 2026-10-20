@@ -75,11 +75,11 @@ export default function DashboardPage() {
     return (
       <div className="grid h-screen place-items-center">
         <div className="space-y-4 text-center">
-          <h1 className="text-2xl font-bold">Reality Hijack — Dashboard</h1>
+          <h1 className="text-2xl font-bold">Your creator dashboard</h1>
           {problem && <p className="text-sm text-amber-400">{problem}</p>}
           <a
             href="/auth/twitch"
-            className="inline-block rounded-lg bg-fuchsia-600 px-5 py-2 font-semibold hover:bg-fuchsia-500"
+            className="inline-block rounded-lg bg-brand-600 px-5 py-2 font-semibold hover:bg-brand-700"
           >
             Sign in with Twitch
           </a>

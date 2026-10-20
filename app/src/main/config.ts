@@ -8,6 +8,9 @@
 //                   moves to safeStorage with the settings UI, and mostly
 //                   disappears in M3 when the hosted control plane holds keys)
 //   uploads/      — viewer reference images
+//   app-state.json — app-level flags (has setup finished?). Separate from
+//                   settings.json because loadSettings() validates against
+//                   the Settings shape and drops anything it doesn't know.
 //
 // DEV FALLBACK: when the app runs unpackaged from the repo (`npm run dev
 // --workspace app`) and keys.json doesn't exist yet, credentials are read from
@@ -27,6 +30,7 @@ const userData = app.getPath("userData");
 const settingsPath = resolve(userData, "settings.json");
 const keysPath = resolve(userData, "keys.json");
 const authTokenPath = resolve(userData, "auth-token");
+const appStatePath = resolve(userData, "app-state.json");
 
 export const uploadsDir = resolve(userData, "uploads");
 /** Moderation ledger + suspected-CSAM quarantine. Never served. */
@@ -226,6 +230,35 @@ export function updateSettings(patch: Partial<Settings>): Settings {
     warn("app-config", "could not persist settings.json");
   }
   return settings;
+}
+
+/** App-level flags, not streamer policy. Missing file = fresh install. */
+export interface AppState {
+  /** The setup wizard reached "Done" at least once. Until then every launch
+   *  opens /setup instead of /router. */
+  setupDone: boolean;
+}
+
+export function getAppState(): AppState {
+  try {
+    if (existsSync(appStatePath)) {
+      const raw = JSON.parse(readFileSync(appStatePath, "utf8")) as Partial<AppState>;
+      return { setupDone: raw.setupDone === true };
+    }
+  } catch {
+    warn("app-config", "app-state.json unreadable — treating as fresh install");
+  }
+  return { setupDone: false };
+}
+
+export function updateAppState(patch: Partial<AppState>): AppState {
+  const next = { ...getAppState(), ...patch };
+  try {
+    writeFileSync(appStatePath, JSON.stringify(next, null, 2));
+  } catch {
+    warn("app-config", "could not persist app-state.json");
+  }
+  return next;
 }
 
 /** The built web bundle: repo web/dist in dev, packaged resources in prod. */

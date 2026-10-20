@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DesktopBridge, DesktopSetupState } from "@rh/shared";
 import { desktopBridge } from "../lib/desktop.js";
+import { PANIC_KEY, TRAY_NAME } from "../lib/platform.js";
 import { acquireCamera } from "../router/decartSession.js";
 
 // The wizard reads everything through the typed preload bridge
@@ -69,7 +70,7 @@ export default function SetupPage() {
               key={label}
               className={`rounded-full px-3 py-1 ${
                 i === step
-                  ? "bg-fuchsia-600 font-semibold"
+                  ? "bg-brand-600 font-semibold"
                   : i < step
                     ? "bg-emerald-800 text-emerald-200"
                     : "bg-zinc-800 text-zinc-500"
@@ -121,7 +122,7 @@ function Primary(props: {
     <button
       onClick={props.onClick}
       disabled={props.disabled}
-      className="rounded-lg bg-fuchsia-600 px-5 py-2 font-semibold hover:bg-fuchsia-500 disabled:opacity-40"
+      className="rounded-lg bg-brand-600 px-5 py-2 font-semibold hover:bg-brand-700 disabled:opacity-40"
     >
       {props.children}
     </button>
@@ -148,15 +149,69 @@ function SignInStep({
   next: () => void;
 }) {
   const [waiting, setWaiting] = useState(false);
+  const [decartKey, setDecartKey] = useState("");
+  const [saved, setSaved] = useState(false);
   if (state.cloudMode) {
     return (
       <Card>
         <p>
-          Signed in as <b className="text-fuchsia-400">{state.login}</b>. Your
+          Signed in as <b className="text-brand-400">{state.login}</b>. Your
           viewer portal and tips run through the Reality Hijack cloud — no API
           keys on this machine.
         </p>
         <Primary onClick={next}>Continue</Primary>
+      </Card>
+    );
+  }
+  // Pasted-keys local mode: a dev fallback only (repo runs, RH_LOCAL_MODE=1).
+  // Streamers never see a key field — the hosted control plane holds the
+  // Decart key for them.
+  const localMode = state.localModeAllowed && (
+    <details className="text-sm text-zinc-500">
+      <summary className="cursor-pointer">Developer: run with my own keys instead</summary>
+      <div className="mt-3 space-y-3">
+        {state.keys.decartApiKey || saved ? (
+          <p className="text-emerald-400">✓ Decart key saved — it loads when setup finishes.</p>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={decartKey}
+              onChange={(e) => setDecartKey(e.target.value)}
+              placeholder="Decart API key"
+              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200"
+            />
+            <button
+              disabled={!decartKey.trim()}
+              onClick={() =>
+                void d.saveKeys({ decartApiKey: decartKey.trim() }).then(() => setSaved(true))
+              }
+              className="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700 disabled:opacity-40"
+            >
+              Save
+            </button>
+          </div>
+        )}
+        <Skip next={next} label="Continue in local mode" />
+      </div>
+    </details>
+  );
+
+  // This build has no control plane baked in (nothing deployed yet): say so.
+  // The app still runs end to end in passthrough demo mode, so the rest of
+  // setup — camera, OBS, the safety acknowledgement — is still worth doing.
+  if (!state.cloudUrl) {
+    return (
+      <Card>
+        <p className="text-zinc-300">
+          <b>Hosted sign-in isn't available in this build yet.</b> Reality
+          Hijack signs you in with Twitch and runs tips, moderation and the AI
+          model from our servers — nothing to configure on your side. That
+          service isn't live for this build; you can still set up your camera
+          and OBS and try the flow with a passthrough test effect.
+        </p>
+        <Primary onClick={next}>Continue</Primary>
+        {localMode}
       </Card>
     );
   }
@@ -177,8 +232,8 @@ function SignInStep({
         >
           {waiting ? "Waiting for browser…" : "Sign in with Twitch"}
         </Primary>
-        <Skip next={next} label="Use local demo mode instead" />
       </div>
+      {localMode}
     </Card>
   );
 }
@@ -242,6 +297,12 @@ function CameraStep({ next }: { next: () => void }) {
   );
 }
 
+/** An error thrown in the main process, minus Electron's IPC wrapper
+ *  ("Error invoking remote method 'rh:…': Error: "). */
+function ipcMessage(e: unknown): string {
+  return (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+}
+
 // ── Step 3: OBS ───────────────────────────────────────────────────────────
 
 function ObsStep({
@@ -256,7 +317,9 @@ function ObsStep({
   next: () => void;
 }) {
   const [result, setResult] = useState<string | null>(null);
+  const [enabling, setEnabling] = useState(false);
   const disc = state.obs.discovery;
+  const obsRunning = state.obs.running;
 
   return (
     <Card>
@@ -273,11 +336,42 @@ function ObsStep({
         </>
       )}
       {disc === "disabled" && (
-        <p className="text-zinc-300">
-          OBS is installed but its <b>WebSocket server is off</b>. In OBS:
-          Tools → WebSocket Server Settings → Enable. The app picks it up
-          automatically.
-        </p>
+        <>
+          <p className="text-zinc-300">
+            OBS is installed but its <b>WebSocket server is off</b> — that's
+            how the app talks to OBS. We can switch it on for you; OBS only
+            reads the setting when it starts, so it has to be closed first.
+          </p>
+          {obsRunning ? (
+            <p className="text-sm text-amber-400">
+              OBS is running — quit it, and this button unlocks on its own.
+            </p>
+          ) : (
+            <p className="text-sm text-zinc-500">
+              Or do it by hand in OBS: Tools → WebSocket Server Settings → Enable.
+            </p>
+          )}
+          <Primary
+            disabled={obsRunning || enabling}
+            onClick={() => {
+              setEnabling(true);
+              setResult(null);
+              void d
+                .enableObsWebsocket()
+                .then((r) => {
+                  if (r === "obs-running") setResult("OBS is still running — quit it and try again.");
+                  else if (r === "no-config") setResult("OBS has never been started on this computer — launch it once, quit, and try again.");
+                  else setResult("Enabled. Starting OBS — this page connects on its own.");
+                  refresh();
+                })
+                .catch((e) => setResult(`Couldn't enable it: ${ipcMessage(e)}`))
+                .finally(() => setEnabling(false));
+            }}
+          >
+            {enabling ? "Enabling…" : "Enable it for me and start OBS"}
+          </Primary>
+          {result && <p className="text-sm text-zinc-300">{result}</p>}
+        </>
       )}
       {(disc === "found" || disc === "unreadable") && !state.obs.connected && (
         <>
@@ -290,7 +384,7 @@ function ObsStep({
               void d
                 .launchObs()
                 .then(refresh)
-                .catch((e) => setResult(`Couldn't launch OBS: ${(e as Error).message}`))
+                .catch((e) => setResult(`Couldn't launch OBS: ${ipcMessage(e)}`))
             }
           >
             Launch OBS
@@ -368,7 +462,7 @@ const SAFETY_CHECKS = [
   },
   {
     id: "panic",
-    text: "I know my panic key (⌘⇧H, or the tray menu) cuts an effect instantly, and I'll use it if anything looks wrong.",
+    text: `I know my panic key (${PANIC_KEY}, or the ${TRAY_NAME}) cuts an effect instantly, and I'll use it if anything looks wrong.`,
   },
   {
     id: "disclosure",
@@ -456,6 +550,7 @@ function TestStep({ d, next }: { d: RhDesktopSetup; next: () => void }) {
 
 function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
   const [auto, setAuto] = useState(state.autoLaunch);
+  const [finishing, setFinishing] = useState(false);
   const portal = state.portalUrl;
   return (
     <Card>
@@ -483,7 +578,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
         </p>
       )}
       <p className="text-sm text-zinc-400">
-        Panic anytime with <b>⌘⇧H</b> (also in the menu-bar icon) — it kills
+        Panic anytime with <b>{PANIC_KEY}</b> (also in the {TRAY_NAME}) — it kills
         the live hijack and pauses the queue instantly.
       </p>
       <label className="flex items-center gap-2 text-sm text-zinc-300">
@@ -497,12 +592,17 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
         />
         Start Reality Hijack when I log in
       </label>
-      <a
-        href="/router"
-        className="inline-block rounded-lg bg-fuchsia-600 px-5 py-2 font-semibold hover:bg-fuchsia-500"
+      {/* Marks setup done and relaunches: from now on the app opens straight
+          into the router, and any key pasted in step 1 is loaded. */}
+      <Primary
+        disabled={finishing}
+        onClick={() => {
+          setFinishing(true);
+          void d.setupComplete();
+        }}
       >
-        Open the router →
-      </a>
+        {finishing ? "Restarting…" : "Open Reality Hijack →"}
+      </Primary>
     </Card>
   );
 }

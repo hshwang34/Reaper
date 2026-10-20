@@ -110,7 +110,7 @@ export function PayoutsPanel({ client, from }: { client: ApiClient; from: "app" 
             <button
               onClick={() => void start()}
               disabled={busy}
-              className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold hover:bg-indigo-500 disabled:opacity-40"
+              className="rounded-lg bg-brand-600 px-4 py-2 font-semibold hover:bg-brand-700 disabled:opacity-40"
             >
               {busy ? "Opening Stripe…" : info.started ? "Continue Stripe setup" : "Set up payouts with Stripe"}
             </button>
