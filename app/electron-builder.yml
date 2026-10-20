@@ -42,6 +42,7 @@ extraResources:
 artifactName: Reality-Hijack-${os}.${ext}
 
 mac:
+  icon: build/icon.png
   category: public.app-category.video
   # One universal build (Apple silicon + Intel in one binary) rather than a
   # per-chip choice on the download page: most people don't know which Mac

@@ -331,6 +331,7 @@ async function boot(): Promise<void> {
     // Windows/Linux draw Electron's default File/Edit/View bar inside the
     // window; the router has no use for it (Alt still reveals it).
     autoHideMenuBar: true,
+    icon: resolve(webDistDir(), "brand/icon-512.png"),
     webPreferences: {
       // The countdown + teardown timers must run while minimized/occluded.
       backgroundThrottling: false,
@@ -467,12 +468,20 @@ async function provisionObs(viewerUrl: string): Promise<void> {
 // ── Tray ──────────────────────────────────────────────────────────────────
 
 function setupTray(port: number): void {
-  // macOS: a "Template" image, which the menu bar tints for light/dark mode.
-  // Windows: a full-colour icon (the notification area doesn't tint). The
-  // @2x variants beside each file are picked up automatically on HiDPI.
-  const assets = resolve(dirname(fileURLToPath(import.meta.url)), "..", "assets");
-  const icon = process.platform === "darwin" ? "trayTemplate.png" : "tray.png";
-  tray = new Tray(nativeImage.createFromPath(resolve(assets, icon)));
+  // macOS: a monochrome "Template" image, which the menu bar tints for
+  // light/dark mode (a colour illustration isn't native there). The @2x
+  // variant beside it is picked up automatically on Retina.
+  // Windows: the notification area doesn't tint, so it gets the colour
+  // mascot — the same artwork as the app icon.
+  const trayIcon =
+    process.platform === "darwin"
+      ? nativeImage.createFromPath(
+          resolve(dirname(fileURLToPath(import.meta.url)), "..", "assets", "trayTemplate.png"),
+        )
+      : nativeImage
+          .createFromPath(resolve(webDistDir(), "brand/icon-180.png"))
+          .resize({ width: 16, height: 16 });
+  tray = new Tray(trayIcon);
   // Windows convention: left-click opens the app, right-click the menu
   // (macOS opens the menu on any click by itself).
   tray.on("click", () => {

@@ -2,402 +2,608 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Reality Hijack</title>
     <meta
       name="description"
-      content="Let chat hijack the stream. You keep the remote. Viewers tip to take over your camera with AI for exactly as many seconds as they paid, then it cuts back. One app, sign in with Twitch, runs through OBS."
+      content="Let viewers pay to take over your camera. A tip buys seconds on your stream: your webcam is redrawn live in the look they picked, with their name on it. A companion app for OBS Studio."
     />
     <meta property="og:title" content="Reality Hijack" />
-    <meta property="og:description" content="Let chat hijack the stream. You keep the remote." />
+    <meta property="og:description" content="Let viewers pay to take over your camera. A tip buys seconds on your stream, with their name on it. One source in OBS." />
     <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#0a0a0c" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 0h28l2 2v28l-2 2H2l-2-2V2z' fill='%230a0a0c'/%3E%3Cpath d='M5 6l15 8.3v3.4L5 26z' fill='%23f2f0ea'/%3E%3Crect x='20' y='0' width='4' height='32' fill='%23ff3b1f'/%3E%3C/svg%3E" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f2ec" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121112" />
+    <link rel="icon" href="/brand/icon-32.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/brand/icon-180.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&family=IBM+Plex+Mono:wght@400;500&display=swap"
     />
-    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="preload" as="image" href="/img/streamer.jpg" />
+    <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
-    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <!--
+      Shared SVG.
+      #rh-mark      the logo: a camera frame with a diagonal cut. Left of the cut is the real
+                    camera (outline); right of it is the hijacked feed (solid).
+      #rh-fx        per-look effect layers drawn over the camera photo. Each group's opacity is a
+                    CSS custom property set by .scene[data-look] (see style.css), so one symbol
+                    serves every look. Inline style="…var()" is required: presentation attributes
+                    can't take var(), and <use> instances inherit custom properties.
+      #rh-posterize a filter that quantises tones for the 80s Anime look.
+    -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
       <symbol id="rh-mark" viewBox="0 0 32 32">
-        <path d="M2 0h28l2 2v28l-2 2H2l-2-2V2z" fill="#0a0a0c"/>
-        <path d="M5 6l15 8.3v3.4L5 26z" fill="#f2f0ea"/>
-        <rect x="20" y="0" width="4" height="32" fill="#ff3b1f"/>
+        <path d="M6 3h20a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <path d="M29 6v20a3 3 0 0 1-3 3H11.5L29 6z" fill="currentColor"/>
+      </symbol>
+      <defs>
+        <filter id="rh-posterize" color-interpolation-filters="sRGB">
+          <feComponentTransfer>
+            <feFuncR type="discrete" tableValues="0.08 0.3 0.55 0.8 1"/>
+            <feFuncG type="discrete" tableValues="0.05 0.25 0.5 0.78 1"/>
+            <feFuncB type="discrete" tableValues="0.15 0.35 0.6 0.85 1"/>
+          </feComponentTransfer>
+        </filter>
+      </defs>
+      <symbol id="rh-fx" viewBox="0 0 960 540" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <radialGradient id="rh-g-lava" cx=".5" cy="1.15" r=".95"><stop offset="0" stop-color="#ff7a00" stop-opacity=".9"/><stop offset=".5" stop-color="#ff3d00" stop-opacity=".3"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+          <linearGradient id="rh-g-water" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fe0ff" stop-opacity=".3"/><stop offset="1" stop-color="#021a30" stop-opacity=".55"/></linearGradient>
+          <radialGradient id="rh-g-candle" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffb347" stop-opacity=".85"/><stop offset="1" stop-color="#ffb347" stop-opacity="0"/></radialGradient>
+          <radialGradient id="rh-g-frost" cx=".5" cy=".5" r=".72"><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#eaf6ff" stop-opacity=".92"/></radialGradient>
+          <filter id="rh-f-blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+        </defs>
+        <!-- lava -->
+        <g style="opacity:var(--ov-lava,0)">
+          <rect width="960" height="540" fill="url(#rh-g-lava)"/>
+          <g fill="none" stroke="#ffd166" stroke-width="8" stroke-linecap="round" filter="url(#rh-f-blur)" opacity=".9">
+            <path d="M0 470l90-14 60 30 74-20 60 36 70-10"/><path d="M640 450l60 26 70-18 60 30 70-8 60 20"/>
+          </g>
+          <g fill="none" stroke="#fff1b8" stroke-width="3" stroke-linecap="round">
+            <path d="M0 470l90-14 60 30 74-20 60 36 70-10"/><path d="M640 450l60 26 70-18 60 30 70-8 60 20"/><path d="M190 500l30-8 20 22"/>
+          </g>
+        </g>
+        <!-- underwater -->
+        <g style="opacity:var(--ov-water,0)">
+          <rect width="960" height="540" fill="url(#rh-g-water)"/>
+          <g fill="#dff6ff" opacity=".16"><path d="M120 0l140 0-60 540-120 0z"/><path d="M560 0l100 0 40 540-120 0z"/></g>
+          <g fill="none" stroke="#bfefff" stroke-width="3" opacity=".3"><path d="M60 120q40-20 80 0t80 0t80 0"/><path d="M620 90q40-20 80 0t80 0t80 0"/><path d="M80 360q40-20 80 0t80 0"/><path d="M660 330q40-20 80 0t80 0t80 0"/></g>
+        </g>
+        <!-- cyberpunk: neon signage at the edges -->
+        <g style="opacity:var(--ov-cyber,0)">
+          <rect x="40" y="36" width="150" height="46" rx="4" fill="none" stroke="#ff2bd6" stroke-width="4" opacity=".9"/>
+          <rect x="40" y="36" width="150" height="46" rx="4" fill="#ff2bd6" opacity=".2" filter="url(#rh-f-blur)"/>
+          <rect x="800" y="60" width="110" height="26" rx="3" fill="#19e6ff" opacity=".85"/>
+          <rect x="800" y="60" width="110" height="26" fill="#19e6ff" opacity=".35" filter="url(#rh-f-blur)"/>
+          <rect x="830" y="100" width="40" height="120" rx="3" fill="none" stroke="#19e6ff" stroke-width="3" opacity=".7"/>
+          <rect x="0" y="480" width="960" height="60" fill="#19e6ff" opacity=".08"/>
+        </g>
+        <!-- haunted -->
+        <g style="opacity:var(--ov-haunt,0)">
+          <circle cx="800" cy="430" r="100" fill="url(#rh-g-candle)"/>
+          <rect x="792" y="410" width="16" height="36" rx="4" fill="#efe6d6"/>
+          <ellipse cx="800" cy="402" rx="7" ry="13" fill="#ffd166"/>
+          <g fill="#cfd5dc" opacity=".3" filter="url(#rh-f-blur)"><ellipse cx="180" cy="490" rx="280" ry="50"/><ellipse cx="760" cy="510" rx="320" ry="60"/><ellipse cx="500" cy="50" rx="340" ry="40"/></g>
+        </g>
+        <!-- winter -->
+        <g style="opacity:var(--ov-frost,0)">
+          <rect width="960" height="540" fill="url(#rh-g-frost)"/>
+          <g fill="#ffd9a0" opacity=".9"><circle cx="704" cy="48" r="5"/><circle cx="740" cy="54" r="5"/><circle cx="776" cy="46" r="5"/><circle cx="812" cy="56" r="5"/><circle cx="848" cy="48" r="5"/><circle cx="884" cy="54" r="5"/><circle cx="920" cy="46" r="5"/></g>
+          <path d="M700 48q18 14 36 6t36 8t36-8t36 10t36-8t36 8t36-6" fill="none" stroke="#c9d6e2" stroke-width="2"/>
+        </g>
       </symbol>
     </svg>
 
-    <header class="nav" id="nav">
+    <header class="nav">
       <div class="wrap nav-inner">
-        <a class="brand" href="#top" aria-label="Reality Hijack home">
-          <svg class="mark" aria-hidden="true"><use href="#rh-mark"/></svg>
-          <span class="wordmark"><span>Reality</span><span class="hijack">Hijack</span></span>
+        <a class="brand" href="#top" aria-label="Reality Hijack, home">
+          <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
+          <span class="wordmark">Reality <strong>Hijack</strong></span>
         </a>
         <nav class="nav-links" aria-label="Sections">
-          <a href="#why">Why chat pays</a>
           <a href="#how">How it works</a>
-          <a href="#looks">The looks</a>
-          <a href="#obs">Works with OBS</a>
+          <a href="#looks">Looks</a>
           <a href="#control">Control</a>
+          <a href="#obs">OBS</a>
           <a href="#faq">FAQ</a>
-          <a class="btn btn-primary nav-menu-cta" href="#alpha">Get the app</a>
         </nav>
-        <div class="nav-cta">
-          <a class="btn btn-ghost" href="https://github.com/hshwang34/Reaper">GitHub</a>
-          <a class="btn btn-primary" href="#alpha">Get the app</a>
-          <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="nav" aria-label="Open menu">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 4h14M2 9h14M2 14h14"/></svg>
-          </button>
-        </div>
+        <a class="btn btn-primary btn-sm" href="#alpha">Get the app</a>
       </div>
     </header>
 
     <main id="top">
-      <!-- ===== Hero ===== -->
-      <section class="wrap hero">
-        <div class="hero-grid">
-          <div class="hero-copy">
-            <h1>Let chat hijack the stream. You keep the remote.</h1>
-            <p class="sub">
-              A viewer tips, and your camera gets restyled live by AI for exactly as many seconds as they paid for.
-              Then it snaps back. You build the menu, cap how far it goes, and can kill it from your keyboard.
-            </p>
-            <div class="hero-actions">
-              <a class="btn btn-primary" href="#alpha">Get the app</a>
-              <button class="btn btn-secondary" type="button" id="watchBtn">Watch a hijack</button>
-              <span class="cta-note">Alpha. Hand-picked channels.</span>
-            </div>
-            <ul class="hero-facts">
-              <li>One app. Sign in with Twitch.</li>
-              <li>Runs through the OBS you already run.</li>
-              <li>$1 buys 1 second. Your panic key ends anything, instantly.</li>
-            </ul>
+      <!-- ============ Hero ============ -->
+      <section class="hero wrap" aria-labelledby="hero-h">
+        <div class="mascot-intro"><img src="/brand/mascot-640.png" width="260" height="260" alt="Reality Hijack’s grinning trickster mascot in a red-banded hat" fetchpriority="high" /><div><span class="brand-eyebrow">GOOD CHAT. GREAT CHAOS.</span><p>A little mischief.<br />A whole new stream.</p><a href="#control">You’re always in control <span aria-hidden="true">↗</span></a></div></div>
+        <div class="hero-copy">
+          <div>
+            <p class="status-line"><span class="status-dot"></span>Free alpha. Onboarding the first streamers by hand.</p>
+            <h1 id="hero-h">Your stream.<br />Chat’s <em>chaos.</em></h1>
           </div>
+          <div>
+            <p class="lead">
+              Let chat hijack your camera with live AI transformations. Viewers pick the look and tip for their moment. You set the limits. When time’s up, reality returns.
+            </p>
+            <div class="actions">
+              <a class="btn btn-primary" href="#alpha">Get the app</a>
+              <a class="btn btn-quiet" href="#how">How it works</a>
+            </div>
+          </div>
+        </div>
 
-          <div class="hero-demo">
-            <div class="monitor">
-              <div class="screen" id="screen" role="button" tabindex="0" aria-label="A hijack, replayed. Activate to trigger the next tip.">
-                <div class="layer slate" id="rawLayer">
-                  <div class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-                  <div class="bars-low" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-                  <div class="slate-text" aria-hidden="true"><span>Cam 1 · raw feed</span><span>Standby</span></div>
-                  <video id="rawVideo" muted playsinline loop preload="metadata" hidden aria-hidden="true"></video>
+        <!--
+          The hero is a live-stream watch page the way a viewer sees one: player, channel row,
+          chat. Platform conventions only (dark chrome, player left / chat right, badges, a
+          pinned message), no real platform's name, logo or colours.
+        -->
+        <figure class="stage" id="stage">
+          <div class="watch ui" role="group" aria-label="A live stream page: the player, the channel row and chat">
+            <div class="watch-main">
+              <div class="frame player scene" id="heroFrame" data-look="raw" data-phase="idle" role="img" aria-label="A live stream player. A viewer tips, the picture is restyled into the look they picked with their name and a countdown on screen, then it cuts back to the normal camera.">
+                <img class="cam" src="/img/streamer.jpg" alt="" width="1280" height="720" />
+                <div class="tint" aria-hidden="true"></div>
+                <svg class="fx" aria-hidden="true"><use href="#rh-fx"/></svg>
+                <canvas class="particles" id="particles" aria-hidden="true"></canvas>
+                <video class="clip clip-before" id="clipBefore" muted playsinline loop preload="none" hidden></video>
+                <video class="clip clip-after" id="clipAfter" muted playsinline loop preload="none" hidden></video>
+                <div class="grain" aria-hidden="true"></div>
+
+                <div class="hud hud-top">
+                  <span class="live-pill">LIVE</span>
+                  <span class="viewers"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3C4.5 3 2.1 5.7 1.3 8c.8 2.3 3.2 5 6.7 5s5.9-2.7 6.7-5C13.9 5.7 11.5 3 8 3zm0 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg><b id="hudViewers">1,284</b></span>
+                  <span class="uptime" id="uptime">1:12:46</span>
                 </div>
-                <div class="layer feed" id="feed" data-look="lava-room">
-                  <div class="atmos-bg" aria-hidden="true"></div>
-                  <div class="atmos" aria-hidden="true"></div>
-                  <video id="feedVideo" muted playsinline preload="metadata" hidden aria-hidden="true"></video>
-                  <div class="ident" aria-hidden="true"><span class="ch" id="identCh">CH 01</span><span class="name" id="identName">Lava Room</span></div>
+                <div class="alert" id="alert" aria-hidden="true">
+                  <span class="alert-avatar" id="alertAvatar">q</span>
+                  <span class="alert-text"><span><b id="alertWho">quartz_ok</b> tipped <b id="alertAmt">$7</b></span><small id="alertLook">Lava Room</small></span>
+                </div>
+                <div class="overlay" id="overlay" aria-hidden="true">
+                  <div class="overlay-name" id="overlayWho">quartz_ok</div>
+                  <div class="overlay-row">
+                    <span class="overlay-look" id="overlayLook">Lava Room</span>
+                    <span class="overlay-time" id="overlayTime">0:07</span>
+                  </div>
+                  <div class="overlay-bar"><i id="overlayBar"></i></div>
                 </div>
                 <div class="wipe" id="wipe" aria-hidden="true"></div>
 
-                <span class="hud hud-state"><span class="hud-dot" aria-hidden="true"></span><span id="hudState" aria-live="polite">RAW FEED</span></span>
-                <span class="hud hud-viewers" id="hudViewers">1,284 watching</span>
-                <span class="hud hud-tip" id="hudTip" aria-hidden="true"></span>
-                <span class="hud hud-count" id="hudCount" aria-hidden="true">0.0</span>
-                <span class="pip-cap" aria-hidden="true">Raw feed · still running</span>
-                <div class="pip" id="pip" aria-hidden="true">
-                  <div class="layer slate">
-                    <div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-                    <div class="bars-low"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-                    <div class="slate-text"><span>Cam 1</span><span>Raw</span></div>
-                    <video id="pipVideo" muted playsinline loop preload="metadata" hidden></video>
-                  </div>
+                <div class="player-bar" aria-hidden="true">
+                  <i class="pb-line"></i>
+                  <span class="pb-group">
+                    <svg viewBox="0 0 16 16"><path d="M3 2h3.5v12H3zM9.5 2H13v12H9.5z"/></svg>
+                    <svg viewBox="0 0 16 16"><path d="M2 6h3l4-3v10l-4-3H2zM11 5.5a3 3 0 0 1 0 5M12.5 3.5a5.5 5.5 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 6h3l4-3v10l-4-3H2z"/></svg>
+                    <i class="pb-vol"></i>
+                    <span class="pb-live">LIVE</span>
+                  </span>
+                  <span class="pb-group">
+                    <span class="pb-q">1080p60</span>
+                    <svg viewBox="0 0 16 16"><path d="M8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm6.3 2.2-1.4-.4-.4-1 .7-1.3-1.1-1.1-1.3.7-1-.4-.4-1.4H6.6l-.4 1.4-1 .4-1.3-.7-1.1 1.1.7 1.3-.4 1-1.4.4v1.6l1.4.4.4 1-.7 1.3 1.1 1.1 1.3-.7 1 .4.4 1.4h1.6l.4-1.4 1-.4 1.3.7 1.1-1.1-.7-1.3.4-1 1.4-.4z"/></svg>
+                    <svg viewBox="0 0 16 16"><path d="M4.5 9.5A2.5 2.5 0 1 1 7 7l6-4 1 1.5L9 8l5 3.5-1 1.5-6-4a2.5 2.5 0 0 1-2.5.5z"/></svg>
+                    <svg viewBox="0 0 16 16"><path d="M1 3h14v10H1zm2 2v6h7V5z"/></svg>
+                    <svg viewBox="0 0 16 16"><path d="M2 2h5v2H4v3H2zm12 0v5h-2V4H9V2zM2 14V9h2v3h3v2zm12 0H9v-2h3V9h2z"/></svg>
+                  </span>
                 </div>
-                <div class="hud-bar" aria-hidden="true"><i id="hudBar"></i></div>
-                <div class="screen-controls"><button type="button" id="demoPause" aria-label="Pause the replay">pause</button></div>
               </div>
-              <div class="monitor-note">
-                <span id="demoNote">Replay of the loop. Click the screen to trigger the next tip.</span>
-                <span id="demoSource">Looks rendered in CSS until the recorded clips land.</span>
+
+              <div class="channel-row">
+                <div class="ch-avatar"><span>N</span><em>LIVE</em></div>
+                <div class="ch-meta">
+                  <div class="ch-name">nova_streams <svg viewBox="0 0 16 16" aria-label="verified"><path d="M8 1l1.8 1.6 2.4-.3.8 2.3 2.1 1.2-.6 2.3 1 2.2-2 1.4-.4 2.4-2.4.2L9 15.8 8 15l-1.7.8-1.4-1.7-2.4-.2-.4-2.4-2-1.4 1-2.2L.5 5.6l2.1-1.2.8-2.3 2.4.3z"/><path d="M4.8 8.3l2.1 2 4.3-4.4" fill="none" stroke="#0e0e10" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                  <div class="ch-title">late night chatting, hijacks are ON tonight (use the code in your tip)</div>
+                  <div class="ch-tags"><span class="ch-cat">Just Chatting</span><span class="tag">English</span><span class="tag">Hijacks on</span><span class="tag">Chill</span></div>
+                </div>
+                <div class="ch-actions">
+                  <span class="ch-btns">
+                    <span class="ch-btn follow"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14S2 9.9 2 6a3.3 3.3 0 0 1 6-1.9A3.3 3.3 0 0 1 14 6c0 3.9-6 8-6 8z"/></svg>Follow</span>
+                    <span class="ch-btn sub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l2 4.3 4.7.5-3.5 3.2 1 4.6L8 11.8 3.8 14.1l1-4.6L1.3 6.3 6 5.8z"/></svg>Subscribe</span>
+                  </span>
+                  <span class="ch-stats"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-6 6c0-3 2.7-5 6-5s6 2 6 5z"/></svg><b id="viewers2">1,284</b><span id="uptime2">1:12:46</span></span>
+                </div>
               </div>
             </div>
+
+            <aside class="chat" aria-label="Stream chat">
+              <div class="chat-head"><span>Stream chat</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm5 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM1 13c0-2.5 2.2-4 5-4s5 1.5 5 4zm10.5 0c0-1.5-.6-2.6-1.5-3.4.3 0 .6-.1 1-.1 2.2 0 4 1.3 4 3.5z"/></svg></div>
+              <!-- the hijack queue, pinned by the streamer: the engine's FIFO as chat sees it -->
+              <div class="chat-pinned" id="queueList"></div>
+              <ol class="chat-list" id="chatList"></ol>
+              <div class="chat-input"><span>Send a message</span><b>Chat</b></div>
+            </aside>
           </div>
-        </div>
+          <figcaption class="stage-caption">
+            <span class="stage-source" id="stageSource">Simulated on a stock photo. Recordings of the real model are coming.</span>
+            <span class="stage-controls">
+              <button class="icon-btn" type="button" id="playBtn" aria-label="Pause the replay">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path class="ic-pause" d="M3 2h3.5v12H3zM9.5 2H13v12H9.5z"/><path class="ic-play" d="M4 2l10 6-10 6z"/></svg>
+              </button>
+              <button class="icon-btn" type="button" id="nextBtn" aria-label="Next tip">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2l8 6-8 6zM12 2h2v12h-2z"/></svg>
+              </button>
+            </span>
+          </figcaption>
+        </figure>
+
+        <ul class="works-with" aria-label="Works with">
+          <li><span class="ww-k">Runs with</span><span class="ww-v">OBS Studio 30+</span></li>
+          <li><span class="ww-k">Tips through</span><span class="ww-v">Streamlabs</span></li>
+          <li><span class="ww-k">Alongside your stream on</span><span class="ww-v">Twitch, Kick or YouTube</span></li>
+          <li><span class="ww-k">Desktop app</span><span class="ww-v">macOS 13 or newer, Windows 10 or newer</span></li>
+        </ul>
       </section>
 
-      <!-- ===== Big type ===== -->
-      <section class="wrap bigtype" aria-label="Brand line">
-        <p>We interrupt<br />this broadcast.</p>
-      </section>
+      <!-- ============ How it works ============ -->
+      <section class="section wrap" id="how" aria-labelledby="how-h">
+        <div class="section-head">
+          <h2 id="how-h">How a tip becomes a moment</h2>
+          <p class="lead">
+            Viewers already pay to be noticed. This gives them something to buy that happens on
+            your camera, where the whole room sees it. Below is the hijack playing above, seen from
+            the viewer's phone, your stream, and your dashboard.
+          </p>
+        </div>
 
-      <!-- ===== Why chat pays ===== -->
-      <section class="wrap section" id="why">
-        <div class="head">
-          <h2>The most interactive thing a tip can buy.</h2>
-          <p class="sub">Chat already pays to mess with you: bits, tip-to-speech, game chaos. This points that same money at your camera, and gives the tipper something nobody else on stream has for those seconds.</p>
-        </div>
-        <div class="reasons">
-          <div>
-            <h3>Their name on your camera</h3>
-            <p>Every hijack carries the tipper's handle on screen, over your face, for the whole room. They're buying a moment where the stream is about them.</p>
-          </div>
-          <div>
-            <h3>They change the stream, not a widget</h3>
-            <p>Not a sound, not a sticker in the corner. Your entire camera becomes the thing they picked, live, in front of everyone watching.</p>
-          </div>
-          <div>
-            <h3>A clip every time</h3>
-            <p>A hijack has a start, a middle, and a cut back. It's shaped to be clipped, and the clip has their name and your reaction in it.</p>
-          </div>
-        </div>
-      </section>
+        <ol class="beats">
+          <li class="beat">
+            <div class="beat-text">
+              <span class="beat-n">1</span>
+              <h3>A viewer pays for a look</h3>
+              <p>Your portal page lists the looks you allow. The viewer picks one, gets a short code, and tips with the code in the message. The tip goes to you through Streamlabs, as it does today.</p>
+            </div>
+            <div class="shot">
+              <div class="app portal ui" aria-label="The viewer portal" role="img">
+                <div class="portal-head">
+                  <span class="portal-title"><img src="/brand/icon-180.png" width="28" height="28" alt="" />Reality Hijack</span>
+                  <span class="portal-sub">Transform the streamer's room in real time. $1 = 1 second.</span>
+                </div>
+                <div class="portal-label">Choose an effect</div>
+                <div class="portal-grid" id="portalGrid">
+                  <button type="button" tabindex="-1" data-preset="lava-room"><span>🌋</span><b>Lava Room</b></button>
+                  <button type="button" tabindex="-1" data-preset="underwater"><span>🌊</span><b>Underwater</b></button>
+                  <button type="button" tabindex="-1" data-preset="80s-anime"><span>📼</span><b>80s Anime</b></button>
+                  <button type="button" tabindex="-1" data-preset="cyberpunk"><span>🌃</span><b>Cyberpunk City</b></button>
+                  <button type="button" tabindex="-1" data-preset="haunted"><span>👻</span><b>Haunted</b></button>
+                  <button type="button" tabindex="-1" data-preset="winter-wonderland"><span>❄️</span><b>Winter Wonderland</b></button>
+                </div>
+                <div class="portal-code">
+                  <span>Include this code in your tip message:</span>
+                  <b id="portalCode">K7Q2</b>
+                  <small>expires in 9:41</small>
+                </div>
+                <div class="portal-status" id="portalStatus" data-state="pending">Waiting for your tip…</div>
+              </div>
+              <span class="shot-caption">Viewer portal · your channel's page</span>
+            </div>
+          </li>
 
-      <!-- ===== How it works ===== -->
-      <section class="wrap section" id="how">
-        <div class="head">
-          <h2>Four stages. The fourth one is the whole point.</h2>
-          <p class="sub">A hijack is a paid, timed takeover of your camera. It starts on a tip, and it always cuts back.</p>
-        </div>
-        <ol class="runsheet">
-          <li>
-            <span class="stage">Stage 01</span>
-            <div><h3>The ask</h3><p>A viewer points at a look from the menu you built: a preset, or a written prompt if you've turned that on. A reference image can ride along.</p></div>
+          <li class="beat">
+            <div class="beat-text">
+              <span class="beat-n">2</span>
+              <h3>Their name is on your camera, live</h3>
+              <p>The tip lands and your webcam is redrawn in that look for as many seconds as they paid. Their name and the countdown sit on the picture, so everyone watching knows who did it and what it cost.</p>
+            </div>
+            <div class="shot">
+              <div class="frame frame-mini player scene" id="miniFrame" data-look="raw" data-phase="idle" role="img" aria-label="The stream player during a hijack, with the viewer's name and a countdown.">
+                <img class="cam" src="/img/streamer.jpg" alt="" width="1280" height="720" loading="lazy" />
+                <div class="tint" aria-hidden="true"></div>
+                <svg class="fx" aria-hidden="true"><use href="#rh-fx"/></svg>
+                <div class="hud hud-top"><span class="live-pill">LIVE</span><span class="viewers"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3C4.5 3 2.1 5.7 1.3 8c.8 2.3 3.2 5 6.7 5s5.9-2.7 6.7-5C13.9 5.7 11.5 3 8 3zm0 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg><b>1,284</b></span></div>
+                <div class="overlay overlay-mini" id="miniOverlay">
+                  <div class="overlay-name" id="miniWho">quartz_ok</div>
+                  <div class="overlay-row"><span class="overlay-look" id="miniLook">Lava Room</span><span class="overlay-time" id="miniTime">0:07</span></div>
+                  <div class="overlay-bar"><i id="miniBar"></i></div>
+                </div>
+                <div class="player-bar" aria-hidden="true">
+                  <i class="pb-line"></i>
+                  <span class="pb-group"><svg viewBox="0 0 16 16"><path d="M3 2h3.5v12H3zM9.5 2H13v14H9.5z"/></svg><svg viewBox="0 0 16 16"><path d="M2 6h3l4-3v10l-4-3H2z"/></svg><i class="pb-vol"></i><span class="pb-live">LIVE</span></span>
+                  <span class="pb-group"><span class="pb-q">1080p60</span><svg viewBox="0 0 16 16"><path d="M1 3h14v10H1zm2 2v6h7V5z"/></svg><svg viewBox="0 0 16 16"><path d="M2 2h5v2H4v3H2zm12 0v5h-2V4H9V2zM2 14V9h2v3h3v2zm12 0H9v-2h3V9h2z"/></svg></span>
+                </div>
+              </div>
+              <span class="shot-caption">Stream output · what chat sees</span>
+            </div>
           </li>
-          <li>
-            <span class="stage">Stage 02</span>
-            <div><h3>The pay</h3><p>They tip with a short code. The amount sets the clock. $1 buys 1 second, $12 buys 12.</p></div>
-          </li>
-          <li>
-            <span class="stage">Stage 03</span>
-            <div><h3>The cut</h3><p>Your feed switches live, in front of your chat. A burst of static covers the seam, and the tipper's name goes up.</p></div>
-          </li>
-          <li>
-            <span class="stage">Stage 04</span>
-            <div><h3>The return</h3><p>When the clock hits zero your scene reverts, the session closes, and the next tip in line gets its turn.</p></div>
+
+          <li class="beat">
+            <div class="beat-text">
+              <span class="beat-n">3</span>
+              <h3>It ends on time. The clip travels.</h3>
+              <p>When the seconds run out, your normal camera returns and the hijack is written to your ledger. Every one is a paid moment chat will clip, and the next viewer wants their name up there too.</p>
+            </div>
+            <div class="shot">
+              <div class="app ledger ui" role="img" aria-label="The streamer dashboard's hijack ledger">
+                <div class="app-label">Hijack ledger</div>
+                <div class="table-scroll">
+                  <table>
+                    <thead><tr><th>When</th><th>From</th><th>Tip</th><th>Secs</th><th>Outcome</th><th class="col-prompt">Prompt</th></tr></thead>
+                    <tbody id="ledgerBody">
+                      <tr><td class="mono">21:14:08</td><td>mossy_pond</td><td class="mono">$6</td><td class="mono">6</td><td class="ok">completed</td><td class="col-prompt">Underwater</td></tr>
+                      <tr><td class="mono">21:11:52</td><td>vhs_ghost</td><td class="mono">$5</td><td class="mono">5</td><td class="ok">completed</td><td class="col-prompt">80s Anime</td></tr>
+                      <tr><td class="mono">21:09:30</td><td>neon_rat</td><td class="mono">$7</td><td class="mono">7</td><td class="ok">completed</td><td class="col-prompt">Cyberpunk City</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <span class="shot-caption">Streamer dashboard · ledger</span>
+            </div>
           </li>
         </ol>
-        <p class="siglog" aria-label="The router state machine">
-          <span class="label">Signal log</span>
-          <span data-state="IDLE">IDLE</span>→<span data-state="AUTHORIZING">AUTHORIZING</span>→<span data-state="CONNECTING">CONNECTING</span>→<span data-state="BUFFERING">BUFFERING</span>→<span data-state="LIVE">LIVE</span>→<span data-state="TEARDOWN">TEARDOWN</span>→<span data-state="IDLE">IDLE</span>
-        </p>
       </section>
 
-      <!-- ===== The looks ===== -->
-      <section class="wrap section" id="looks">
-        <div class="head">
-          <h2>Six channels. You decide what's on the dial.</h2>
-          <p class="sub">Presets resolve on the server from an id. A viewer never controls the prompt text. Custom prompts are a separate switch you flip, or don't.</p>
+      <!-- ============ The looks ============ -->
+      <section class="section wrap" id="looks" aria-labelledby="looks-h">
+        <div class="section-head">
+          <h2 id="looks-h">The menu viewers pay from</h2>
+          <p class="lead">Seven looks built in. You choose which are on your menu. Each is a fixed prompt on our side, so a viewer buys a name, never the text behind it.</p>
         </div>
-        <ul class="channels" id="channels">
-          <li class="channel is-featured" data-preset="lava-room">
-            <div class="screen-sm"><div class="feed" data-look="lava-room"><div class="atmos-bg"></div><div class="atmos"></div><div class="ident"><span class="ch">CH 01</span><span class="name">Lava Room</span></div></div></div>
-            <div class="channel-body"><h3>Lava Room</h3><span class="intensity" aria-label="Intensity 4 of 5"><b>●●●●</b>○</span><p>Molten floor, glowing cracks, embers in the air.</p></div>
+        <ul class="looks-grid">
+          <li class="look">
+            <div class="look-art scene" data-look="lava-room" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
+            <h3>Lava Room</h3>
+            <p>The room floods with molten lava, cracks glowing in the floor.</p>
           </li>
-          <li class="channel" data-preset="underwater">
-            <div class="screen-sm"><div class="feed" data-look="underwater"><div class="atmos-bg"></div><div class="atmos"></div><div class="ident"><span class="ch">CH 02</span><span class="name">Underwater</span></div></div></div>
-            <div class="channel-body"><h3>Underwater</h3><span class="intensity" aria-label="Intensity 2 of 5"><b>●●</b>○○○</span><p>Submerged, shafts of blue light, drifting bubbles.</p></div>
+          <li class="look">
+            <div class="look-art scene" data-look="underwater" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
+            <h3>Underwater</h3>
+            <p>Deep blue light from above, drifting bubbles, everything submerged.</p>
           </li>
-          <li class="channel" data-preset="80s-anime">
-            <div class="screen-sm"><div class="feed" data-look="80s-anime"><div class="atmos-bg"></div><div class="atmos"></div><div class="ident"><span class="ch">CH 03</span><span class="name">80s Anime</span></div></div></div>
-            <div class="channel-body"><h3>80s Anime</h3><span class="intensity" aria-label="Intensity 3 of 5"><b>●●●</b>○○</span><p>Cel shading, neon sunset, VHS grain.</p></div>
+          <li class="look">
+            <div class="look-art scene" data-look="80s-anime" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
+            <h3>80s Anime</h3>
+            <p>Cel-shaded with bold ink lines, neon sunset and VHS color.</p>
           </li>
-          <li class="channel" data-preset="cyberpunk">
-            <div class="screen-sm"><div class="feed" data-look="cyberpunk"><div class="atmos-bg"></div><div class="atmos"></div><div class="ident"><span class="ch">CH 04</span><span class="name">Cyberpunk City</span></div></div></div>
-            <div class="channel-body"><h3>Cyberpunk City</h3><span class="intensity" aria-label="Intensity 3 of 5"><b>●●●</b>○○</span><p>Holographic signs, rain-slick reflections.</p></div>
+          <li class="look">
+            <div class="look-art scene" data-look="cyberpunk" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
+            <h3>Cyberpunk City</h3>
+            <p>Neon signs and rain-slicked streets behind you, teal and magenta light.</p>
           </li>
-          <li class="channel" data-preset="haunted">
-            <div class="screen-sm"><div class="feed" data-look="haunted"><div class="atmos-bg"></div><div class="atmos"></div><div class="ident"><span class="ch">CH 05</span><span class="name">Haunted</span></div></div></div>
-            <div class="channel-body"><h3>Haunted</h3><span class="intensity" aria-label="Intensity 4 of 5"><b>●●●●</b>○</span><p>Cold tones, creeping shadows, candlelight.</p></div>
+          <li class="look">
+            <div class="look-art scene" data-look="haunted" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
+            <h3>Haunted</h3>
+            <p>Cold, drained color, creeping mist and a flickering candle.</p>
           </li>
-          <li class="channel" data-preset="winter-wonderland">
-            <div class="screen-sm"><div class="feed" data-look="winter-wonderland"><div class="atmos-bg"></div><div class="atmos"></div><div class="ident"><span class="ch">CH 06</span><span class="name">Winter Wonderland</span></div></div></div>
-            <div class="channel-body"><h3>Winter Wonderland</h3><span class="intensity" aria-label="Intensity 1 of 5"><b>●</b>○○○○</span><p>Soft snow, frost on everything, warm fairy lights.</p></div>
+          <li class="look">
+            <div class="look-art scene" data-look="winter-wonderland" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
+            <h3>Winter Wonderland</h3>
+            <p>Soft snow, frost on every surface, warm fairy lights.</p>
+          </li>
+          <li class="look">
+            <div class="look-art scene look-photo" data-look="raw" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><div class="photo-chip"><i></i><span>reference photo</span></div></div>
+            <h3>Become the Photo</h3>
+            <p>The viewer attaches a photo and the person on camera becomes whoever is in it. Same pose, same room.</p>
+          </li>
+          <li class="look look-custom">
+            <div class="look-art custom-art ui" aria-hidden="true">
+              <div class="custom-label">…or write your own</div>
+              <div class="custom-field">turn the room into a snow globe</div>
+              <div class="custom-switch"><span class="switch" data-on="false"><i></i></span>Off until you turn it on</div>
+            </div>
+            <h3>Custom prompts</h3>
+            <p>Viewers can type their own idea. Off by default; when you allow it, every prompt is checked against your guardrails first.</p>
           </li>
         </ul>
-        <p class="channels-note">
-          Every channel carries a category and an intensity from 1 to 5. You choose which categories run, cap the intensity, and set a cooldown between hijacks.
-        </p>
       </section>
 
-      <!-- ===== Works with OBS ===== -->
-      <section class="wrap section" id="obs">
-        <div class="obs-grid">
-          <div>
-            <div class="head">
-              <h2>It's a source in your OBS. Nothing else changes.</h2>
-              <p class="sub">Reality Hijack is a companion to OBS Studio, not a replacement for it. The app talks to OBS over the websocket OBS already ships with, adds one browser source for the hijacked feed, and shows it only while a paid hijack is live.</p>
+      <!-- ============ Control ============ -->
+      <section class="section wrap" id="control" aria-labelledby="control-h">
+        <div class="split">
+          <div class="split-text">
+            <p class="brand-eyebrow">MISCHIEF, WITH BOUNDARIES</p><h2 id="control-h">Chat gets the spotlight.<br />You keep the controls.</h2>
+            <ul class="facts">
+              <li><b>You build the menu.</b> Turn looks on or off, set the minimum tip and the longest a hijack can run.</li>
+              <li><b>Custom prompts are off until you say.</b> When you allow them, a blocklist and a moderation pass run before anything reaches your camera.</li>
+              <li><b>One key ends it.</b> <kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd> from anywhere cuts back to your camera and pauses the queue.</li>
+              <li><b>Every hijack ends on time.</b> Three separate timers cap the run: one in the app, one watchdog on your machine, and one on the model provider's servers. If any of them fire, your camera comes back.</li>
+            </ul>
+          </div>
+          <div class="shot">
+            <div class="app guardrails ui" role="img" aria-label="The streamer's guardrail settings">
+              <div class="app-label branded-app-label"><img src="/brand/icon-180.png" width="32" height="32" alt="" />Reality Hijack <span> / Guardrails</span></div>
+              <div class="gr-fields">
+                <label><span>Min tip ($)</span><div class="field mono">2</div></label>
+                <label><span>Max duration (s)</span><div class="field mono">60</div></label>
+                <label><span>Cooldown (s)</span><div class="field mono">3</div></label>
+                <label><span>Queue depth</span><div class="field mono">5</div></label>
+              </div>
+              <div class="gr-toggle"><span class="switch" data-on="false"><i></i></span>Allow custom free-text prompts</div>
+              <div class="gr-presets">
+                <span class="gr-sub">Enabled presets</span>
+                <div class="gr-checks">
+                  <span class="check on">🌋 Lava Room</span>
+                  <span class="check on">🌊 Underwater</span>
+                  <span class="check on">📼 80s Anime</span>
+                  <span class="check on">🌃 Cyberpunk City</span>
+                  <span class="check">👻 Haunted</span>
+                  <span class="check on">❄️ Winter Wonderland</span>
+                  <span class="check on">🪞 Become the Photo</span>
+                </div>
+              </div>
+              <div class="gr-panic">
+                <span>Panic key</span>
+                <span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd></span>
+                <span class="gr-note">Also in the menu bar</span>
+              </div>
+              <div class="gr-timers" aria-hidden="true">
+                <span class="gr-sub">Run cap, three ways</span>
+                <div class="timer-rows">
+                  <div class="timer-row"><span>App timer</span><i style="--w:70%"></i><em>7 s</em></div>
+                  <div class="timer-row"><span>Local watchdog</span><i style="--w:86%"></i><em>+10 s</em></div>
+                  <div class="timer-row"><span>Provider token</span><i style="--w:100%"></i><em>expires</em></div>
+                </div>
+              </div>
             </div>
-            <ol class="setup" aria-label="Setup">
-              <li><div><strong>Download the app</strong><span>One file for Mac, one for Windows.</span></div></li>
-              <li><div><strong>Sign in with Twitch</strong><span>That's the account. No forms, no API keys.</span></div></li>
-              <li><div><strong>Allow camera access</strong><span>It reads the OBS Virtual Camera, so the scene you broadcast is the scene that gets hijacked.</span></div></li>
-              <li><div><strong>Let it find OBS</strong><span>It adds and positions its own source. You can watch it happen in your sources list.</span></div></li>
-              <li><div><strong>Send yourself a test hijack</strong><span>Free, from the setup wizard. The first one chat buys shouldn't be the first one you've seen.</span></div></li>
-            </ol>
-            <p class="compat" aria-label="Compatibility">
-              <span>OBS Studio 30+</span><span>obs-websocket 5, built in</span><span>OBS Virtual Camera</span><span>macOS 13+</span><span>Windows 10+</span><span>Streamlabs tips</span><span>Twitch sign-in</span>
+            <span class="shot-caption">Streamer dashboard · guardrails</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ OBS ============ -->
+      <section class="section wrap" id="obs" aria-labelledby="obs-h">
+        <div class="split split-rev">
+          <div class="split-text">
+            <h2 id="obs-h">One source in OBS. Nothing else changes.</h2>
+            <p>
+              The app connects to OBS Studio over its WebSocket server and adds a single Browser Source
+              named <b>AI Hijack</b> to your scene. It stays hidden until a hijack is live, then hides again.
+              Your scenes, filters, alerts and camera stay exactly as you had them.
+            </p>
+            <p>
+              It reads your camera from the OBS Virtual Camera, so whatever you already do to your picture
+              in OBS carries over into the hijack.
             </p>
           </div>
-          <figure class="obs-dock" aria-label="Your OBS sources list after setup">
-            <div class="dock-title">Sources</div>
-            <ul>
-              <li class="is-rh">
-                <span class="eye" aria-hidden="true"></span>
-                <span class="kind" aria-hidden="true">B</span>
-                <span class="src">AI Hijack</span>
-                <span class="tag">added by Reality Hijack</span>
-              </li>
-              <li>
-                <span class="eye" aria-hidden="true"></span>
-                <span class="kind" aria-hidden="true">V</span>
-                <span class="src">Webcam</span>
-                <span class="tag">Video Capture Device</span>
-              </li>
-              <li>
-                <span class="eye" aria-hidden="true"></span>
-                <span class="kind" aria-hidden="true">G</span>
-                <span class="src">Game</span>
-                <span class="tag">Game Capture</span>
-              </li>
-              <li>
-                <span class="eye" aria-hidden="true"></span>
-                <span class="kind" aria-hidden="true">B</span>
-                <span class="src">Chat overlay</span>
-                <span class="tag">Browser</span>
-              </li>
-              <li>
-                <span class="eye" aria-hidden="true"></span>
-                <span class="kind" aria-hidden="true">A</span>
-                <span class="src">Mic</span>
-                <span class="tag">Audio Input Capture</span>
-              </li>
-            </ul>
-            <div class="dock-status">
-              <span><i class="ok"></i>Virtual Camera: active</span>
-              <span><i class="ok"></i>obs-websocket: connected</span>
-              <span><i class="ok"></i>Reality Hijack: linked</span>
+          <div class="shot">
+            <div class="app obs ui" role="img" aria-label="OBS Studio with the AI Hijack browser source in the Sources dock, visible only while a hijack is live">
+              <div class="obs-title"><span class="obs-lights"><i></i><i></i><i></i></span><b>OBS 32.2.2 - Profile: Untitled - Scenes: Untitled</b></div>
+              <div class="obs-menu"><span>File</span><span>Edit</span><span>View</span><span>Docks</span><span>Profile</span><span>Scene Collection</span><span>Tools</span><span>Help</span></div>
+              <div class="obs-program">
+                <div class="frame frame-obs scene" id="obsFrame" data-look="raw" data-phase="idle">
+                  <img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" />
+                  <div class="tint" aria-hidden="true"></div>
+                  <svg class="fx" aria-hidden="true"><use href="#rh-fx"/></svg>
+                  <div class="obs-overlay-tag" id="obsTag">quartz_ok · Lava Room</div>
+                </div>
+              </div>
+              <div class="obs-docks">
+                <div class="obs-dock obs-scenes">
+                  <div class="obs-dock-title">Scenes</div>
+                  <div class="obs-row sel">Just Chatting</div>
+                  <div class="obs-row">Gameplay</div>
+                  <div class="obs-row">Starting Soon</div>
+                  <div class="obs-row">BRB</div>
+                  <div class="obs-dock-foot"><span>+</span><span>−</span><span>⌃</span><span>⌄</span></div>
+                </div>
+                <div class="obs-dock obs-sources">
+                  <div class="obs-dock-title">Sources</div>
+                  <div class="obs-row obs-src hijack" id="obsSource" data-visible="false">
+                    <svg class="src-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v10H2zM4 5v6h8V5z"/></svg>
+                    <span>AI Hijack</span>
+                    <svg class="eye" viewBox="0 0 20 20" aria-hidden="true"><path class="eye-open" d="M10 4C5.5 4 2.4 7.6 1.5 10c.9 2.4 4 6 8.5 6s7.6-3.6 8.5-6c-.9-2.4-4-6-8.5-6zm0 9.5A3.5 3.5 0 1 1 10 6.5a3.5 3.5 0 0 1 0 7z"/><path class="eye-shut" d="M3 10c1.5 2.4 4 4 7 4s5.5-1.6 7-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    <svg class="lock" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7zm2 0h4V5a2 2 0 0 0-4 0z"/></svg>
+                  </div>
+                  <div class="obs-row obs-src"><svg class="src-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v10H2zM4 5v6h8V5z"/></svg><span>Alerts</span><svg class="eye on" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4C5.5 4 2.4 7.6 1.5 10c.9 2.4 4 6 8.5 6s7.6-3.6 8.5-6c-.9-2.4-4-6-8.5-6zm0 9.5A3.5 3.5 0 1 1 10 6.5a3.5 3.5 0 0 1 0 7z"/></svg><svg class="lock" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7zm2 0h4V5a2 2 0 0 0-4 0z"/></svg></div>
+                  <div class="obs-row obs-src"><svg class="src-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h9v8H2zM11 7l3-2v6l-3-2z"/></svg><span>Webcam</span><svg class="eye on" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4C5.5 4 2.4 7.6 1.5 10c.9 2.4 4 6 8.5 6s7.6-3.6 8.5-6c-.9-2.4-4-6-8.5-6zm0 9.5A3.5 3.5 0 1 1 10 6.5a3.5 3.5 0 0 1 0 7z"/></svg><svg class="lock" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7zm2 0h4V5a2 2 0 0 0-4 0z"/></svg></div>
+                  <div class="obs-row obs-src"><svg class="src-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v8H2zM5 13h6v1H5z"/></svg><span>Game Capture</span><svg class="eye on" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4C5.5 4 2.4 7.6 1.5 10c.9 2.4 4 6 8.5 6s7.6-3.6 8.5-6c-.9-2.4-4-6-8.5-6zm0 9.5A3.5 3.5 0 1 1 10 6.5a3.5 3.5 0 0 1 0 7z"/></svg><svg class="lock" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7zm2 0h4V5a2 2 0 0 0-4 0z"/></svg></div>
+                  <div class="obs-row obs-src"><svg class="src-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v10H2zM4 5v6h8V5z"/></svg><span>Chat</span><svg class="eye on" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4C5.5 4 2.4 7.6 1.5 10c.9 2.4 4 6 8.5 6s7.6-3.6 8.5-6c-.9-2.4-4-6-8.5-6zm0 9.5A3.5 3.5 0 1 1 10 6.5a3.5 3.5 0 0 1 0 7z"/></svg><svg class="lock" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7zm2 0h4V5a2 2 0 0 0-4 0z"/></svg></div>
+                  <div class="obs-dock-foot"><span>+</span><span>−</span><span>⚙</span><span>⌃</span><span>⌄</span></div>
+                </div>
+                <div class="obs-dock obs-mixer">
+                  <div class="obs-dock-title">Audio Mixer</div>
+                  <div class="obs-ch"><span>Mic/Aux</span><i class="meter" style="--l:62%"></i><em>-12.4 dB</em></div>
+                  <div class="obs-ch"><span>Desktop Audio</span><i class="meter" style="--l:38%"></i><em>-24.0 dB</em></div>
+                </div>
+                <div class="obs-dock obs-controls">
+                  <div class="obs-dock-title">Controls</div>
+                  <div class="obs-btn live">Stop Streaming</div>
+                  <div class="obs-btn">Start Recording</div>
+                  <div class="obs-btn on">Stop Virtual Camera</div>
+                  <div class="obs-btn">Studio Mode</div>
+                  <div class="obs-btn">Settings</div>
+                </div>
+              </div>
+              <div class="obs-status"><span id="obsStatus">AI Hijack: hidden</span><span class="obs-stats"><span class="st-live">● LIVE: 01:12:46</span><span>REC: 00:00:00</span><span>CPU: 4.1%, 60.00 fps</span><span>6000 kb/s</span></span></div>
             </div>
-            <figcaption>The only thing that's new is the top row. It stays hidden until a hijack is live, and it's hidden again before the session closes.</figcaption>
-          </figure>
+            <span class="shot-caption">OBS Studio · Sources dock</span>
+          </div>
         </div>
       </section>
 
-      <!-- ===== Control ===== -->
-      <section class="wrap section" id="control">
-        <div class="head">
-          <h2>Chat buys the seconds. You decide what those seconds can be.</h2>
-        </div>
-        <div class="controls">
-          <div>
-            <h3>You build the menu</h3>
-            <p>Pick which looks are offered, switch whole categories off, cap the intensity, set a cooldown between hijacks and a limit on the queue.</p>
+      <!-- ============ Alpha CTA ============ -->
+      <section class="section wrap" id="alpha" aria-labelledby="alpha-h">
+        <div class="cta-card">
+          <div class="cta-text">
+            <h2 id="alpha-h">Give chat their main-character moment.</h2>
+            <p>
+              We are onboarding the first streamers by hand. It is not a Twitch extension and does not use Bits.
+            </p>
+            <dl class="reqs">
+              <div><dt>App</dt><dd>macOS 13 or newer (one build for Apple silicon and Intel) and Windows 10 or newer. Download details provided during onboarding.</dd></div>
+              <div><dt>OBS</dt><dd>OBS Studio 30 or newer with the WebSocket server turned on.</dd></div>
+              <div><dt>Tips</dt><dd>A Streamlabs account. Tips keep landing where they do today.</dd></div>
+            </dl>
           </div>
-          <div>
-            <h3>Custom prompts are off until you say</h3>
-            <p>Preset prompts live on the server and travel by id, so a viewer never types into the model. If you turn written prompts on, each one is checked against your guardrails before it can run.</p>
+          <div class="cta-actions">
+            <a class="btn btn-primary btn-lg" href="https://github.com/hshwang34/Reaper/issues/new?title=Alpha%20access%20request&body=Channel%3A%20%0AAverage%20viewers%3A%20%0AWhat%20I%20stream%3A%20%0ATipping%20setup%20today%20(Streamlabs%2C%20other)%3A%20%0A">Get the app</a>
+            <span class="cta-note">Opens a short request form on GitHub. We reply with a download.</span>
+            <a class="cta-link" href="https://github.com/hshwang34/Reaper/commits/main">Release notes on GitHub</a>
           </div>
-          <div>
-            <h3>One key ends everything</h3>
-            <p>Press <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>H</kbd> or the tray button. The effect hides first, then the session drops, whatever state it was in.</p>
-          </div>
-          <div>
-            <h3>It ends on the second, always</h3>
-            <p>Three independent timers end every hijack on time, one of them on the model provider's own servers. A frozen machine can't leave it running.</p>
-          </div>
-        </div>
-        <p class="statline">
-          <span><b>100%</b> of every tip stays with you</span>
-          <span>tips run through your own Streamlabs</span>
-          <span>we never hold the money</span>
-        </p>
-      </section>
-
-      <!-- ===== Alpha ===== -->
-      <section class="wrap section" id="alpha">
-        <div class="bulletin">
-          <span class="stamp" aria-hidden="true">Hand-picked · alpha</span>
-          <h2>We're onboarding the first channels by hand.</h2>
-          <p class="sub">A small cohort, one conversation at a time, before this opens to anyone.</p>
-          <ul>
-            <li>Free during alpha. $0 to you, 100% of tips stay yours.</li>
-            <li>We cover the model compute, under a monthly cap per channel.</li>
-            <li>No cut of tips, no card on file, nothing to cancel.</li>
-            <li>One short call first. We want to be there for your first hijack.</li>
-          </ul>
-          <div class="hero-actions">
-            <a class="btn btn-primary" href="https://github.com/hshwang34/Reaper/issues/new?title=Alpha%20access%20request&body=Channel%3A%20%0AAverage%20viewers%3A%20%0AWhat%20I%20stream%3A%20%0ATipping%20setup%20today%20(Streamlabs%2C%20other)%3A%20%0A">Get the app</a>
-            <span class="cta-note">Opens a short request. We reply with a call.</span>
-          </div>
-          <small>Pricing after alpha isn't decided yet, on purpose. The options we're weighing are in the <a href="https://github.com/hshwang34/Reaper/blob/main/docs/COMMERCIALIZATION.md">commercialization notes</a>.</small>
         </div>
       </section>
 
-      <!-- ===== FAQ ===== -->
-      <section class="wrap section" id="faq">
-        <div class="head"><h2>What streamers ask first.</h2></div>
-        <div class="faq">
-          <details>
-            <summary>Is this allowed on Twitch?</summary>
-            <p>A hijack is triggered by your own channel's tips through Streamlabs today, the same rail existing tip-to-speech and media-share tools use. It is not a Twitch extension and does not use Bits. A native Bits or Channel Points tier is a documented later phase with its own compliance work, and it isn't promised here.</p>
-          </details>
-          <details>
-            <summary>How much does it lag?</summary>
-            <p>There is real glass-to-glass delay, like any live AI video pipeline. We don't hide that it exists. We hide the seam: a burst of static covers every switch, and the feed never shows on stream until real frames are confirmed arriving.</p>
-          </details>
-          <details>
-            <summary>What happens if it breaks mid-hijack?</summary>
-            <p>Every exit path, whether the timer ending, an error, a dropped connection, or you closing the app, runs the same teardown: hide the effect, then close the session. It fails toward your normal camera, never toward stuck. The <a href="https://github.com/hshwang34/Reaper/blob/main/docs/POSTMORTEM-first-live-hijack.md">postmortem of the first live hijack</a> covers the five bugs that shaped this.</p>
-          </details>
-          <details>
-            <summary>Can a viewer make me look like anything they want?</summary>
-            <p>No. You choose the looks, cap the intensity, and decide whether custom prompts run at all. When they do, each one is checked against your guardrails first, and your panic key is always live.</p>
-          </details>
-          <details>
-            <summary>Does it work with Streamlabs Desktop or other broadcast apps?</summary>
-            <p>OBS Studio today, through obs-websocket 5. Other broadcast apps are on the list, not in the app.</p>
-          </details>
-          <details>
-            <summary>What does it cost me?</summary>
-            <p>Nothing during alpha. Tips go through your own tipping rail and you keep them. We cover the model compute per channel under a monthly cap while we prove this on real channels.</p>
-          </details>
-          <details>
-            <summary>Is this actually built?</summary>
-            <p>Yes. Tip, queue, live restyle, revert, guardrails, and the timers are running code in the <a href="https://github.com/hshwang34/Reaper">public repository</a>, alongside the <a href="https://github.com/hshwang34/Reaper/blob/main/FEASIBILITY.md">feasibility research</a> that shaped them.</p>
-          </details>
-        </div>
+      <!-- ============ FAQ ============ -->
+      <section class="section wrap faq" id="faq" aria-labelledby="faq-h">
+        <h2 id="faq-h">Questions</h2>
+        <dl>
+          <div class="qa">
+            <dt>What do I need?</dt>
+            <dd>OBS Studio with its WebSocket server on, a Streamlabs account for tips, and the Reality Hijack desktop app, for macOS or Windows.</dd>
+          </div>
+          <div class="qa">
+            <dt>Is this a Twitch extension?</dt>
+            <dd>No. Tips come in through Streamlabs, so it works on any platform where you take tips that way. No Bits, no extension review.</dd>
+          </div>
+          <div class="qa">
+            <dt>Where does the money go?</dt>
+            <dd>To you, through Streamlabs, exactly as your tips do now. The app only listens for the tip event; it never touches the payment.</dd>
+          </div>
+          <div class="qa">
+            <dt>How long does a hijack last?</dt>
+            <dd>As many seconds as the tip, up to the maximum you set. A short wipe covers the cut in and the cut out.</dd>
+          </div>
+          <div class="qa">
+            <dt>Is there a delay?</dt>
+            <dd>The restyled picture runs a little behind your camera, as any live AI video does. The wipe hides the jump at both ends, and the countdown is on screen so viewers know what is happening.</dd>
+          </div>
+          <div class="qa">
+            <dt>What can a viewer make it do?</dt>
+            <dd>Only a look you have turned on. Custom prompts are off unless you allow them, and when you do, they are checked against your guardrails before they run.</dd>
+          </div>
+          <div class="qa">
+            <dt>Does it cost me anything?</dt>
+            <dd>Not during alpha. Pricing after alpha is not decided yet.</dd>
+          </div>
+        </dl>
       </section>
     </main>
 
     <footer class="footer">
-      <div class="wrap">
-        <div class="footer-grid">
-          <div>
-            <a class="brand" href="#top">
-              <svg class="mark" aria-hidden="true"><use href="#rh-mark"/></svg>
-              <span class="wordmark"><span>Reality</span><span class="hijack">Hijack</span></span>
-            </a>
-            <p class="footer-tag">Reality Hijack turns your chat's tips into a timed takeover of your camera. Free during alpha.</p>
-          </div>
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <a class="brand" href="#top" aria-label="Reality Hijack, back to top">
+            <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
+            <span class="wordmark">Reality <strong>Hijack</strong></span>
+          </a>
+          <p>A companion app for OBS Studio. Alpha.</p>
+        </div>
+        <nav class="footer-cols" aria-label="Footer">
           <div>
             <h4>Product</h4>
-            <ul>
-              <li><a href="#why">Why chat pays</a></li>
-              <li><a href="#how">How it works</a></li>
-              <li><a href="#obs">Works with OBS</a></li>
-              <li><a href="#alpha">Get the app</a></li>
-            </ul>
+            <a href="#how">How it works</a>
+            <a href="#looks">Looks</a>
+            <a href="#control">Control</a>
+            <a href="#alpha">Get the app</a>
           </div>
           <div>
-            <h4>Read the work</h4>
-            <ul>
-              <li><a href="https://github.com/hshwang34/Reaper">Source on GitHub</a></li>
-              <li><a href="https://github.com/hshwang34/Reaper/blob/main/FEASIBILITY.md">Feasibility assessment</a></li>
-              <li><a href="https://github.com/hshwang34/Reaper/blob/main/docs/COMMERCIALIZATION.md">Commercialization plan</a></li>
-              <li><a href="https://github.com/hshwang34/Reaper/blob/main/docs/POSTMORTEM-first-live-hijack.md">First live hijack postmortem</a></li>
-            </ul>
+            <h4>Project</h4>
+            <a href="https://github.com/hshwang34/Reaper">Source on GitHub</a>
+            <a href="https://github.com/hshwang34/Reaper/blob/main/FEASIBILITY.md">Feasibility notes</a>
+            <a href="https://github.com/hshwang34/Reaper/commits/main">Release notes</a>
+            <a href="https://github.com/hshwang34">Built by Hyunseok Hwang</a>
           </div>
-        </div>
-        <div class="footer-bottom">
-          <span>© <span id="year">2026</span> Reality Hijack</span>
-          <span>Built by <a href="https://github.com/hshwang34">Hyunseok Hwang</a></span>
-        </div>
+          <div>
+            <h4>Legal</h4>
+            <span class="soon">Privacy policy <small>coming</small></span>
+            <span class="soon">Terms of use <small>coming</small></span>
+          </div>
+        </nav>
+        <p class="footer-legal">
+          © 2026 Reality Hijack. OBS and OBS Studio are trademarks of Wizards of OBS, LLC. Streamlabs, Twitch,
+          Kick and YouTube are trademarks of their respective owners; none of them endorse this app.
+          Camera photo by Yan Krukau on Pexels.
+        </p>
       </div>
     </footer>
-
-    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

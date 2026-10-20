@@ -23,7 +23,7 @@ const STATE_COLOR: Record<RouterState, string> = {
   AUTHORIZING: "bg-sky-500",
   CONNECTING: "bg-sky-500",
   BUFFERING: "bg-indigo-500",
-  LIVE: "bg-fuchsia-600",
+  LIVE: "bg-brand-600",
   TEARDOWN: "bg-amber-500",
 };
 
@@ -162,9 +162,9 @@ export default function RouterPage() {
     <div className="mx-auto max-w-6xl p-6">
       <header className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Reality Hijack — Router</h1>
+          <h1 className="text-2xl font-bold">Stream controls</h1>
           <p className="text-sm text-zinc-400">
-            Streamer control surface · capture + state machine
+            Manage your camera, live effects, and queue.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -186,7 +186,7 @@ export default function RouterPage() {
 
       {/* Hero: the AI output is what the streamer is judging, so it gets the
           full width; the camera input is just an "am I armed?" inset. */}
-      <div className="relative mb-6 overflow-hidden rounded-xl border border-fuchsia-900 bg-black">
+      <div className="relative mb-6 overflow-hidden rounded-xl border border-brand-900 bg-black">
         <p className="absolute left-3 top-2 z-10 text-xs text-zinc-400">AI output (Decart)</p>
         <video
           ref={aiPreviewRef}
@@ -317,8 +317,8 @@ function ManualHijackPanel({
   }
 
   return (
-    <div className="rounded-xl border border-fuchsia-900/60 bg-zinc-950 p-4">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-fuchsia-400">
+    <div className="rounded-xl border border-brand-900/60 bg-zinc-950 p-4">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-brand-400">
         Manual hijack
       </h3>
       <textarea
@@ -326,7 +326,7 @@ function ManualHijackPanel({
         onChange={(e) => setPrompt(e.target.value)}
         rows={2}
         placeholder="Describe the reality to impose…"
-        className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-2 text-sm outline-none focus:border-fuchsia-500"
+        className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-2 text-sm outline-none focus:border-brand-500"
       />
       <div className="mt-2 flex items-center gap-3">
         <label className="flex items-center gap-2 text-sm text-zinc-400">
@@ -344,7 +344,7 @@ function ManualHijackPanel({
         <button
           onClick={fire}
           disabled={!armed || sending || !prompt.trim()}
-          className="ml-auto rounded-lg bg-fuchsia-600 px-4 py-1.5 text-sm font-bold hover:bg-fuchsia-500 disabled:opacity-40"
+          className="ml-auto rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-bold hover:bg-brand-700 disabled:opacity-40"
         >
           {sending ? "Firing…" : busy ? "Queue hijack" : "Fire hijack"}
         </button>
@@ -411,7 +411,7 @@ function SettingsPanel({ onSaved }: { onSaved: (s: Settings) => void }) {
       <button
         onClick={save}
         disabled={saving}
-        className="mt-4 rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-semibold hover:bg-sky-500 disabled:opacity-50"
+        className="mt-4 rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50"
       >
         {saving ? "Saving…" : "Save settings"}
       </button>
