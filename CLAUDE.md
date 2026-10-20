@@ -95,11 +95,16 @@ first successful live hijack.
 ### Content safety (docs/CONTENT-SAFETY.md)
 
 With a real Decart key, viewer-authored bytes reach the model only through classifiers:
-custom text needs `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`; **any** reference image needs
+custom text needs `OPENAI_API_KEY` (the non-LLM floor; `ANTHROPIC_API_KEY` adds the policy check but never suffices alone); **any** reference image needs
 Sightengine (`SIGHTENGINE_API_USER`/`SECRET`), the minors check. Missing keys switch the
 matching tier off (fail closed); presets always work. MOCK mode ("dev mode") runs blocklist +
-structural checks only. Invariants: the chain runs before a claim code exists; suspected CSAM
+structural checks only. Streamer approval and the output guard are **opt-in** (default off, local and
+hosted): input screening + the panic hotkey are the baseline, like Streamlabs TTS's filter +
+skip. With no approval tier on, a borderline (`review`) classifier result is rejected at
+intake, never parked. Invariants: the chain runs before a claim code exists; suspected CSAM
 stops before any further vendor and is quarantined, never deleted (`docs/runbooks/csam.md`);
+every other check runs to completion so the portal can list **every** failure point
+(`findings[]`, streamed live as NDJSON — CONTENT-SAFETY "What the viewer is told");
 uploads are deleted at job end / expiry / 1h; output-guard stops are ordinary `teardown()`s
 whose `job:done` reason starts with `safety:`.
 

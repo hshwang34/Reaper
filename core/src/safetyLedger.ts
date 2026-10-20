@@ -17,8 +17,15 @@ export type ModerationEventInput = Omit<ModerationEvent, "id" | "ts">;
 
 export interface SafetyLedger {
   record(e: ModerationEventInput): ModerationEvent;
-  /** Newest first. */
+  /** Newest first. This is what the STREAMER sees (/moderation). */
   recent(limit?: number): ModerationEvent[];
+  /**
+   * Operator-only: the takedown requester's contact, keyed by ticket id.
+   * Kept out of `record`/`recent` on purpose — the person asking for an image
+   * of themselves to be removed must not be identified to the streamer (who
+   * may be the one who put it on stream). Never returned by any API route.
+   */
+  recordContact(ticket: string, contact: string): void;
 }
 
 function stamp(e: ModerationEventInput): ModerationEvent {
@@ -29,6 +36,7 @@ function stamp(e: ModerationEventInput): ModerationEvent {
  *  `seed` pre-loads already-stamped events, oldest first. */
 export function memorySafetyLedger(cap = 500, seed: ModerationEvent[] = []): SafetyLedger {
   const ring: ModerationEvent[] = seed.slice(-cap);
+  const contacts = new Map<string, string>();
   return {
     record(e) {
       const ev = stamp(e);
@@ -37,11 +45,15 @@ export function memorySafetyLedger(cap = 500, seed: ModerationEvent[] = []): Saf
       return ev;
     },
     recent: (limit = 100) => ring.slice(-limit).reverse(),
+    recordContact: (ticket, contact) => void contacts.set(ticket, contact),
   };
 }
 
-/** Append-only JSONL on disk + an in-memory tail for the dashboard view. */
+/** Append-only JSONL on disk + an in-memory tail for the dashboard view.
+ *  Takedown contacts go to a separate owner-only file next to it
+ *  (`<name>.contacts.jsonl`) that no route reads. */
 export function jsonlSafetyLedger(path: string, cap = 500): SafetyLedger {
+  const contactsPath = path.replace(/\.jsonl$/, "") + ".contacts.jsonl";
   const seed: ModerationEvent[] = [];
   if (existsSync(path)) {
     try {
@@ -64,6 +76,15 @@ export function jsonlSafetyLedger(path: string, cap = 500): SafetyLedger {
       return ev;
     },
     recent: (limit) => mem.recent(limit),
+    recordContact(ticket, contact) {
+      try {
+        appendFileSync(contactsPath, `${JSON.stringify({ ticket, contact, ts: Date.now() })}\n`, {
+          mode: 0o600,
+        });
+      } catch (err) {
+        warn("safety", `takedown contact append failed: ${(err as Error).message}`);
+      }
+    },
   };
 }
 
@@ -79,6 +100,20 @@ export function ipHash(ip: string | undefined | null): string {
     .update(ip ?? "unknown")
     .digest("hex")
     .slice(0, 16);
+}
+
+/**
+ * The submitter identity for strikes and rate limits: salted hash of
+ * (channel, client IP). Channel-scoped so one channel's abuser can't spend
+ * another channel's budget (the hosted plane mounts ONE router for all).
+ *
+ * `ip` must be the real client address. Behind a reverse proxy (Fly) that
+ * means the host sets Express `trust proxy` to the proxy hop count —
+ * otherwise every viewer is the proxy, shares one key, and one troll's
+ * strikes would hit everyone. Hosts own that setting (server/src/env.ts).
+ */
+export function clientKey(channel: string | undefined, ip: string | undefined | null): string {
+  return ipHash(`${channel ?? ""}|${ip ?? "unknown"}`);
 }
 
 // ── Strikes ──────────────────────────────────────────────────────────────

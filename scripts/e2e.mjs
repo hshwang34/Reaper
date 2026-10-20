@@ -14,9 +14,10 @@
 // audience would see. Needs Google Chrome installed (CHROME_PATH to override).
 
 import { spawn, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { encode, decode } from "@msgpack/msgpack";
@@ -86,7 +87,7 @@ function startFakeObs(port) {
 }
 
 // ── run ─────────────────────────────────────────────────────────────────────
-let sidecar, browser, obs;
+let sidecar, browser, obs, settingsDir;
 async function main() {
   if (!existsSync(CHROME)) throw new Error(`Chrome not found at ${CHROME} (set CHROME_PATH)`);
 
@@ -102,6 +103,8 @@ async function main() {
   // E2E_REAL_DECART=1 opts into the .env Decart key: same checks, real lucy
   // sessions (a few seconds of billed GPU time per run).
   const realDecart = process.env.E2E_REAL_DECART === "1";
+  settingsDir = mkdtempSync(join(tmpdir(), "rh-e2e-"));
+  const settingsFile = join(settingsDir, "settings.json");
   sidecar = spawn("npm", ["run", "start", "--workspace", "sidecar"], {
     cwd: root,
     env: {
@@ -115,6 +118,8 @@ async function main() {
       ...(realDecart
         ? {}
         : { OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", SIGHTENGINE_API_USER: "", SIGHTENGINE_API_SECRET: "" }),
+      // A fresh settings file: DEFAULT_SETTINGS, never the developer's own.
+      SIDECAR_SETTINGS_PATH: settingsFile,
       OBS_WS_URL: `ws://127.0.0.1:${obsPort}`,
       OBS_WS_PASSWORD: "",
       OBS_SCENE: "Scene",
@@ -135,6 +140,12 @@ async function main() {
   const up = await waitFor(async () => (await api("/api/health").catch(() => ({}))).status === 200, 30_000, 300);
   check("sidecar boots", up);
   if (!up) return;
+
+  // The output guard is opt-in (CONTENT-SAFETY §5) — off by default. Turn it
+  // on explicitly so the run still proves the real nsfwjs guard loads in
+  // Chrome and passes the first frame.
+  const guard = await api("/api/settings", { outputGuard: "on" });
+  check("output guard opted in via settings", guard.json?.outputGuard === "on");
 
   const cfg = await api("/api/router-config");
   check(realDecart ? "runs in LIVE Decart mode" : "runs in MOCK mode", cfg.json?.decartEnabled === realDecart);
@@ -172,7 +183,7 @@ async function main() {
   const shown = await waitFor(() => obsCalls.some((c) => c.visible === true), 20_000);
   check("OBS source unhidden after the buffering gate", shown, shown ? `${Date.now() - t0} ms after tip` : "");
   // CONTENT-SAFETY S4/S6: the real nsfwjs guard loaded in Chrome and passed
-  // the first frame (the default policy runs it), and the viewer draws the
+  // the first frame (opted in above), and the viewer draws the
   // on-stream chips over the effect.
   check(
     "output guard loaded in the router and passed the first frame",
@@ -219,6 +230,10 @@ async function main() {
   // ── 4. content safety: moderation ledger, report, takedown ─────────────
   const nsfw = await api("/api/submissions", { prompt: "make everyone naked" });
   check("blocklisted custom prompt rejected (422)", nsfw.status === 422, nsfw.json?.error);
+  check(
+    "rejection names the check and the exact word",
+    nsfw.json?.findings?.some((f) => f.check === "prompt:blocklist" && f.matches?.includes("naked")),
+  );
   const log = await api("/api/moderation?limit=20");
   const hit = log.json?.events?.find((e) => e.stage === "text" && e.verdict === "reject");
   // The reason may name the blocklist term; the viewer's own text never lands.
@@ -230,6 +245,11 @@ async function main() {
   check("viewer report accepted", rep.status === 200 && rep.json?.ok === true);
   const td = await api("/api/takedown", { contact: "e2e@example.com", description: "e2e takedown" });
   check("takedown request ticketed", td.status === 200 && typeof td.json?.ticket === "string");
+  const log2 = await api("/api/moderation?limit=50");
+  check(
+    "takedown requester's contact is not in the streamer's log",
+    !JSON.stringify(log2.json).includes("e2e@example.com"),
+  );
   const cfg2 = await api("/api/config");
   check("portal config carries the consent statement", /18 or older/.test(cfg2.json?.consentStatement ?? ""));
 
@@ -250,6 +270,46 @@ async function main() {
   check("HTML declared as image/png is rejected by its bytes", fake.status === 400, fake.json?.error);
   const swap = await upload(png, "image/png", { presetId: "photo-swap" });
   check("face swap without the consent box is refused", swap.status === 400, swap.json?.error);
+
+  // Last, because each rejection is a strike and three pause this submitter's
+  // custom prompts and photos — the uploads above must run before that.
+  // The portal's path: the same decision, streamed as NDJSON (plan → checks → result).
+  const streamed = await fetch(`${base}/api/submissions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+    body: JSON.stringify({ prompt: "a naked castle, nude statues" }),
+  });
+  const lines = (await streamed.text()).trim().split("\n").map((l) => JSON.parse(l));
+  const final = lines.at(-1);
+  check(
+    "streamed checks: plan first, result last, every failure point listed",
+    streamed.headers.get("content-type")?.includes("application/x-ndjson") &&
+      lines[0]?.t === "plan" &&
+      final?.t === "result" &&
+      final.ok === false &&
+      final.status === 422 &&
+      final.findings?.length === 2,
+    final?.error,
+  );
+
+  // …and what the viewer actually sees: type, press Enter, read the findings.
+  const portal = await ctx.newPage();
+  await portal.goto(`${base}/portal`);
+  const promptBox = portal.getByPlaceholder(/snow globe/i);
+  if (await promptBox.isVisible().catch(() => false)) {
+    await promptBox.fill("a nude beach with naked surfers");
+    await promptBox.press("Enter");
+    const shownFindings = await waitFor(async () => /Didn't pass/.test(await portal.locator("body").innerText()), 8000);
+    const marks = await portal.locator("mark").allInnerTexts();
+    check(
+      "portal: Enter submits; failures listed with the words highlighted",
+      shownFindings && marks.includes("nude") && marks.includes("naked"),
+      marks.join(", "),
+    );
+  } else {
+    check("portal offers a custom prompt box", false);
+  }
+  await portal.close();
 }
 
 try {
@@ -260,6 +320,7 @@ try {
   await browser?.close().catch(() => {});
   sidecar?.kill("SIGTERM");
   obs?.close();
+  if (settingsDir) rmSync(settingsDir, { recursive: true, force: true });
 }
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

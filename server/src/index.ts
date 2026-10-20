@@ -10,6 +10,7 @@
 //   /c/:login                                — hosted viewer portal (SPA)
 //   /uploads/:channel/*                      — reference images
 
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
@@ -53,10 +54,17 @@ import {
 } from "./payments.js";
 
 const app = express();
-// Fly (and any real host) terminates TLS at a proxy: without this, req.ip is
-// the proxy's address and every per-IP limit and strike lumps all viewers
-// into one bucket — one abuser would lock out everyone.
-app.set("trust proxy", 1);
+// Real client IPs behind the edge proxy (see env.trustProxy): strikes and the
+// per-IP limits below are per viewer, not per proxy — otherwise one abuser
+// would lock out everyone. Configurable so a directly-exposed server can't be
+// spoofed with a forged X-Forwarded-For.
+app.set("trust proxy", env.trustProxy);
+if (env.trustProxy === false && env.publicUrl.startsWith("https://")) {
+  warn(
+    "server",
+    "RH_TRUST_PROXY unset on a public deployment — if a proxy fronts this server, every viewer will share one strike/rate-limit identity",
+  );
+}
 app.disable("x-powered-by");
 
 // Stripe webhook: signature verification needs the RAW body, so this route
@@ -233,7 +241,9 @@ const upload = multer({
     },
     filename: (_req, file, cb) => {
       const ext = ALLOWED_IMG.get(file.mimetype) ?? ".jpg";
-      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
+      // 128 random bits: the takedown endpoint treats possessing an upload URL
+      // as proof you saw the picture, so the name must not be guessable.
+      cb(null, `${randomBytes(16).toString("hex")}${ext}`);
     },
   }),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
@@ -253,6 +263,7 @@ app.use(
       if (!rt) return null;
       return {
         runtime: rt,
+        channelId: id, // resolved — login/id/casing variants share one key
         updateSettings: rt.updateSettings,
         decartEnabled: Boolean(env.decartApiKey),
         mint: (durationSec) => rt.mint(durationSec),

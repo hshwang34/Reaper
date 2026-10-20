@@ -104,6 +104,17 @@ export const moderationEvents = sqliteTable("moderation_events", {
   tipper: text("tipper"),
 });
 
+/** Takedown requesters' contacts, keyed by ticket. OPERATOR-ONLY: separate
+ *  from moderation_events because the streamer reads that table, and the
+ *  person asking for an image of themselves to come down must not be
+ *  identified to the channel that showed it. No API route reads this. */
+export const takedownContacts = sqliteTable("takedown_contacts", {
+  ticket: text("ticket").primaryKey(),
+  channelId: text("channel_id").notNull(),
+  contact: text("contact").notNull(),
+  ts: integer("ts").notNull(),
+});
+
 /** One row per viewer payment (Stripe Checkout). The money record: what was
  *  paid, what we kept (application fee = Stripe fee + GPU + margin), and how
  *  it settled. Status: pending → paid → delivered | refunded | refund_failed
@@ -204,6 +215,12 @@ CREATE TABLE IF NOT EXISTS moderation_events (
   tipper TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_moderation_channel ON moderation_events(channel_id, ts);
+CREATE TABLE IF NOT EXISTS takedown_contacts (
+  ticket TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  contact TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_hijacks_channel ON hijacks(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_mints_channel ON token_mints(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_refresh_channel ON refresh_tokens(channel_id);

@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   allowedCategories: [...PRESET_CATEGORIES],
   referenceImages: "likeness",
   moderationStrictness: "standard",
-  outputGuard: "on",
+  outputGuard: "off",
   enhanceCustomPrompts: false,
   reviewLikeness: false,
   showAttribution: true,
@@ -49,17 +49,19 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 /** Hosted defaults (CONTENT-SAFETY §5): our key, our uploads, our liability —
- *  so a new channel starts presets-only with strict thresholds, scene-only
- *  images, a required output guard, and approval on every likeness swap. The
- *  streamer can open each tier deliberately from the dashboard. */
+ *  so a new channel starts presets-only with strict thresholds and scene-only
+ *  images. Input screening is the baseline everywhere; streamer approval and
+ *  the output guard are opt-in, as on the local rig (same model as Streamlabs
+ *  TTS: filter + skip, no approval queue). The streamer can open or tighten
+ *  each tier deliberately from the dashboard. */
 export const HOSTED_SETTINGS: Settings = {
   ...DEFAULT_SETTINGS,
   allowSolePendingMatch: false,
   customPrompts: "off",
   referenceImages: "scenes",
   moderationStrictness: "strict",
-  outputGuard: "required",
-  reviewLikeness: true,
+  outputGuard: "off",
+  reviewLikeness: false,
 };
 
 /** Merge a persisted (untrusted-shape) settings object over the defaults.

@@ -21,6 +21,7 @@ import {
 } from "@rh/shared";
 import { CorrelationStore } from "./correlation.js";
 import { isBanned } from "./submissions.js";
+import { displayName } from "./moderation.js";
 import { log, warn } from "./log.js";
 
 export interface EngineEmit {
@@ -471,10 +472,15 @@ export class Engine {
 
 /** Stamp the streamer's safety policy onto a job (CONTENT-SAFETY S4/S6). */
 function jobSafety(s: Settings, trusted: boolean, tipper: string | null): JobSafety {
+  // The tip's display name is unverified free text that would go on stream;
+  // displayName() cleans it or falls back to "a viewer". A banned tipper gets
+  // no chip at all — their money buys the default preset, not airtime.
+  const attribution =
+    s.showAttribution && tipper && !isBanned(s, tipper) ? displayName(tipper, s.blocklistExtra) : null;
   return {
     outputGuard: s.outputGuard,
     trusted,
-    attribution: s.showAttribution && tipper ? tipper.slice(0, 32) : null,
+    attribution,
     aiLabel: s.showAiLabel,
   };
 }

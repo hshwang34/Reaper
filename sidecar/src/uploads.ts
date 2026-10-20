@@ -3,6 +3,7 @@
 // fetch them as a Blob for Decart initialState.image. The uploads dir is
 // host-provided: repo-local for the sidecar CLI, userData for the Electron app.
 
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import multer from "multer";
 
@@ -22,7 +23,9 @@ export function createUploads(uploadsDir: string) {
     destination: (_req, _file, cb) => cb(null, uploadsDir),
     filename: (_req, file, cb) => {
       const ext = ALLOWED.get(file.mimetype) ?? ".jpg";
-      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
+      // 128 random bits: the takedown endpoint treats possessing an upload URL
+      // as proof you saw the picture, so the name must not be guessable.
+      cb(null, `${randomBytes(16).toString("hex")}${ext}`);
     },
   });
 

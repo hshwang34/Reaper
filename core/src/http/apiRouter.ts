@@ -12,14 +12,16 @@
 import { Router, type Request, type RequestHandler } from "express";
 import {
   CONSENT_STATEMENT,
+  NDJSON,
   PRESETS,
   presetAllowed,
   sanitizeSettingsPatch,
   type Settings,
+  type SubmitEvent,
 } from "@rh/shared";
 import { MintError } from "../mintPolicy.js";
 import { imagesReady, textReady } from "../moderation.js";
-import { ipHash, RateLimiter } from "../safetyLedger.js";
+import { clientKey, RateLimiter } from "../safetyLedger.js";
 import { createSubmission } from "../submissions.js";
 import { parseFakeTip } from "../triggers/fake.js";
 import { log, warn } from "../log.js";
@@ -33,6 +35,10 @@ export interface UploadedFile {
 
 export interface ApiContext {
   runtime: Runtime;
+  /** Canonical channel id (hosted) — never the raw URL segment, which may
+   *  be a login or an id in any casing for the same channel. Absent on the
+   *  single-channel local rig. Strike / rate-limit keys use this. */
+  channelId?: string;
   updateSettings(patch: Partial<Settings>): Settings;
   /** True when a real dct_ key backs this context (else tokens are "MOCK"). */
   decartEnabled: boolean;
@@ -71,6 +77,13 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
   // mergeParams: the hosted plane mounts us under /api/c/:channel and the
   // context resolver needs that param.
   const r = Router({ mergeParams: true });
+
+  /** Strike / rate-limit identity: (canonical channel, real client IP). Keyed
+   *  on the RESOLVED channel id, not the URL segment: `/c/Alice`, `/c/alice`
+   *  and `/c/<id>` are one channel, and keying on the raw segment would hand
+   *  an abuser a fresh budget per spelling. `req.ip` is the client only when
+   *  the host set `trust proxy` correctly — see clientKey. */
+  const submitter = (req: Request) => clientKey(opts.context(req)?.channelId, req.ip);
 
   /** Resolve-or-404, so every handler below can assume a context. */
   const withCtx =
@@ -137,13 +150,30 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
 
   /** Viewer submission: prompt/preset + optional image, before tipping.
    *  The whole moderation chain runs here (see submissions.ts) — before a
-   *  claim code exists, so nothing the viewer sent can reach a job unchecked. */
+   *  claim code exists, so nothing the viewer sent can reach a job unchecked.
+   *
+   *  Two response shapes, same decision:
+   *    · `Accept: application/x-ndjson` (the portal) — 200, then one JSON
+   *      line per event: the check `plan`, each `check` state as it
+   *      resolves, and a final `result` carrying the real status. The checks
+   *      take seconds; the viewer watches them happen instead of a spinner.
+   *    · otherwise — one JSON body with the matching HTTP status. */
   r.post(
     "/submissions",
     guardedUpload,
     withCtx(async (ctx, req, res) => {
       const file = req.file;
       const rt = ctx.runtime;
+      const streaming = (req.headers.accept ?? "").includes(NDJSON);
+      const send = (ev: SubmitEvent) => res.write(`${JSON.stringify(ev)}\n`);
+      if (streaming) {
+        res.status(200);
+        res.setHeader("Content-Type", `${NDJSON}; charset=utf-8`);
+        // Defeat proxy buffering (nginx, compression) so each line lands live.
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders();
+      }
       let out;
       try {
         out = await createSubmission(
@@ -158,31 +188,42 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
           {
             ...(req.body as Record<string, unknown>),
             image: file ? { url: ctx.imageUrl(file), path: file.path } : null,
-            ipHash: ipHash(req.ip),
+            ipHash: submitter(req),
           },
+          streaming ? send : undefined,
         );
       } catch (e) {
         // Never leave an unvetted file on disk behind an unexpected throw.
         if (file) ctx.discardUpload(file);
-        throw e;
+        if (!streaming) throw e;
+        // Headers are gone: the error has to travel as the result line.
+        warn("api", `submission failed: ${(e as Error).message}`);
+        send({ t: "result", ok: false, status: 500, error: "something went wrong — try again", findings: [], checks: [] });
+        return res.end();
       }
       if (!out.ok) {
         if (file) {
           if (out.quarantine) ctx.quarantineUpload(file);
           else ctx.discardUpload(file);
         }
-        return res.status(out.status).json({ error: out.error });
+        const body = { error: out.error, findings: out.findings ?? [], checks: out.checks ?? [] };
+        if (!streaming) return res.status(out.status).json(body);
+        send({ t: "result", ok: false, status: out.status, ...body });
+        return res.end();
       }
       ctx.onSubmission?.({ code: out.code, presetId: out.presetId, hasImage: Boolean(file) });
-      res.json({ code: out.code, expiresAt: out.expiresAt, needsReview: out.needsReview });
+      const body = { code: out.code, expiresAt: out.expiresAt, needsReview: out.needsReview, checks: out.checks };
+      if (!streaming) return res.json(body);
+      send({ t: "result", ok: true, ...body });
+      res.end();
     }),
   );
 
-  // Public safety surface (S5). Rate-limited per submitter; both land in the
-  // ledger the streamer reads, and a takedown acts immediately.
+  // Public safety surface (S5). Rate-limited per submitter per channel; both
+  // land in the ledger the streamer reads, and a takedown acts immediately.
   const publicLimiter = new RateLimiter(10, 60_000);
   const limited: RequestHandler = (req, res, next) => {
-    if (publicLimiter.allow(ipHash(req.ip))) return next();
+    if (publicLimiter.allow(submitter(req))) return next();
     res.status(429).json({ error: "too many requests" });
   };
   const field = (v: unknown, max: number) =>
@@ -204,7 +245,7 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
         categories: [],
         code: field(b.code, 8) || null,
         jobId: field(b.jobId, 64) || null,
-        ipHash: ipHash(req.ip),
+        ipHash: submitter(req),
       });
       warn("safety", `viewer report ${ev.id.slice(0, 8)}: ${reason.slice(0, 80)}`);
       res.json({ ok: true, id: ev.id });
@@ -212,9 +253,12 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
   );
 
   /** TAKE IT DOWN-style removal request (docs/runbooks/takedown.md). Deletes
-   *  the named upload and every identical / near-identical copy we hold now,
-   *  and blocks the picture from being uploaded again. The 48h SLA clock
-   *  starts at the ledger timestamp. */
+   *  the named upload and every EXACT (sha256) copy we hold now, and blocks
+   *  that picture from being uploaded again. Near-duplicate fan-out is the
+   *  streamer's call (POST /moderation/takedown) — an anonymous requester
+   *  can't wipe everyone's similar-looking photos. The requester's contact
+   *  goes to the operator-only store, never the streamer-visible ledger.
+   *  The 48h SLA clock starts at the ledger timestamp. */
   r.post(
     "/takedown",
     limited,
@@ -232,17 +276,55 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
       // is guessable — acting on it anonymously would let anyone delete
       // strangers' pending uploads — so a code-only request is recorded for
       // the operator to verify and action within the SLA.
-      const removed = imageUrl ? ctx.runtime.uploads.takedown({ url: imageUrl }) : 0;
+      const { removed, blocked } = imageUrl
+        ? ctx.runtime.uploads.takedown({ url: imageUrl }, { requester: submitter(req) })
+        : { removed: 0, blocked: true };
+      // A refused re-upload block (anonymous budget full) is escalated, never
+      // reported as blocked: the streamer re-files it via /moderation/takedown,
+      // which is unbudgeted.
+      const ev = ctx.runtime.ledger.record({
+        stage: "takedown",
+        verdict: blocked ? "info" : "review",
+        source: "requester",
+        reason:
+          `${description.slice(0, 300)} — removed ${removed} exact copy(ies)` +
+          (imageUrl ? "" : " — code/description only: operator to verify") +
+          (blocked ? "" : " — re-upload NOT blocked (anonymous budget full): re-file as a streamer takedown"),
+        categories: blocked ? ["takedown"] : ["takedown", "block-refused"],
+        code: code ?? null,
+        ipHash: submitter(req),
+      });
+      ctx.runtime.ledger.recordContact(ev.id, contact);
+      warn(
+        "safety",
+        `TAKEDOWN request ${ev.id.slice(0, 8)} — removed ${removed}${blocked ? "" : ", block REFUSED"}; 48h SLA (docs/runbooks/takedown.md)`,
+      );
+      res.json({ ok: true, ticket: ev.id, removed });
+    }),
+  );
+
+  /** Streamer/operator takedown: the full fan-out — exact copies AND dHash
+   *  near-duplicates (re-compressed / resized), blocked from re-upload. */
+  r.post(
+    "/moderation/takedown",
+    opts.requireAuth,
+    withCtx((ctx, req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const imageUrl = field(b.imageUrl, 500) || undefined;
+      const sha256 = /^[0-9a-f]{64}$/.test(field(b.sha256, 64)) ? field(b.sha256, 64) : undefined;
+      if (!imageUrl && !sha256) return res.status(400).json({ error: "imageUrl or sha256 required" });
+      const { removed } = ctx.runtime.uploads.takedown(
+        { url: imageUrl, sha256 },
+        { nearDuplicates: true, source: "streamer" },
+      );
       const ev = ctx.runtime.ledger.record({
         stage: "takedown",
         verdict: "info",
-        source: "requester",
-        reason: `${description.slice(0, 300)} — contact: ${contact} — removed ${removed} file(s)`,
-        categories: ["takedown"],
-        code: code ?? null,
-        ipHash: ipHash(req.ip),
+        source: "streamer",
+        reason: `streamer takedown incl. near-duplicates — removed ${removed} file(s)`,
+        categories: ["takedown", "near-duplicates"],
+        inputHash: sha256 ?? null,
       });
-      warn("safety", `TAKEDOWN request ${ev.id.slice(0, 8)} — removed ${removed}; 48h SLA (docs/runbooks/takedown.md)`);
       res.json({ ok: true, ticket: ev.id, removed });
     }),
   );
