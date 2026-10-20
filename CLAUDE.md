@@ -67,7 +67,10 @@ With a real Decart key, viewer-authored bytes reach the model only through class
 custom text needs `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`; **any** reference image needs
 Sightengine (`SIGHTENGINE_API_USER`/`SECRET`), the minors check. Missing keys switch the
 matching tier off (fail closed); presets always work. MOCK mode ("dev mode") runs blocklist +
-structural checks only. Invariants: the chain runs before a claim code exists; suspected CSAM
+structural checks only. Streamer approval and the output guard are **opt-in** (default off, local and
+hosted): input screening + the panic hotkey are the baseline, like Streamlabs TTS's filter +
+skip. With no approval tier on, a borderline (`review`) classifier result is rejected at
+intake, never parked. Invariants: the chain runs before a claim code exists; suspected CSAM
 stops before any further vendor and is quarantined, never deleted (`docs/runbooks/csam.md`);
 uploads are deleted at job end / expiry / 1h; output-guard stops are ordinary `teardown()`s
 whose `job:done` reason starts with `safety:`.

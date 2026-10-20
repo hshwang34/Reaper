@@ -96,15 +96,23 @@ test("classifier reject → 422 + ledger + strike; error → 503; review → par
   assert.equal(!e.ok && e.status, 503);
   assert.equal(broken.ledger.recent(1)[0].verdict, "error");
 
-  const borderline = intakeDeps(
-    settings(),
-    liveSuite([fakeText(() => ({ verdict: "review", categories: [], reason: "ambiguous" }))]),
-  );
+  // Approval is opt-in: with no approval tier on, borderline is refused (no
+  // strike) rather than parked in a queue nobody is watching.
+  const ambiguous = () => liveSuite([fakeText(() => ({ verdict: "review", categories: [], reason: "ambiguous" }))]);
+  const noApproval = intakeDeps(settings(), ambiguous());
+  const rr = await createSubmission(noApproval, { ...noImage, prompt: "a spooky clown" });
+  assert.deepEqual(rr, { ok: false, status: 422, error: "ambiguous" });
+  assert.equal(noApproval.ledger.recent(1)[0].verdict, "reject");
+  for (let i = 0; i < 3; i++) await createSubmission(noApproval, { ...noImage, prompt: "a spooky clown" });
+  assert.ok(!noApproval.strikes.blocked(ip), "borderline is not a strike");
+
+  const borderline = intakeDeps(settings({ customPrompts: "classified+approval" }), ambiguous());
   const rv = await createSubmission(borderline, { ...noImage, prompt: "a spooky clown" });
   assert.ok(rv.ok && rv.needsReview);
   assert.equal(borderline.store.get(rv.code)?.reviewWhy, "classifier: ambiguous");
   d.dispose();
   broken.dispose();
+  noApproval.dispose();
   borderline.dispose();
 });
 

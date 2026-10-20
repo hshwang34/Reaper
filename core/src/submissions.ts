@@ -156,6 +156,10 @@ export async function createSubmission(
   let finalPresetId: string | null;
   let needsReview = false;
   let reviewWhy = "";
+  // Approval is opt-in (CONTENT-SAFETY §5). With no approval tier on, nobody
+  // is watching the queue, so a borderline classifier result is rejected
+  // up front — never parked, where a paid tip would wait on no one.
+  const approvalOn = s.customPrompts === "classified+approval" || s.reviewLikeness;
   const preset = presetId ? getPreset(presetId) : undefined;
 
   if (presetId) {
@@ -205,9 +209,10 @@ export async function createSubmission(
     try {
       const r = await moderateText(prompt, s, s.blocklistExtra, moderation);
       const step = decidingStep(r.steps);
+      const verdict = r.verdict === "review" && !approvalOn ? "reject" : r.verdict;
       ledger.record({
         stage: "text",
-        verdict: r.verdict,
+        verdict,
         source: step.source,
         reason: r.reason,
         categories: step.categories,
@@ -219,6 +224,8 @@ export async function createSubmission(
         strikes.strike(ipHash);
         return { ok: false, status: 422, error: r.reason };
       }
+      // Borderline, not abusive: refused without a strike.
+      if (verdict === "reject") return { ok: false, status: 422, error: r.reason };
       if (r.verdict === "review") {
         needsReview = true;
         reviewWhy = `classifier: ${r.reason}`;
@@ -263,9 +270,10 @@ export async function createSubmission(
         strikes.strike(ipHash);
         return { ok: false, status: 422, error: "image rejected", quarantine: true };
       }
+      const verdict = r.verdict === "review" && !approvalOn ? "reject" : r.verdict;
       ledger.record({
         stage: "image",
-        verdict: r.verdict,
+        verdict,
         source: step.source,
         reason: r.reason,
         categories: step.categories,
@@ -277,6 +285,8 @@ export async function createSubmission(
         strikes.strike(ipHash);
         return { ok: false, status: 422, error: r.reason };
       }
+      // Borderline, not abusive: refused without a strike.
+      if (verdict === "reject") return { ok: false, status: 422, error: r.reason };
       if (r.verdict === "review") {
         needsReview = true;
         reviewWhy = `classifier: ${r.reason}`;

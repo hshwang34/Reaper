@@ -209,10 +209,11 @@ export interface ImageModerationProvider {
 
 Suspected CSAM (nudity + `minorPossible`) never reaches step 7 or any LLM.
 
-### S3 · Streamer approval queue (optional per policy)
+### S3 · Streamer approval queue (opt-in)
 
-For `customPrompts: "classified+approval"` (and always for likeness swaps
-on hosted): a matched tip does **not** enqueue the job; it parks it as
+Off by default everywhere (see "Approval and the output guard are opt-in"
+below). For `customPrompts: "classified+approval"`, or `reviewLikeness` for
+likeness swaps: a matched tip does **not** enqueue the job; it parks it as
 `SubmissionStatus.state = "review"` with a 2-minute window. New protocol
 messages (control plane, in `shared/src/protocol.ts`):
 
@@ -223,7 +224,16 @@ Approve → normal enqueue. Reject/timeout → `failed`, the tip is logged as
 unfulfilled (refund policy is a Phase-2 rail question). The router page gets
 a one-tap card; the hosted dashboard gets the same.
 
-### S4 · Output guard (web/router, in the hot path)
+A borderline classifier verdict (`review`) parks the job only when an
+approval tier is on. With none on, nobody is watching the queue, so the
+submission is rejected at intake with the classifier's reason (ledger
+verdict `reject`, **no strike**: borderline isn't abuse) and the viewer is
+never asked to tip for it.
+
+### S4 · Output guard (web/router, in the hot path, opt-in)
+
+`outputGuard` defaults to `"off"` everywhere; the router page only downloads
+the model once the streamer turns it on.
 
 A `FrameGuard` samples the Decart output `<video>` into a canvas at ~2 fps
 and runs an in-browser NSFW classifier (`nsfwjs` MobileNetV2, ~3.5MB, TF.js
@@ -281,7 +291,7 @@ The panic button stays — the guard is a reflex, the human is the judgment.
 | | Local mode (streamer's key) | Hosted (our key) |
 |---|---|---|
 | Classifier keys | streamer-supplied (optional) → without them, `customPrompts: "off"`, `images: "off"` | ours; always on |
-| Defaults | `classified`, `scenes`, `standard`, guard `monitor` | `off`, `off`, `strict`, guard `required` for likeness |
+| Defaults | `classified`, `likeness`, `standard`; guard `off`, approval off | `off`, `scenes`, `strict`; guard `off`, approval off |
 | Uploads dir | userData, TTL 24h | server, TTL 24h, behind the takedown endpoint |
 | Ledger | JSONL | SQLite, exportable per channel |
 | Approval queue | router page | dashboard + router |
@@ -400,6 +410,20 @@ numbers in `VERIFICATION.md`.
 | S6 on-stream | chips on `RtcOfferMsg.overlay` → `ViewerPage.tsx`; setup wizard "Stream safety" step; `ModerationPanel` | e2e (chips visible) |
 
 ### Deviations from the design, and why
+
+- **Approval and the output guard are opt-in (2026-10-19).** Both stay in the
+  code and the dashboard, but `outputGuard` defaults to `"off"` and no
+  approval tier is on, locally *and* hosted. The baseline matches what
+  streamers already accept from Streamlabs: TTS has a word filter, a spam
+  filter and a skip, with no approval queue; Media Share's manual-play mode is
+  optional. Here the equivalent baseline is input screening (S1/S2, which
+  stays strict on hosted: presets-only, scene-only images, strict thresholds)
+  plus the panic hotkey. Approval adds dead time to a tip someone already
+  paid for, and a refund question whenever the streamer declines. The output
+  guard adds a model load before every go-live and can false-positive on a
+  paid job, for a low marginal catch once the inputs are screened. Streamers
+  who want either turn it on; with approval off, borderline classifier
+  results are rejected at intake rather than parked.
 
 - **Flat `Settings` fields, not a nested `contentPolicy` object.** Every host
   applies patches as a shallow merge (`{...settings, ...patch}`), and a nested

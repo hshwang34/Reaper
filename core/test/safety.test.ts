@@ -184,7 +184,10 @@ test("settings: legacy allowCustomPrompts migrates; hosted base is presets-only"
 
   const hosted = loadSettings({}, HOSTED_SETTINGS);
   assert.equal(hosted.customPrompts, "off");
-  assert.equal(hosted.outputGuard, "required");
+  // Approval and the output guard are opt-in everywhere; input screening stays strict.
+  assert.equal(hosted.outputGuard, "off");
+  assert.equal(hosted.reviewLikeness, false);
+  assert.equal(hosted.moderationStrictness, "strict");
   assert.equal(hosted.referenceImages, "scenes");
 
   const junk = loadSettings({
@@ -194,7 +197,7 @@ test("settings: legacy allowCustomPrompts migrates; hosted base is presets-only"
     allowedCategories: ["environment", "nsfw"],
   });
   assert.equal(junk.customPrompts, "classified");
-  assert.equal(junk.outputGuard, "on");
+  assert.equal(junk.outputGuard, "off", "invalid value falls back to the (opt-in) default");
   assert.equal(junk.maxIntensity, 5);
   assert.deepEqual(junk.allowedCategories, ["environment"]);
 });
