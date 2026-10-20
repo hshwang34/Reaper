@@ -86,7 +86,17 @@ let client: StripeLike | null = null;
 
 /** The Stripe client, or null when payments aren't configured (dev). */
 export function stripe(): StripeLike | null {
-  if (!client && env.stripeSecretKey) client = new Stripe(env.stripeSecretKey) as unknown as StripeLike;
+  if (!client && env.stripeSecretKey) {
+    // STRIPE_API_BASE (dev/e2e only — the production boot gate refuses it)
+    // routes every SDK call, v1 and v2, to a local fake.
+    const base = env.stripeApiBase ? new URL(env.stripeApiBase) : null;
+    client = new Stripe(
+      env.stripeSecretKey,
+      base
+        ? { host: base.hostname, port: Number(base.port), protocol: base.protocol.replace(":", "") as "http" | "https" }
+        : undefined,
+    ) as unknown as StripeLike;
+  }
   return client;
 }
 
@@ -511,7 +521,7 @@ export async function refund(paymentId: string, reason: string): Promise<void> {
 // settleJob then refunds it (no token was minted) — and removes it from the
 // queue first, so a refunded hijack can never play afterwards.
 
-export const OFFLINE_GRACE_MS = 2 * 60_000;
+export const OFFLINE_GRACE_MS = env.offlineGraceMs;
 export const START_DEADLINE_MS = 15 * 60_000;
 
 const isPaid = (job: HijackJob) => job.tip.source === "stripe";

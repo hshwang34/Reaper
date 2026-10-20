@@ -34,6 +34,12 @@ npm test                  # node --test: core/test (engine, correlation, hub, mi
 npm run check             # typecheck + test — the gate to run after edits
 npm run e2e               # mock-mode end-to-end: real sidecar + headless Chrome router/viewer +
                           #   a fake OBS; asserts what the audience sees (needs Google Chrome)
+npm run e2e:hosted        # the commercial path, zero secrets: real control plane + the real Electron
+                          #   app (CDP-driven) + portal checkout against a fake Stripe (signed
+                          #   webhooks) + fake OBS; asserts pay→play, settle, panic, refunds
+npm run smoke:prod        # read-only checks against the deployed server (hourly in CI: smoke.yml)
+npm run smoke:live        # on demand: a real test-mode Stripe Checkout (4242) on prod → real hijack;
+                          #   needs the streamer app open + armed; ~$0.06 of Decart per run
 npm run build             # builds the web app only
 npm run start             # production demo rig: build, then ONE process on :7712
 
