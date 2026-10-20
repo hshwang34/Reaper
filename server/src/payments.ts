@@ -227,8 +227,12 @@ export async function createCheckout(channelId: string, input: CheckoutInput): P
   // Only take money for a hijack that can actually play: the streamer's app
   // (the router) must be connected. Otherwise the job would sit in a queue
   // with nowhere to run until something refunds it.
-  if (rt.engine.snapshot().routerState === "OFFLINE") {
+  const snap = rt.engine.snapshot();
+  if (snap.routerState === "OFFLINE") {
     throw new PaymentError(409, "the streamer's Reality Hijack app isn't running right now — try again when they're live");
+  }
+  if (snap.paused) {
+    throw new PaymentError(409, "the streamer has paused hijacks right now — try again in a bit");
   }
 
   const code = input.code.trim().toUpperCase();
@@ -460,7 +464,57 @@ export async function refund(paymentId: string, reason: string): Promise<void> {
   }
 }
 
-// ── 5. Boot reconciliation ────────────────────────────────────────────────
+// ── 5. Paid hijacks that never start ──────────────────────────────────────
+// The checkout gate only proves the streamer's app was up when the viewer
+// PAID. Afterwards the app can drop off (crash, sleep, stream ended) or the
+// streamer can panic-pause, leaving a paid job in a queue with nowhere to
+// run. Two layers make sure the viewer gets their money back:
+//   · app offline for OFFLINE_GRACE_MS → drop the channel's queued paid jobs
+//     (channels.ts arms the timer from router-state reports);
+//   · any paid job not started within START_DEADLINE_MS, whatever the cause
+//     (paused, stuck) → dropped and refunded by the sweep below.
+// Dropping goes through Engine.dropQueued, which ends the job as failed —
+// settleJob then refunds it (no token was minted) — and removes it from the
+// queue first, so a refunded hijack can never play afterwards.
+
+export const OFFLINE_GRACE_MS = 2 * 60_000;
+export const START_DEADLINE_MS = 15 * 60_000;
+
+const isPaid = (job: HijackJob) => job.tip.source === "stripe";
+
+/** Drop every queued paid job on a channel (its app is gone). */
+export function dropQueuedPaid(channelId: string, reason: string): number {
+  const rt = getRuntime(channelId);
+  return rt ? rt.engine.dropQueued(isPaid, reason) : 0;
+}
+
+/** Refund paid hijacks that haven't started within the deadline. */
+export async function sweepStalePaid(now = Date.now()): Promise<number> {
+  const stale = db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.status, "paid"), sql`${payments.updatedAt} < ${now - START_DEADLINE_MS}`))
+    .all();
+  let n = 0;
+  for (const p of stale) {
+    const reason = "the hijack didn't start within 15 minutes";
+    const rt = getRuntime(p.channelId);
+    // In the queue: drop it (settleJob refunds). Not in the queue (lost,
+    // or the channel is gone): refund directly — unless it actually started.
+    const dropped = rt ? rt.engine.dropQueued((j) => j.tip.ref === p.id, reason) : 0;
+    if (dropped === 0) {
+      const active = rt?.engine.snapshot().activeJob;
+      if (p.jobId && active?.jobId === p.jobId) continue; // playing right now
+      if (p.jobId && jobWasMinted(p.jobId)) continue; // started — settles on its own
+      await refund(p.id, reason);
+    }
+    n++;
+  }
+  if (n) warn("payments", `refunded ${n} paid hijack(s) that never started`);
+  return n;
+}
+
+// ── 6. Boot reconciliation ────────────────────────────────────────────────
 
 /** Runtimes (queue, active job) are process memory. A payment still `paid`
  *  at boot was accepted by an engine that no longer exists — its hijack will

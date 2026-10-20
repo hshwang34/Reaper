@@ -49,6 +49,7 @@ import {
   payoutStatus,
   reconcileOnBoot,
   refreshPayouts,
+  sweepStalePaid,
 } from "./payments.js";
 
 const app = express();
@@ -322,8 +323,12 @@ app.get("/api/c/:channel/payments", (req, res) => {
   res.json({
     enabled: paymentsEnabled() && payoutStatus(id).enabled,
     minUsd: minPaymentUsd(id),
-    // The streamer's app is connected — a payment now can actually play.
-    live: getRuntime(id)!.engine.snapshot().routerState !== "OFFLINE",
+    // The streamer's app is connected and not panic-paused — a payment now
+    // can actually play (checkout enforces the same rule).
+    live: (() => {
+      const snap = getRuntime(id)!.engine.snapshot();
+      return snap.routerState !== "OFFLINE" && !snap.paused;
+    })(),
   });
 });
 
@@ -521,6 +526,8 @@ process.on("unhandledRejection", (e) => warn("process", `unhandled rejection: ${
 restoreTriggeredRuntimes();
 // Payments accepted by an engine this restart destroyed will never run.
 void reconcileOnBoot();
+// Backstop: paid hijacks that never started (paused, stuck) get refunded.
+setInterval(() => void sweepStalePaid(), 60_000).unref();
 
 // Nightly SQLite snapshot (kept 7 days) — the ledger is the money record.
 setInterval(() => void backupDatabase(), 24 * 3600_000).unref();
