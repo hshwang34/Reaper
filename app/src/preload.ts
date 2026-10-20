@@ -31,6 +31,8 @@ const bridge = {
   provisionObs: (): Promise<{ ok: boolean; detail: string }> =>
     ipcRenderer.invoke("rh:provision-obs"),
   launchObs: (): Promise<void> => ipcRenderer.invoke("rh:launch-obs"),
+  enableObsWebsocket: () => ipcRenderer.invoke("rh:enable-obs-websocket"),
+  setupComplete: (): Promise<void> => ipcRenderer.invoke("rh:setup-complete"),
   testHijack: (prompt: string, durationSec: number): Promise<string> =>
     ipcRenderer.invoke("rh:test-hijack", prompt, durationSec),
   setAutoLaunch: (enabled: boolean): Promise<void> =>

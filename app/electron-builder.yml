@@ -1,9 +1,11 @@
-# electron-builder — macOS-first (plan M5; Windows is a post-M5 fast-follow).
+# electron-builder — macOS (Apple silicon + Intel DMGs) and Windows (x64
+# NSIS installer). docs/DISTRIBUTION.md is the release runbook.
 #
 # The app is a bundled main process (dist/main.mjs, dist/preload.cjs) plus
-# staged resources (web-dist + the one unbundled dep). Signing/notarization
-# are gated on the Apple Developer enrollment: with CSC_* env unset, builds
-# are unsigned (fine for the internal M5 dry-run); CI sets them for release.
+# staged resources (web-dist + the unbundled deps, incl. sharp's native
+# binaries for every target arch — scripts/stage-resources.mjs). Signing is
+# gated on secrets: with them unset, builds are unsigned (fine for testing,
+# but Gatekeeper / SmartScreen warn); CI sets them for release.
 appId: com.realityhijack.app
 productName: Reality Hijack
 copyright: © Reality Hijack
@@ -15,20 +17,52 @@ directories:
   output: release
   buildResources: build
 
+# electron-builder copies every production dependency into app.asar by
+# default, but esbuild already inlined them into dist/main.mjs — and the two
+# that can't be inlined ship in extraResources. Without the exclusion the asar
+# carried a second, unused copy of the whole tree (+30 MB) whose sharp was
+# built for the build host's arch only.
 files:
   - dist/**/*
+  - assets/**/*
   - package.json
+  - "!**/node_modules/**"
+# Nothing native left in the asar to rebuild against Electron's ABI (sharp
+# uses N-API prebuilts, valid across Node and Electron).
+npmRebuild: false
 
 extraResources:
   - from: build-resources
     to: .
 
+# Fixed names with no spaces and no version: GitHub Releases mangles spaces,
+# and the site links to .../releases/latest/download/<name>, which only stays
+# valid if the name doesn't change per release. The version is in the
+# release page and the app's About.
+artifactName: Reality-Hijack-${os}.${ext}
+
 mac:
   icon: build/icon.png
   category: public.app-category.video
+  # One universal build (Apple silicon + Intel in one binary) rather than a
+  # per-chip choice on the download page: most people don't know which Mac
+  # they have, and Safari deliberately reports Apple silicon as Intel, so the
+  # page can't tell either. Costs ~100 MB over a single-arch DMG.
+  # dmg = the download; zip = what electron-updater installs from.
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
+  # @electron/universal refuses native files that are byte-identical in the
+  # arm64 and x64 builds unless they're listed here — and sharp's prebuilt
+  # binaries are, because stage-resources.mjs ships BOTH chips' copies in
+  # each build (that's what makes the merge trivial).
+  x64ArchFiles: "**/node_modules/@img/**"
+  # Signs + notarizes when the APPLE_* env vars exist (CI secrets); logs a
+  # warning and skips otherwise. Without this line electron-builder 25 never
+  # notarizes, and a signed-but-unnotarized app still hits the Gatekeeper wall.
+  notarize: true
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -38,6 +72,24 @@ mac:
 
 dmg:
   title: Reality Hijack
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+# One-click, per-user install: no admin prompt, installs to
+# %LOCALAPPDATA%\Programs, launches when done — the fewest clicks between a
+# streamer and the setup wizard. Per-user also lets electron-updater update
+# silently without UAC.
+nsis:
+  oneClick: true
+  perMachine: false
+  artifactName: Reality-Hijack-Setup.${ext}
+  shortcutName: Reality Hijack
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
 
 # electron-updater feed (GitHub Releases). Enabled once the repo is public
 # and releases are cut in CI.

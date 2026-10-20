@@ -97,8 +97,11 @@ These need a person with the right logins; none are code:
    DEV AUTH. Redirect URL: `<RH_PUBLIC_URL>/auth/twitch/callback`.
 3. **Streamlabs OAuth app** — replaces the pasted-token connect once approved
    (approval has a lead time; the pasted token works meanwhile).
-4. **Deploy the control plane**: `cd server && fly launch` (uses `fly.toml`),
-   then `fly secrets set DECART_API_KEY=… TWITCH_CLIENT_ID=… … RH_PUBLIC_URL=…`
+4. **Deploy the control plane** from the repo root (the image needs
+   `shared/`, `core/` and `web/`): `fly launch --config server/fly.toml
+   --dockerfile server/Dockerfile --no-deploy`, create the volume, then
+   `fly deploy --config server/fly.toml --dockerfile server/Dockerfile .`
+   and `fly secrets set DECART_API_KEY=… TWITCH_CLIENT_ID=… … RH_PUBLIC_URL=…`
    plus the content-safety classifier keys (`OPENAI_API_KEY`,
    `ANTHROPIC_API_KEY`, `SIGHTENGINE_API_USER`, `SIGHTENGINE_API_SECRET`) and a
    volume path for `RH_QUARANTINE_DIR`.
