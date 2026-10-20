@@ -82,18 +82,25 @@ function payableChannel(id: string) {
   return getRuntime(id)!;
 }
 
-function paidEvent(eventId: string, sessionId: string) {
+function paidEvent(
+  eventId: string,
+  sessionId: string,
+  over: { account?: string; amount?: number; metadataPaymentId?: string; asSession?: string } = {},
+) {
   const row = db.select().from(payments).where(eq(payments.checkoutSessionId, sessionId)).get()!;
   return Buffer.from(
     JSON.stringify({
       id: eventId,
       type: "checkout.session.completed",
+      account: over.account ?? "acct_paid", // Connect event: the streamer's account
       data: {
         object: {
-          id: sessionId,
+          id: over.asSession ?? sessionId,
           payment_status: "paid",
           payment_intent: `pi_${sessionId}`,
-          metadata: { paymentId: row.id },
+          amount_total: over.amount ?? row.amountCents,
+          currency: "usd",
+          metadata: { paymentId: over.metadataPaymentId ?? row.id },
         },
       },
     }),
@@ -238,5 +245,24 @@ test("a job that failed AFTER its token was minted is never auto-refunded on the
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(statusOf(sessionId), "failed_after_start");
   assert.equal(calls.refunds.length, before, "no automatic refund");
+  rt.stop();
+});
+
+test("a forged session can't pay for someone else's payment (wrong session, account or amount)", async () => {
+  const rt = payableChannel("dev:forge");
+  const sub = rt.correlation.add({ prompt: "lava", presetId: "lava-room", tipperName: null, imageUrl: null });
+  await createCheckout("dev:forge", { code: sub.code, amountUsd: 20, viewerName: "v", returnUrl: "https://x/c/forge" });
+  const sessionId = `cs_test_${calls.sessions}`;
+  const real = db.select().from(payments).where(eq(payments.checkoutSessionId, sessionId)).get()!;
+  // The streamer's own cheap session, carrying our copied paymentId.
+  await handleWebhook(paidEvent("evt_f1", sessionId, { asSession: "cs_streamer_own", metadataPaymentId: real.id, amount: 50 }), "ok");
+  assert.equal(statusOf(sessionId), "pending", "metadata alone never marks a payment paid");
+  await handleWebhook(paidEvent("evt_f2", sessionId, { account: "acct_someone_else" }), "ok");
+  assert.equal(statusOf(sessionId), "pending", "event from another account");
+  await handleWebhook(paidEvent("evt_f3", sessionId, { amount: 300 }), "ok");
+  assert.equal(statusOf(sessionId), "pending", "amount must match what we priced");
+  assert.ok(rt.correlation.get(sub.code), "the effect is still waiting for a real payment");
+  await handleWebhook(paidEvent("evt_f4", sessionId), "ok");
+  assert.equal(statusOf(sessionId), "paid");
   rt.stop();
 });

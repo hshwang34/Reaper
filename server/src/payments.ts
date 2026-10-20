@@ -310,7 +310,7 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
 
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const session = event.data.object as Stripe.Checkout.Session;
-    if (session.payment_status === "paid") await onPaid(session);
+    if (session.payment_status === "paid") await onPaid(session, event.account ?? null);
   } else if (event.type === "account.updated") {
     const account = event.data.object as Stripe.Account;
     const channelId = account.metadata?.channelId;
@@ -331,14 +331,30 @@ function setStatus(paymentId: string, status: string, extra: Partial<typeof paym
     .run();
 }
 
-async function onPaid(session: Stripe.Checkout.Session): Promise<void> {
-  const paymentId = session.metadata?.paymentId;
-  const p = paymentId ? db.select().from(payments).where(eq(payments.id, paymentId)).get() : undefined;
+async function onPaid(session: Stripe.Checkout.Session, account: string | null): Promise<void> {
+  // Never trust the session's metadata to say WHICH payment this is: with
+  // direct charges the streamer has a full Stripe Dashboard on the account
+  // the payment lives on, sees our metadata, and could create their own
+  // cheap session carrying a copied paymentId. Look the payment up by the
+  // session id WE created (unforgeable), then check the event came from
+  // that channel's account and the money matches what we priced.
+  const p = db.select().from(payments).where(eq(payments.checkoutSessionId, session.id)).get();
   if (!p) {
-    warn("payments", `paid session ${session.id} has no payment row — ignoring`);
+    warn("payments", `paid session ${session.id} is not one we created — ignoring`);
     return;
   }
   if (p.status !== "pending") return;
+  const row = channelRow(p.channelId);
+  const mismatch =
+    !row?.stripeAccountId || account !== row.stripeAccountId
+      ? "event from the wrong Stripe account"
+      : session.amount_total !== p.amountCents || session.currency !== "usd"
+        ? `amount ${session.amount_total} ${session.currency} ≠ ${p.amountCents} usd`
+        : null;
+  if (mismatch) {
+    warn("payments", `REJECTED paid session ${session.id}: ${mismatch}`);
+    return;
+  }
   const paymentIntentId =
     typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null);
   setStatus(p.id, "paid", { paymentIntentId });
