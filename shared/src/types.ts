@@ -130,8 +130,9 @@ export interface Settings {
   cooldownSec: number;
   /** Preset fired when a tip has no matching submission. */
   defaultPresetId: string;
-  /** Preset ids the streamer has enabled (subset of the catalog). */
-  enabledPresetIds: string[];
+  /** Preset ids the streamer switched OFF. Opt-out, so presets added to
+   *  the catalog later reach existing channels without a migration. */
+  disabledPresetIds: string[];
   /** Match an unlabeled tip to the only pending submission (correlation rule
    *  3). Convenient on a one-viewer demo rig; on a real channel it hands a
    *  stranger's tip to whoever submitted last, so hosted streamers should

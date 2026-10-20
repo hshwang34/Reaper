@@ -61,3 +61,59 @@ test("coverTransform: top-left anchored, fills + crops, never stretches", () => 
   assert.equal(t.alignment, 5);
   assert.deepEqual([t.positionX, t.positionY, t.boundsWidth, t.boundsHeight], [1, 2, 3, 4]);
 });
+
+// ── planOverlay: which scenes, which layer ─────────────────────────────────
+import { CAMERA_INPUT_KINDS, planOverlay, type SceneSnapshot } from "../src/obsAlign.js";
+
+const item = (id: number, index: number, name: string, kind: string, extra: Partial<SceneSnapshot["items"][0]> = {}) => ({
+  id, index, name, kind, enabled: true, isOurs: name === "AI Hijack", ...extra,
+});
+
+test("targets every scene with a visible webcam — never a hardcoded 'Scene'", () => {
+  const scenes: SceneSnapshot[] = [
+    { scene: "Starting Soon", items: [item(1, 0, "Countdown", "ffmpeg_source")] },
+    { scene: "Just Chatting", items: [item(2, 0, "BG", "image_source"), item(3, 1, "Facecam", "macos-avcapture")] },
+    { scene: "Gaming", items: [item(4, 0, "Game", "game_capture"), item(5, 1, "Cam", "dshow_input")] },
+    { scene: "BRB", items: [item(6, 0, "Facecam", "macos-avcapture", { enabled: false })] },
+  ];
+  const { targets, existing } = planOverlay(scenes, "AI Hijack", CAMERA_INPUT_KINDS);
+  assert.deepEqual(targets, ["Just Chatting", "Gaming"]);
+  assert.deepEqual(existing, []);
+});
+
+test("a fresh install (on top of everything) moves directly above the webcam, under the streamer's frame + alerts", () => {
+  // bottom → top: BG, Facecam, Cam frame, Alerts, AI Hijack (just created)
+  const scenes: SceneSnapshot[] = [{
+    scene: "Just Chatting",
+    items: [
+      item(1, 0, "BG", "image_source"),
+      item(2, 1, "Facecam", "macos-avcapture"),
+      item(3, 2, "Cam frame", "image_source"),
+      item(4, 3, "Alerts", "browser_source"),
+      item(9, 4, "AI Hijack", "browser_source"),
+    ],
+  }];
+  const [p] = planOverlay(scenes, "AI Hijack", CAMERA_INPUT_KINDS).existing;
+  assert.equal(p!.camera, "Facecam");
+  assert.equal(p!.reorderTo, 2); // → BG, Facecam, AI Hijack, Cam frame, Alerts
+});
+
+test("an overlay below the webcam (invisible) is raised to just above it; one already there stays put", () => {
+  const below: SceneSnapshot[] = [{
+    scene: "S",
+    items: [item(9, 0, "AI Hijack", "browser_source"), item(1, 1, "BG", "image_source"), item(2, 2, "Cam", "macos-avcapture")],
+  }];
+  assert.equal(planOverlay(below, "AI Hijack", CAMERA_INPUT_KINDS).existing[0]!.reorderTo, 2);
+  const ok: SceneSnapshot[] = [{
+    scene: "S",
+    items: [item(2, 0, "Cam", "macos-avcapture"), item(9, 1, "AI Hijack", "browser_source"), item(3, 2, "Alerts", "browser_source")],
+  }];
+  assert.equal(planOverlay(ok, "AI Hijack", CAMERA_INPUT_KINDS).existing[0]!.reorderTo, null);
+});
+
+test("a scene with no webcam keeps the overlay where it is", () => {
+  const scenes: SceneSnapshot[] = [{ scene: "Scene", items: [item(9, 0, "AI Hijack", "browser_source")] }];
+  const { targets, existing } = planOverlay(scenes, "AI Hijack", CAMERA_INPUT_KINDS);
+  assert.deepEqual(targets, []);
+  assert.deepEqual(existing, [{ scene: "Scene", itemId: 9, camera: null, cameraItemId: null, reorderTo: null }]);
+});

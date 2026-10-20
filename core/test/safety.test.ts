@@ -323,19 +323,21 @@ test("jobs carry the streamer's safety policy; the public label hides custom tex
 
 // ── Settings ─────────────────────────────────────────────────────────────
 
-test("settings: legacy allowCustomPrompts migrates; hosted base is presets-only", () => {
+test("settings: legacy allowCustomPrompts migrates; hosted base is 'Anything goes' with strict screening", () => {
   assert.equal(loadSettings({ allowCustomPrompts: false }).customPrompts, "off");
   assert.equal(loadSettings({ allowCustomPrompts: true }).customPrompts, "classified");
   assert.equal(loadSettings({ allowCustomPrompts: true, customPrompts: "off" }).customPrompts, "off");
   assert.ok(!("allowCustomPrompts" in loadSettings({ allowCustomPrompts: true })));
 
+  // Product decision 2026-10-20: new channels start fully open (typed ideas
+  // + face swaps) and tighten from the studio; classifiers stay strict.
   const hosted = loadSettings({}, HOSTED_SETTINGS);
-  assert.equal(hosted.customPrompts, "off");
+  assert.equal(hosted.customPrompts, "classified");
   // Approval and the output guard are opt-in everywhere; input screening stays strict.
   assert.equal(hosted.outputGuard, "off");
   assert.equal(hosted.reviewLikeness, false);
   assert.equal(hosted.moderationStrictness, "strict");
-  assert.equal(hosted.referenceImages, "scenes");
+  assert.equal(hosted.referenceImages, "likeness");
 
   const junk = loadSettings({
     customPrompts: "anything-goes",
