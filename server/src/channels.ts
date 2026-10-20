@@ -41,7 +41,7 @@ import {
 } from "@rh/core";
 import { channels, db, hijacks, moderationEvents, tokenMints } from "./db.js";
 import { env, isProduction } from "./env.js";
-import { dropQueuedPaid, OFFLINE_GRACE_MS, settleJob } from "./payments.js";
+import { dropQueuedPaid, OFFLINE_GRACE_MS, recordDispatch, settleJob } from "./payments.js";
 
 /** One classifier suite for every channel — it holds OUR vendor keys and is
  *  stateless; per-channel policy is passed on each call. Dev mode only when
@@ -232,6 +232,7 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
     hooks: {
       // Ledger: one row per dispatched job, updated on completion.
       onDispatch: (job) => {
+        recordDispatch(job);
         db.insert(hijacks)
           .values({
             channelId,
