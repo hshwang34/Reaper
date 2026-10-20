@@ -219,7 +219,8 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
       .where(eq(channels.id, channelId))
       .get();
     // HOSTED_SETTINGS, not the local defaults: our key, our uploads, our
-    // liability — a new channel starts presets-only (CONTENT-SAFETY §5).
+    // liability — strict thresholds, prompts + photos on behind the
+    // classifiers (CONTENT-SAFETY §5, decision #12).
     try {
       return loadSettings(JSON.parse(fresh?.settingsJson ?? "{}"), HOSTED_SETTINGS);
     } catch {

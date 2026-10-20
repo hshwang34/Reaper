@@ -160,10 +160,10 @@ async function main() {
   await viewer.goto(`${base}/viewer`);
   const router = await ctx.newPage();
   await router.goto(`${base}/router`);
-  await router.getByRole("button", { name: /arm camera/i }).click();
+  await router.getByRole("button", { name: /turn the camera on|arm camera/i }).click();
   check(
     "router arms the camera",
-    await waitFor(async () => !(await router.getByRole("button", { name: /arm camera/i }).isVisible()), 10_000),
+    await waitFor(async () => !(await router.getByRole("button", { name: /turn the camera on|arm camera/i }).isVisible()), 10_000),
   );
   check(
     "router OBS tile shows connected",

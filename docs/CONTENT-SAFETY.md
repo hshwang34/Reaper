@@ -40,7 +40,7 @@ The portfolio framing from `FEASIBILITY.md` §5 still holds and gets sharper:
 *the safest guardrail is a data model where untrusted bytes never reach the
 model.* Presets are that. Everything below is the price of letting any
 untrusted bytes (free text, images) through at all — and the honest product
-answer is that **new streamers get presets-only by default**, and every
+answer is that **new streamers get prompts and photos on, behind the classifier chain** (decision #12 — presets are examples, not the product), and every
 further tier is an opt-in with its own cost.
 
 ---
@@ -453,7 +453,8 @@ numbers in `VERIFICATION.md`.
   streamers already accept from Streamlabs: TTS has a word filter, a spam
   filter and a skip, with no approval queue; Media Share's manual-play mode is
   optional. Here the equivalent baseline is input screening (S1/S2, which
-  stays strict on hosted: presets-only, scene-only images, strict thresholds)
+  stays strict on hosted: strict thresholds, the full classifier chain on
+  every custom prompt and photo — decision #12 opened both by default)
   plus the panic hotkey. Approval adds dead time to a tip someone already
   paid for, and a refund question whenever the streamer declines. The output
   guard adds a model load before every go-live and can false-positive on a

@@ -323,19 +323,21 @@ test("jobs carry the streamer's safety policy; the public label hides custom tex
 
 // ── Settings ─────────────────────────────────────────────────────────────
 
-test("settings: legacy allowCustomPrompts migrates; hosted base is presets-only", () => {
+test("settings: legacy allowCustomPrompts migrates; hosted base opens prompts + photos behind classifiers", () => {
   assert.equal(loadSettings({ allowCustomPrompts: false }).customPrompts, "off");
   assert.equal(loadSettings({ allowCustomPrompts: true }).customPrompts, "classified");
   assert.equal(loadSettings({ allowCustomPrompts: true, customPrompts: "off" }).customPrompts, "off");
   assert.ok(!("allowCustomPrompts" in loadSettings({ allowCustomPrompts: true })));
 
   const hosted = loadSettings({}, HOSTED_SETTINGS);
-  assert.equal(hosted.customPrompts, "off");
+  // Decision #12: viewers always get a prompt box and a photo field; the
+  // classifier chain, not a presets-only default, is what keeps it safe.
+  assert.equal(hosted.customPrompts, "classified");
   // Approval and the output guard are opt-in everywhere; input screening stays strict.
   assert.equal(hosted.outputGuard, "off");
   assert.equal(hosted.reviewLikeness, false);
   assert.equal(hosted.moderationStrictness, "strict");
-  assert.equal(hosted.referenceImages, "scenes");
+  assert.equal(hosted.referenceImages, "likeness");
 
   const junk = loadSettings({
     customPrompts: "anything-goes",

@@ -235,6 +235,19 @@ export class CloudLink {
    *  "send yourself a test hijack" in cloud mode). */
   /** The channel's free daily test hijack. The server picks the preset and
    *  length — the hosted key never runs free text without a payment. */
+  /** Stripe payout status for the wizard's "Get paid" step. */
+  async payouts(): Promise<{ configured: boolean; started: boolean; enabled: boolean }> {
+    const b = await this.authedGet<{ configured?: boolean; started?: boolean; enabled?: boolean }>("payouts");
+    return { configured: Boolean(b.configured), started: Boolean(b.started), enabled: Boolean(b.enabled) };
+  }
+
+  /** Stripe-hosted onboarding URL; `from: "app"` lands on /payouts-done. */
+  async payoutsOnboardUrl(country: string): Promise<string> {
+    const b = await this.authedPost<{ url?: string }>("payouts/onboard", { country, from: "app" });
+    if (!b.url) throw new Error("no onboarding link");
+    return b.url;
+  }
+
   async testHijack(): Promise<string> {
     const body = await this.authedPost<{ outcome?: string }>("test-hijack", {});
     return body.outcome ?? "queued";
@@ -248,19 +261,27 @@ export class CloudLink {
     return `${this.cfg.url}/c/${encodeURIComponent(this.cfg.login)}`;
   }
 
-  /** POST to this channel's authed API, rotating the access token once on
-   *  401. Every control call shares this so the retry logic exists once. */
-  private async authedPost<T>(path: string, payload: unknown): Promise<T> {
+  private authedGet<T>(path: string): Promise<T> {
+    return this.authed<T>(path, "GET");
+  }
+
+  private authedPost<T>(path: string, payload: unknown): Promise<T> {
+    return this.authed<T>(path, "POST", payload);
+  }
+
+  /** Call this channel's authed API, rotating the access token once on 401.
+   *  Every control call shares this so the retry logic exists once. */
+  private async authed<T>(path: string, method: "GET" | "POST", payload?: unknown): Promise<T> {
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await fetch(
         `${this.cfg.url}/api/c/${encodeURIComponent(this.cfg.channelId)}/${path}`,
         {
-          method: "POST",
+          method,
           headers: {
-            "content-type": "application/json",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
             authorization: `Bearer ${this.access}`,
           },
-          body: JSON.stringify(payload),
+          body: method === "POST" ? JSON.stringify(payload ?? {}) : undefined,
         },
       );
       if (res.status === 401 && attempt === 0) {

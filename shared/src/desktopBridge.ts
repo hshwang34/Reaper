@@ -22,7 +22,16 @@ export interface DesktopSetupState {
   /** Pasted-keys local mode is a dev fallback (repo runs, RH_LOCAL_MODE=1),
    *  never something the wizard offers streamers. */
   localModeAllowed: boolean;
-  obs: { discovery: string; connected: boolean; running: boolean };
+  obs: {
+    discovery: string;
+    connected: boolean;
+    running: boolean;
+    /** OBS's Virtual Camera output: null when OBS isn't connected (unknown). */
+    virtualCamActive: boolean | null;
+  };
+  /** A real model is wired up (cloud mode, or a pasted Decart key): a test
+   *  hijack restyles the camera. Otherwise it's passthrough + the AI label. */
+  decartEnabled: boolean;
   /** Which credentials are configured — booleans only, no secret values. */
   keys: Record<string, boolean>;
   port: number;
@@ -51,6 +60,13 @@ export interface DesktopBridge {
   enableObsWebsocket(): Promise<
     "enabled" | "already-enabled" | "obs-running" | "no-config"
   >;
+  /** Start OBS's Virtual Camera over obs-websocket (OBS 28+). */
+  startVirtualCamera(): Promise<"started" | "already-on" | "obs-not-connected">;
+  /** Stripe payout status from the control plane (cloud mode only; null
+   *  in local mode, where there are no payments). Booleans only. */
+  payouts(): Promise<{ configured: boolean; started: boolean; enabled: boolean } | null>;
+  /** Start/resume Stripe onboarding in the system browser. */
+  startPayouts(country: string): Promise<void>;
   /** Mark setup finished and relaunch into the router (picks up saved keys). */
   setupComplete(): Promise<void>;
   /** Fire a test hijack through whichever engine owns money logic. */

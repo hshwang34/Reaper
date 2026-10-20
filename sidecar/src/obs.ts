@@ -50,6 +50,30 @@ export class ObsController {
     log("obs", `reconfigured → ${url}`);
   }
 
+  /** Is OBS's Virtual Camera output running? null = OBS not connected, or
+   *  an OBS too old to answer (obs-websocket < 5.0 / OBS < 28). */
+  async virtualCamActive(): Promise<boolean | null> {
+    if (!this.connected) return null;
+    try {
+      const r = await this.obs.call("GetVirtualCamStatus");
+      return r.outputActive;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Start the Virtual Camera for the streamer (the wizard's camera step).
+   *  Output type (Source vs Program) is OBS's own setting and stays theirs. */
+  async startVirtualCam(): Promise<"started" | "already-on" | "obs-not-connected"> {
+    await this.ensureConnected().catch(() => {});
+    if (!this.connected) return "obs-not-connected";
+    const { outputActive } = await this.obs.call("GetVirtualCamStatus");
+    if (outputActive) return "already-on";
+    await this.obs.call("StartVirtualCam");
+    log("obs", "virtual camera started");
+    return "started";
+  }
+
   async ensureConnected(): Promise<void> {
     if (this.connected) return;
     if (this.connecting) return this.connecting;

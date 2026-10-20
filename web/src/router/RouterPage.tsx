@@ -1,21 +1,20 @@
-// The streamer's control surface. Runs in a REAL Chrome tab (never inside OBS)
-// because it needs getUserMedia on the OBS Virtual Camera. Holds the state
-// machine, the camera, and the loopback sender; also exposes the guardrail
-// settings and the panic control.
+// The streamer's studio — the app's home after setup. Runs in a REAL Chrome
+// tab / the Electron window (never inside OBS) because it needs getUserMedia
+// on the OBS Virtual Camera. The router wiring itself (hub, state machine,
+// camera, loopback) is useRouterEngine; this page is the streamer-facing
+// surface over it: am I live-ready, where is panic, what do I share, and —
+// for the curious — the guardrails, moderation and developer panels.
 
-import { useEffect, useRef, useState } from "react";
-import type { AnyMsg, RouterState, Settings, StatusSnapshot } from "@rh/shared";
-import { api, type RouterConfig } from "../lib/api.js";
-import { HubSocket } from "../lib/ws.js";
-import { LoopbackSender } from "../lib/loopback.js";
+import { useEffect, useState } from "react";
+import type { RouterState, Settings } from "@rh/shared";
+import { api } from "../lib/api.js";
+import { desktopBridge } from "../lib/desktop.js";
+import { PANIC_KEY, TRAY_NAME } from "../lib/platform.js";
 import { GuardrailsEditor } from "../features/GuardrailsEditor.js";
 import { DesktopCredentials } from "../features/DesktopCredentials.js";
 import { ModerationPanel, ReviewPanel } from "../features/SafetyPanels.js";
-import { RouterMachine } from "./stateMachine.js";
-import { browserPorts } from "./ports.js";
-import { FrameGuard } from "./frameGuard.js";
-import { acquireCamera, listCameras } from "./decartSession.js";
-import { setDebugSink } from "../lib/debug.js";
+import { Keycap } from "../features/Keycap.js";
+import { StreamVideo, useRouterEngine } from "./useRouterEngine.js";
 
 const STATE_COLOR: Record<RouterState, string> = {
   OFFLINE: "bg-zinc-600",
@@ -27,211 +26,96 @@ const STATE_COLOR: Record<RouterState, string> = {
   TEARDOWN: "bg-amber-500",
 };
 
+/** What the state pill says to a streamer (the raw state stays in its title). */
+const STATE_LABEL: Record<RouterState, string> = {
+  OFFLINE: "Camera off",
+  IDLE: "Ready",
+  AUTHORIZING: "Starting…",
+  CONNECTING: "Connecting…",
+  BUFFERING: "Warming up…",
+  LIVE: "LIVE",
+  TEARDOWN: "Reverting…",
+};
+
 export default function RouterPage() {
-  const machineRef = useRef<RouterMachine | null>(null);
-  const hubRef = useRef<HubSocket | null>(null);
-  const guardRef = useRef<FrameGuard | null>(null);
-  const previewRef = useRef<HTMLVideoElement>(null);
-  const aiPreviewRef = useRef<HTMLVideoElement>(null);
-
-  const [state, setState] = useState<RouterState>("OFFLINE");
-  const [remaining, setRemaining] = useState<number | undefined>();
-  const [status, setStatus] = useState<StatusSnapshot | null>(null);
-  const [cfg, setCfg] = useState<RouterConfig | null>(null);
-  const [logLines, setLogLines] = useState<string[]>([]);
-  const [armError, setArmError] = useState<string | null>(null);
-  const [cams, setCams] = useState<{ deviceId: string; label: string }[]>([]);
-  const [camId, setCamId] = useState<string>("auto");
-  const camStreamRef = useRef<MediaStream | null>(null);
-
-  const pushLog = (line: string) => {
-    setLogLines((prev) => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev].slice(0, 40));
-    hubRef.current?.send({ t: "page:log", line });
-  };
+  const r = useRouterEngine();
+  const desktop = desktopBridge();
+  const [login, setLogin] = useState<string | null>(null);
+  const [portalUrl, setPortalUrl] = useState<string>(`${location.origin}/portal`);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const hub = new HubSocket("router").connect();
-    hubRef.current = hub;
-    setDebugSink((line) => hub.send({ t: "page:log", line }));
-    const sender = new LoopbackSender(hub);
-    // Output guard (CONTENT-SAFETY S4) is opt-in. When it's on, warm the
-    // model now so the first guarded job doesn't spend its pre-LIVE budget
-    // loading weights; when it's off, never download it.
-    const guard = new FrameGuard(pushLog);
-    guardRef.current = guard;
-    api
-      .getSettings()
-      .then((s) => s.outputGuard !== "off" && void guard.ready())
-      .catch(() => {});
-    const machine = new RouterMachine(browserPorts(hub, sender, guard), {
-      onState: (s, rem) => {
-        setState(s);
-        setRemaining(rem);
-      },
-      log: pushLog,
-      onAiStream: (stream) => {
-        if (aiPreviewRef.current) {
-          aiPreviewRef.current.srcObject = stream;
-          if (stream) void aiPreviewRef.current.play().catch(() => {});
-        }
-      },
+    void desktop?.setupState().then((s) => {
+      setLogin(s.login);
+      if (s.portalUrl) setPortalUrl(s.portalUrl);
     });
-    machineRef.current = machine;
-    const offDrop = hub.onDrop(() => machine.abandon("lost sidecar connection"));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const off = hub.on((m) => {
-      const msg = m as AnyMsg;
-      switch (msg.t) {
-        case "job:start":
-          void machine.runJob(msg.job);
-          break;
-        case "job:cancel":
-          machine.cancel(msg.jobId, msg.reason);
-          break;
-        case "viewer:frames-ok":
-          machine.onFramesOk(msg.jobId);
-          break;
-        case "status":
-          setStatus(msg.status);
-          break;
-      }
-    });
-
-    // The OBS tile must track the live connection (OBS is often launched
-    // after this page, and can drop mid-stream), so poll the cheap local
-    // config endpoint rather than fetching it once at mount.
-    const refreshCfg = () => api.getRouterConfig().then(setCfg).catch(() => {});
-    void refreshCfg();
-    const cfgTimer = window.setInterval(refreshCfg, 5000);
-
-    // Panic hotkey: Escape toggles pause on the sidecar (which cancels any
-    // active job). The streamer's face is the canvas — this must be instant.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") void panic();
-    };
-    window.addEventListener("keydown", onKey);
-    const onUnload = () => void machine.dispose();
-    window.addEventListener("pagehide", onUnload);
-
-    return () => {
-      off();
-      offDrop();
-      setDebugSink(null);
-      window.clearInterval(cfgTimer);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pagehide", onUnload);
-      void machine.dispose();
-      sender.dispose();
-      hub.close();
-    };
-  }, []);
-
-  async function arm(deviceId?: string) {
-    setArmError(null);
-    try {
-      const { stream, usingObs } = await acquireCamera(deviceId);
-      // Re-arm path (picker change): release the previous device first.
-      camStreamRef.current?.getTracks().forEach((t) => t.stop());
-      camStreamRef.current = stream;
-      if (previewRef.current) {
-        previewRef.current.srcObject = stream;
-        void previewRef.current.play().catch(() => {});
-      }
-      machineRef.current?.setCamera(stream);
-      pushLog(
-        usingObs
-          ? "armed on OBS Virtual Camera"
-          : deviceId
-            ? `armed on ${stream.getVideoTracks()[0]?.label ?? "selected camera"}`
-            : "armed on default camera (OBS Virtual Camera not found)",
-      );
-      // Labels are visible now that permission is granted — populate picker.
-      setCams(await listCameras());
-    } catch (e) {
-      setArmError((e as Error).message);
-    }
-  }
-
-  /** Picker fallback for when the label match got the wrong device (or the
-   *  streamer wants a different one). Only offered between jobs. */
-  function switchCamera(id: string) {
-    setCamId(id);
-    void arm(id === "auto" ? undefined : id);
-  }
-
-  async function panic() {
-    const { paused } = await api.panic();
-    pushLog(paused ? "PANIC — paused" : "resumed");
-  }
+  const paused = r.status?.paused ?? false;
+  const armed = r.cameraStream !== null;
 
   return (
     <div className="mx-auto max-w-6xl p-6">
-      <header className="mb-6 flex items-center justify-between">
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Stream controls</h1>
+          <h1 className="text-2xl font-bold">Creator studio</h1>
           <p className="text-sm text-zinc-400">
-            Manage your camera, live effects, and queue.
+            {login ? (
+              <>
+                Signed in as <b className="text-zinc-200">{login}</b> ·{" "}
+              </>
+            ) : null}
+            Keep this window open while you stream — it's what runs each hijack.
           </p>
         </div>
         <div className="flex items-center gap-3">
           <span
-            className={`rounded-full px-3 py-1 text-sm font-semibold ${STATE_COLOR[state]}`}
+            title={r.state}
+            className={`rounded-full px-3 py-1 text-sm font-semibold ${STATE_COLOR[r.state]}`}
           >
-            {state}
-            {state === "LIVE" && remaining != null ? ` · ${remaining}s` : ""}
+            {STATE_LABEL[r.state]}
+            {r.state === "LIVE" && r.remainingSec != null ? ` · ${r.remainingSec}s` : ""}
           </span>
-          <button
-            onClick={panic}
-            className="rounded-lg bg-red-600 px-4 py-1.5 text-sm font-bold hover:bg-red-500"
-            title="Esc"
-          >
-            PANIC
-          </button>
+          <PanicButton paused={paused} onClick={() => void r.panic()} />
         </div>
       </header>
 
       {/* Hero: the AI output is what the streamer is judging, so it gets the
           full width; the camera input is just an "am I armed?" inset. */}
       <div className="relative mb-6 overflow-hidden rounded-xl border border-brand-900 bg-black">
-        <p className="absolute left-3 top-2 z-10 text-xs text-zinc-400">AI output (Decart)</p>
-        <video
-          ref={aiPreviewRef}
-          muted
-          playsInline
-          className="aspect-video w-full object-contain"
-        />
+        <p className="absolute left-3 top-2 z-10 text-xs text-zinc-400">
+          {r.aiStream ? "AI output — this is what viewers see" : "AI output appears here during a hijack"}
+        </p>
+        <StreamVideo stream={r.aiStream} className="aspect-video w-full object-contain" />
         <div className="absolute bottom-3 right-3 w-48 overflow-hidden rounded-lg border border-zinc-700 bg-black shadow-lg">
-          <video
-            ref={previewRef}
-            muted
-            playsInline
-            className="aspect-video w-full object-cover"
-          />
-          <p className="absolute left-1.5 top-1 text-[10px] text-zinc-400">Camera</p>
+          <StreamVideo stream={r.cameraStream} className="aspect-video w-full object-cover" />
+          <p className="absolute left-1.5 top-1 text-[10px] text-zinc-400">
+            {r.camera ? r.camera.label : "Camera"}
+          </p>
         </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Left: arm + status */}
+        {/* Left: readiness, share link, panic explainer */}
         <section className="space-y-4">
-          {!machineRef.current?.hasCamera() && state === "OFFLINE" && (
+          {!armed && r.state === "OFFLINE" && (
             <button
-              onClick={() => void arm()}
+              onClick={() => void r.arm()}
               className="w-full rounded-lg bg-emerald-600 px-4 py-2 font-semibold hover:bg-emerald-500"
             >
-              Arm camera
+              Turn the camera on
             </button>
           )}
-          {cams.length > 0 && (state === "IDLE" || state === "OFFLINE") && (
+          {r.cams.length > 0 && (r.state === "IDLE" || r.state === "OFFLINE") && (
             <label className="flex items-center gap-2 text-sm text-zinc-400">
               Camera
               <select
-                value={camId}
-                onChange={(e) => switchCamera(e.target.value)}
+                value={r.camId}
+                onChange={(e) => r.switchCamera(e.target.value)}
                 className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-sm"
               >
                 <option value="auto">Auto (prefer OBS Virtual Camera)</option>
-                {cams.map((c) => (
+                {r.cams.map((c) => (
                   <option key={c.deviceId} value={c.deviceId}>
                     {c.label}
                   </option>
@@ -239,31 +123,61 @@ export default function RouterPage() {
               </select>
             </label>
           )}
-          {armError && (
-            <p className="text-sm text-red-400">Arm failed: {armError}</p>
+          {r.camera && !r.camera.usingObs && (
+            <p className="text-sm text-amber-400">
+              Using {r.camera.label}, not the OBS Virtual Camera — effects will restyle the
+              raw webcam, not your OBS scene.
+            </p>
           )}
+          {r.armError && <p className="text-sm text-red-400">Camera failed: {r.armError}</p>}
 
           <dl className="grid grid-cols-2 gap-2 text-sm">
-            <Info label="Decart" value={cfg ? (cfg.decartEnabled ? "LIVE" : "MOCK") : "…"} />
-            <Info label="OBS" value={cfg ? (cfg.obsConnected ? "connected" : "waiting") : "…"} />
-            <Info label="Queue" value={status ? String(status.queueLength) : "0"} />
-            <Info label="Paused" value={status?.paused ? "yes" : "no"} />
+            <Info label="Camera" value={armed ? (r.camera?.usingObs ? "OBS Virtual Camera" : "on") : "off"} />
+            <Info label="OBS" value={r.cfg ? (r.cfg.obsConnected ? "connected" : "not connected") : "…"} />
+            <Info label="AI model" value={r.cfg ? (r.cfg.decartEnabled ? "live" : "demo (passthrough)") : "…"} />
+            <Info label="Queue" value={r.status ? `${r.status.queueLength} waiting` : "0"} />
           </dl>
+
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
+              Your viewer page
+            </h3>
+            <p className="mb-2 text-sm text-zinc-400">
+              Put this in chat or a panel. Viewers write a prompt, add a photo, pay, and
+              their hijack runs here.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 break-all rounded bg-zinc-900 p-2 text-xs">{portalUrl}</code>
+              <button
+                onClick={() => {
+                  void navigator.clipboard.writeText(portalUrl).then(() => {
+                    setCopied(true);
+                    window.setTimeout(() => setCopied(false), 1500);
+                  });
+                }}
+                className="rounded bg-zinc-800 px-3 py-2 text-xs hover:bg-zinc-700"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
+
+          <PanicExplainer paused={paused} />
         </section>
 
-        {/* Right: approvals + manual fire + guardrail settings + safety + log */}
+        {/* Right: approvals + try-it + guardrails + moderation; dev panels collapsed */}
         <section className="space-y-4">
-          <ReviewPanel client={api} pending={status?.reviewPending} />
-          <ManualHijackPanel
-            armed={state !== "OFFLINE"}
-            busy={state !== "IDLE"}
-            state={state}
-            onFired={(outcome) => pushLog(`manual hijack → ${outcome}`)}
+          <ReviewPanel client={api} pending={r.status?.reviewPending} />
+          <TryEffectPanel
+            armed={armed}
+            busy={r.state !== "IDLE"}
+            state={r.state}
+            onFired={(outcome) => r.pushLog(`manual hijack → ${outcome}`)}
           />
           <SettingsPanel
             onSaved={(s) => {
-              pushLog(`settings saved (min $${s.minTipUSD}, max ${s.maxDurationSec}s)`);
-              if (s.outputGuard !== "off") void guardRef.current?.ready();
+              r.pushLog(`settings saved (min $${s.minTipUSD}, max ${s.maxDurationSec}s)`);
+              if (s.outputGuard !== "off") r.warmGuard();
             }}
           />
           <ModerationPanel
@@ -272,17 +186,24 @@ export default function RouterPage() {
               void api
                 .getSettings()
                 .then((s) => api.saveSettings({ bannedViewers: [...s.bannedViewers, name] }))
-                .then(() => pushLog(`banned ${name}`))
-                .catch((e) => pushLog(`ban failed: ${(e as Error).message}`))
+                .then(() => r.pushLog(`banned ${name}`))
+                .catch((e) => r.pushLog(`ban failed: ${(e as Error).message}`))
             }
           />
-          <DesktopCredentials />
+          <details className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-widest text-zinc-500">
+              Advanced — credentials
+            </summary>
+            <div className="mt-3">
+              <DesktopCredentials />
+            </div>
+          </details>
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
               Event log
             </h3>
             <div className="max-h-56 space-y-1 overflow-y-auto font-mono text-xs text-zinc-400">
-              {logLines.map((l, i) => (
+              {r.logLines.map((l, i) => (
                 <div key={i}>{l}</div>
               ))}
             </div>
@@ -293,9 +214,46 @@ export default function RouterPage() {
   );
 }
 
-/** Streamer console: type a prompt, fire a hijack directly — no tip, no chat.
- *  Disabled until the camera is armed; queues normally if a job is running. */
-function ManualHijackPanel({
+/** The one control that must never be ambiguous. Two states, both named. */
+function PanicButton({ paused, onClick }: { paused: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={`${PANIC_KEY} from any app · Esc in this window`}
+      className={`rounded-lg px-4 py-1.5 text-sm font-bold ${
+        paused ? "bg-emerald-600 hover:bg-emerald-500" : "bg-red-600 hover:bg-red-500"
+      }`}
+    >
+      {paused ? "Resume hijacks" : "PANIC — hide & pause"}
+    </button>
+  );
+}
+
+function PanicExplainer({ paused }: { paused: boolean }) {
+  return (
+    <div className={`rounded-xl border p-4 ${paused ? "border-amber-700 bg-amber-950/30" : "border-zinc-800 bg-zinc-950"}`}>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
+        Panic
+      </h3>
+      {paused ? (
+        <p className="text-sm text-amber-200">
+          Paused. The effect is hidden and new hijacks wait. Press <Keycap>{PANIC_KEY}</Keycap>{" "}
+          again or click Resume when you're ready.
+        </p>
+      ) : (
+        <p className="text-sm text-zinc-400">
+          Press <Keycap>{PANIC_KEY}</Keycap> from any app (OBS included), use the {TRAY_NAME}, or the
+          red button above. The effect disappears from your stream immediately and new hijacks
+          are paused until you resume. On the hosted service, a viewer whose hijack never played is refunded.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Streamer console: type a prompt, run a hijack on yourself — no tip, no
+ *  viewer. Disabled until the camera is on; queues normally if a job is running. */
+function TryEffectPanel({
   armed,
   busy,
   state,
@@ -329,9 +287,13 @@ function ManualHijackPanel({
 
   return (
     <div className="rounded-xl border border-brand-900/60 bg-zinc-950 p-4">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-brand-400">
-        Manual hijack
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-widest text-brand-400">
+        Try an effect on yourself
       </h3>
+      <p className="mb-2 text-xs text-zinc-500">
+        Runs exactly like a viewer's hijack, on your stream, for free. Good for checking your
+        OBS scene before going live.
+      </p>
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
@@ -357,17 +319,17 @@ function ManualHijackPanel({
           disabled={!armed || sending || !prompt.trim()}
           className="ml-auto rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-bold hover:bg-brand-700 disabled:opacity-40"
         >
-          {sending ? "Firing…" : busy ? "Queue hijack" : "Fire hijack"}
+          {sending ? "Starting…" : busy ? "Queue it" : "Run it"}
         </button>
       </div>
       {!armed && (
         <p className="mt-2 text-xs text-amber-400">
-          Arm the camera first — the hijack needs a live camera feed.
+          Turn the camera on first — a hijack needs a live camera feed.
         </p>
       )}
       {busy && armed && (
         <p className="mt-2 text-xs text-zinc-500">
-          A job is running ({state}) — new fires join the queue.
+          A hijack is running ({STATE_LABEL[state as RouterState] ?? state}) — new ones join the queue.
         </p>
       )}
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}

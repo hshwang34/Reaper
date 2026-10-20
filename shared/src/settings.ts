@@ -48,17 +48,19 @@ export const DEFAULT_SETTINGS: Settings = {
   bannedViewers: [],
 };
 
-/** Hosted defaults (CONTENT-SAFETY §5): our key, our uploads, our liability —
- *  so a new channel starts presets-only with strict thresholds and scene-only
- *  images. Input screening is the baseline everywhere; streamer approval and
- *  the output guard are opt-in, as on the local rig (same model as Streamlabs
- *  TTS: filter + skip, no approval queue). The streamer can open or tighten
- *  each tier deliberately from the dashboard. */
+/** Hosted defaults (CONTENT-SAFETY §5). The product is "write your own prompt,
+ *  add a photo" — presets are examples of what works, not the menu (product
+ *  decision #12, 2026-10-20) — so a new channel starts with custom prompts and
+ *  photos ON, behind the classifier chain, with strict thresholds. Input
+ *  screening is the baseline everywhere; streamer approval and the output
+ *  guard are opt-in, as on the local rig (same model as Streamlabs TTS:
+ *  filter + skip, no approval queue). The streamer can tighten each tier
+ *  from the dashboard; a missing classifier key still fails that tier closed. */
 export const HOSTED_SETTINGS: Settings = {
   ...DEFAULT_SETTINGS,
   allowSolePendingMatch: false,
-  customPrompts: "off",
-  referenceImages: "scenes",
+  customPrompts: "classified",
+  referenceImages: "likeness",
   moderationStrictness: "strict",
   outputGuard: "off",
   reviewLikeness: false,
