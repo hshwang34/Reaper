@@ -3,3 +3,4 @@ export * from "./protocol.js";
 export * from "./presets.js";
 export * from "./settings.js";
 export * from "./desktopBridge.js";
+export * from "./safetyChecks.js";

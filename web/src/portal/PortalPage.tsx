@@ -16,18 +16,40 @@
 // host's classifiers), so it never shows a control intake would refuse; a
 // photo of a person needs the consent box, whose text is exactly what the
 // server records (docs/CONTENT-SAFETY.md S2).
+//
+// Submitting runs the server's safety checks before a claim code exists. The
+// page streams them (SafetyChecks.tsx): a live checklist while they run, and
+// on a reject every failure point — which check, what it caught, the exact
+// words. The form is locked while checking so what's shown is what was checked.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { computeDurationSec, type SubmissionStatus } from "@rh/shared";
+import {
+  computeDurationSec,
+  type CheckResult,
+  type SafetyFinding,
+  type SubmissionStatus,
+} from "@rh/shared";
 import { api, type PaymentsInfo, type PublicConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
 import { channelSlug } from "../lib/channel.js";
 import { downscaleImage } from "../lib/image.js";
+import { SafetyChecklist, SafetyFindings } from "./SafetyChecks.js";
 
 /** Hard client-side ceiling on the raw file before downscaling (Decart's own
  *  reference-image limit is 10 MB post-encode; we shrink to 720p so any
  *  sensible photo fits — this only stops multi-hundred-MB mistakes). */
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/** A rejected submission, pinned to exactly what was checked. */
+interface Failure {
+  findings: SafetyFinding[];
+  checks: CheckResult[];
+  prompt: string | null;
+  image: File | null;
+}
+
+/** Server messages are lower-case fragments; sentence-case them for display. */
+const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function PortalPage() {
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
@@ -55,6 +77,14 @@ export default function PortalPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Safety-check progress: `preparing` covers the client-side stretch (photo
+  // shrink + upload) until the server announces its checks.
+  const [checks, setChecks] = useState<CheckResult[]>([]);
+  const [preparing, setPreparing] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [passedChecks, setPassedChecks] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
   const [code, setCode] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [status, setStatus] = useState<SubmissionStatus | null>(null);
@@ -144,8 +174,10 @@ export default function PortalPage() {
   }
 
   async function submit() {
-    if (!cfg) return;
+    if (!cfg || submitting) return;
     setError(null);
+    setFailure(null);
+    setChecks([]);
     if (!presetId && !customPrompt.trim()) {
       setError("Pick a preset or write a custom prompt.");
       return;
@@ -159,6 +191,10 @@ export default function PortalPage() {
       return;
     }
     setSubmitting(true);
+    const checkedPrompt = presetId ? null : customPrompt.trim();
+    const checkedImage = imageFile;
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       const form = new FormData();
       if (presetId) form.set("presetId", presetId);
@@ -168,33 +204,64 @@ export default function PortalPage() {
       // an absent field as Decart's default (on) for older clients.
       form.set("enhance", enhance ? "1" : "0");
       if (imageFile) {
+        setPreparing("Preparing your photo…");
         const blob = await downscaleImage(imageFile);
         form.set("image", blob, "reference.jpg");
         if (consent) form.set("consent", "1");
       }
-      const res = await api.submit(form);
-      if (paid) {
-        // Moderation passed and the code exists — now the money. Stripe holds
-        // the effect for the 30 minutes its checkout page lives.
-        const { url } = await api.checkout(res.code, tipAmount, tipperName.trim());
-        location.href = url;
-        return;
+      setPreparing(imageFile ? "Uploading…" : "Sending…");
+      const res = await api.submit(
+        form,
+        (ev) => {
+          if (ev.t === "plan") {
+            setPreparing(null);
+            setChecks(ev.checks.map((c) => ({ ...c, state: "pending" })));
+          } else {
+            setChecks((prev) => prev.map((c) => (c.id === ev.id ? { ...c, state: ev.state } : c)));
+          }
+        },
+        ac.signal,
+      );
+      // The result carries the final state of every check — the source of truth.
+      if (res.checks.length) setChecks(res.checks);
+      if (res.ok) {
+        setPassedChecks(res.checks.length);
+        if (paid) {
+          // Every check passed and the code exists — now the money. Stripe
+          // holds the effect for the 30 minutes its checkout page lives.
+          const { url } = await api.checkout(res.code, tipAmount, tipperName.trim());
+          location.href = url;
+          return;
+        }
+        setCode(res.code);
+        setExpiresAt(res.expiresAt);
+        setStatus({
+          code: res.code,
+          state: "pending",
+          message: res.needsReview
+            ? "The streamer approves this kind of effect before it runs. If they decline (or don't answer within 2 minutes), it won't run."
+            : undefined,
+        });
+      } else if (res.findings.length) {
+        setFailure({ findings: res.findings, checks: res.checks, prompt: checkedPrompt, image: checkedImage });
+      } else {
+        setError(sentence(res.error));
       }
-      setCode(res.code);
-      setExpiresAt(res.expiresAt);
-      setStatus({
-        code: res.code,
-        state: "pending",
-        message: res.needsReview
-          ? "The streamer approves this kind of effect before it runs. If they decline (or don't answer within 2 minutes), it won't run."
-          : undefined,
-      });
     } catch (e) {
+      if (ac.signal.aborted) return;
       setError((e as Error).message);
     } finally {
+      setPreparing(null);
       setSubmitting(false);
     }
   }
+
+  // Results describe what was checked; once the viewer edits, say so.
+  const failureStale =
+    failure != null &&
+    (failure.prompt !== (presetId ? null : customPrompt.trim()) || failure.image !== imageFile);
+  const unchangedFailure = failure != null && !failureStale;
+  const checksDone = checks.filter((c) => c.state !== "pending" && c.state !== "running").length;
 
   async function simulateTip() {
     if (!code) return;
@@ -204,6 +271,9 @@ export default function PortalPage() {
   }
 
   function reset() {
+    setChecks([]);
+    setFailure(null);
+    setPassedChecks(0);
     setCode(null);
     setExpiresAt(null);
     setStatus(null);
@@ -242,7 +312,14 @@ export default function PortalPage() {
       </header>
 
       {!code ? (
-        <div className="space-y-6">
+        <form
+          className="space-y-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <fieldset disabled={submitting} className="mx-0 min-w-0 space-y-6 border-0 p-0">
           {/* Presets */}
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
@@ -252,6 +329,8 @@ export default function PortalPage() {
               {cfg.presets.map((p) => (
                 <button
                   key={p.id}
+                  type="button"
+                  aria-pressed={presetId === p.id}
                   onClick={() => pickPreset(p.id)}
                   className={`relative rounded-xl border p-3 text-left transition ${
                     presetId === p.id
@@ -295,6 +374,14 @@ export default function PortalPage() {
                   setCustomPrompt(e.target.value);
                   if (e.target.value) setPresetId(null);
                 }}
+                onKeyDown={(e) => {
+                  // Enter submits, Shift+Enter breaks the line. Never mid-IME
+                  // composition: Enter there confirms a Hangul/kana candidate.
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
                 placeholder="e.g. turn the room into a snow globe"
                 rows={2}
                 className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-sm outline-none focus:border-brand-500"
@@ -304,6 +391,7 @@ export default function PortalPage() {
                 you get a code — no nudity, real people, hate or gore.
                 {cfg.customPromptsNeedApproval &&
                   " The streamer also approves each custom effect before it runs."}
+                <span className="hidden sm:inline"> Enter to submit · Shift+Enter for a new line.</span>
               </p>
             </section>
           )}
@@ -420,7 +508,7 @@ export default function PortalPage() {
             </label>
           </section>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          </fieldset>
           {paid && !pay!.live && (
             <p className="rounded-lg bg-amber-900/30 px-3 py-2 text-sm text-amber-300">
               Hijacks are paused right now — the streamer's Reality Hijack
@@ -428,17 +516,38 @@ export default function PortalPage() {
             </p>
           )}
 
+          {(submitting || checks.length > 0) && (
+            <SafetyChecklist checks={checks} preparing={preparing} running={submitting} stale={failureStale} />
+          )}
+          {failure && (
+            <SafetyFindings
+              findings={failure.findings}
+              checks={failure.checks}
+              prompt={failure.prompt}
+              stale={failureStale}
+            />
+          )}
+          {error && (
+            <p role="alert" className="text-sm text-red-400">
+              {error}
+            </p>
+          )}
+
+          {/* Re-sending exactly what just failed would fail the same way —
+              and cost the viewer a strike — so it waits for an edit. */}
           <button
-            onClick={submit}
-            disabled={submitting || (paid && !pay!.live)}
-            className="w-full rounded-xl bg-brand-600 px-4 py-3 font-bold hover:opacity-90 disabled:opacity-50"
+            type="submit"
+            disabled={submitting || unchangedFailure || (paid && !pay!.live)}
+            className={`w-full rounded-xl bg-brand-600 px-4 py-3 font-bold hover:opacity-90 disabled:opacity-50 ${
+              submitting ? "disabled:cursor-wait" : "disabled:cursor-not-allowed"
+            }`}
           >
             {submitting
-              ? paid
-                ? "Checking your effect…"
-                : "Submitting…"
-              : paid
-                ? `Pay $${tipAmount} — ${durationPreview}s hijack`
+              ? (preparing ?? (checks.length ? `Running safety checks… ${checksDone}/${checks.length}` : "Checking…"))
+              : unchangedFailure
+                ? "Edit your request to check again"
+                : paid
+                  ? `Pay $${tipAmount} — ${durationPreview}s hijack`
                 : "Get my claim code"}
           </button>
           <p className="text-center text-xs text-zinc-600">
@@ -454,7 +563,7 @@ export default function PortalPage() {
               </>
             )}
           </p>
-        </div>
+        </form>
       ) : (
         <ClaimView
           paid={paid || status?.message?.startsWith("Payment received") === true}
@@ -463,6 +572,7 @@ export default function PortalPage() {
           status={status}
           tipAmount={tipAmount}
           durationPreview={durationPreview}
+          passedChecks={passedChecks}
           onSimulate={simulateTip}
           onReset={reset}
         />
@@ -570,10 +680,12 @@ function ClaimView(props: {
   status: SubmissionStatus | null;
   tipAmount: number;
   durationPreview: number;
+  /** Safety checks this submission passed (0 for a plain preset). */
+  passedChecks: number;
   onSimulate: () => void;
   onReset: () => void;
 }) {
-  const { code, secsLeft, status, tipAmount, durationPreview } = props;
+  const { code, secsLeft, status, tipAmount, durationPreview, passedChecks } = props;
   // The claim-code TTL only matters while we're still waiting for a tip. Once a
   // tip has matched (queued/live/done/failed), the code is consumed server-side
   // — so a lapsed TTL must not overwrite a real terminal state (e.g. flip a
@@ -612,6 +724,11 @@ function ClaimView(props: {
           <p className="text-xs text-zinc-500">
             expires in {Math.floor(secsLeft / 60)}:
             {String(secsLeft % 60).padStart(2, "0")}
+          </p>
+        )}
+        {passedChecks > 0 && (
+          <p className="mt-3 text-xs text-emerald-400">
+            ✓ Passed {passedChecks === 1 ? "the safety check" : `all ${passedChecks} safety checks`}
           </p>
         )}
       </div>
