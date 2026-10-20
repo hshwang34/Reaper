@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { getPreset } from "@rh/shared";
+import { getPreset, type SubmitProgress } from "@rh/shared";
 import { createSubmission, emptySuite, parseEnhance } from "../src/index.js";
 import {
   fakeImage,
@@ -84,7 +84,13 @@ test("classifier reject → 422 + ledger + strike; error → 503; review → par
   const reject = fakeText(() => ({ verdict: "reject", categories: ["sexual"], reason: "not allowed on stream" }));
   const d = intakeDeps(settings(), liveSuite([reject]));
   const r = await createSubmission(d, { ...noImage, prompt: "something bad" });
-  assert.deepEqual(r, { ok: false, status: 422, error: "not allowed on stream" });
+  assert.ok(!r.ok);
+  assert.equal(r.status, 422);
+  assert.equal(r.error, "Sexual content");
+  assert.deepEqual(
+    r.findings?.map((f) => [f.check, f.category, f.label]),
+    [["prompt:fake-text", "sexual", "Sexual content"]],
+  );
   const ev = d.ledger.recent(1)[0];
   assert.equal(ev.stage, "text");
   assert.equal(ev.verdict, "reject");
@@ -131,7 +137,7 @@ test("three rejections pause the submitter's untrusted tiers — presets stay op
   d.dispose();
 });
 
-test("custom text needs a non-LLM floor classifier; the floor always runs first", async () => {
+test("custom text needs a non-LLM floor classifier; the floor is started (and listed) first", async () => {
   const policyOnly = fakeText(undefined, "llm", "policy");
   const d = intakeDeps(settings(), liveSuite([policyOnly]));
   const r = await createSubmission(d, { ...noImage, prompt: "a castle" });
@@ -319,5 +325,135 @@ test("a needsImage preset without a photo is a 400 and stores nothing", async ()
   const noPhoto = await createSubmission(d, { ...noImage, presetId: "photo-swap" });
   assert.deepEqual(noPhoto, { ok: false, status: 400, error: "this effect needs a reference image" });
   assert.equal(d.store.size, 0);
+  d.dispose();
+});
+
+// ── What the viewer is told (shared/src/safetyChecks.ts) ─────────────────
+
+test("progress: the plan comes first, then each check's state; the outcome carries final states", async () => {
+  const floor = fakeText(undefined, "floor");
+  const llm = fakeText(() => ({ verdict: "review", categories: [], reason: "borderline" }), "llm", "policy");
+  const gate = fakeImage({ faces: 0 }, { name: "gate" });
+  const d = intakeDeps(settings(), liveSuite([floor, llm], [gate]));
+  const events: SubmitProgress[] = [];
+  const out = await createSubmission(
+    d,
+    { ipHash: ip, prompt: "a castle", image: { url: "/u/p.jpg", path: await imageFile() } },
+    (ev) => events.push(ev),
+  );
+  assert.ok(out.ok && out.needsReview);
+  const [plan, ...rest] = events;
+  assert.equal(plan.t, "plan");
+  assert.deepEqual(
+    plan.t === "plan" && plan.checks.map((c) => [c.id, c.subject]),
+    [
+      ["prompt:blocklist", "prompt"],
+      ["prompt:floor", "prompt"],
+      ["prompt:llm", "prompt"],
+      ["photo:file", "photo"],
+      ["photo:gate", "photo"],
+    ],
+  );
+  assert.ok(rest.every((e) => e.t === "check"));
+  assert.deepEqual(
+    out.checks.map((c) => [c.id, c.state]),
+    [
+      ["prompt:blocklist", "pass"],
+      ["prompt:floor", "pass"],
+      ["prompt:llm", "review"],
+      ["photo:file", "pass"],
+      ["photo:gate", "pass"],
+    ],
+  );
+  d.dispose();
+});
+
+test("findings: prompt AND photo failures come back together, one strike for the lot", async () => {
+  const d = intakeDeps(
+    settings({ referenceImages: "scenes" }),
+    liveSuite(
+      [fakeText(() => ({ verdict: "reject", categories: ["hate"], reason: "not allowed on stream" }), "floor")],
+      [fakeImage({ faces: 1, verdict: "reject", categories: ["gore"] }, { name: "gate" })],
+    ),
+  );
+  const out = await createSubmission(d, {
+    ipHash: ip,
+    prompt: "naked zombies",
+    image: { url: "/u/q.jpg", path: await imageFile() },
+  });
+  assert.ok(!out.ok);
+  assert.equal(out.status, 422);
+  assert.deepEqual(
+    out.findings?.map((f) => [f.subject, f.check, f.category]),
+    [
+      ["prompt", "prompt:blocklist", "blocklist"],
+      ["prompt", "prompt:floor", "hate"],
+      ["photo", "photo:gate", "gore"],
+      ["photo", "photo:gate", "face-not-allowed"],
+    ],
+  );
+  assert.match(out.error, /^4 problems found/);
+  // One strike for the whole submission: the 3-strike pause isn't reached.
+  assert.equal(d.strikes.blocked(ip), false);
+  d.dispose();
+});
+
+test("findings: a non-minor reject at the gate still lets later checks add theirs; a minor stops them", async () => {
+  const gate = fakeImage({ verdict: "reject", categories: ["offensive-symbol"] }, { name: "gate" });
+  const llm = fakeImage({ verdict: "reject", categories: ["public-figure"] }, { coversMinors: false, name: "llm" });
+  const d = intakeDeps(settings(), liveSuite([], [llm, gate]));
+  const both = await createSubmission(d, {
+    ipHash: ip,
+    presetId: "underwater",
+    image: { url: "/u/r.jpg", path: await imageFile() },
+  });
+  assert.deepEqual(!both.ok && both.findings?.map((f) => f.category), ["offensive-symbol", "public-figure"]);
+
+  const minorGate = fakeImage({ faces: 1, minorPossible: true }, { name: "gate" });
+  const later = fakeImage({}, { coversMinors: false, name: "llm" });
+  const d2 = intakeDeps(settings(), liveSuite([], [later, minorGate]));
+  const minor = await createSubmission(d2, {
+    ipHash: "other-ip",
+    presetId: "underwater",
+    image: { url: "/u/s2.jpg", path: await imageFile() },
+  });
+  assert.ok(!minor.ok);
+  assert.equal(later.calls, 0, "no further vendor sees a possible minor");
+  assert.deepEqual(minor.findings?.map((f) => f.category), ["minor"]);
+  assert.deepEqual(minor.checks?.map((c) => c.state), ["pass", "fail", "skipped"]);
+  d.dispose();
+  d2.dispose();
+});
+
+test("findings: suspected CSAM gives the viewer one generic line, nothing descriptive", async () => {
+  const d = intakeDeps(
+    settings(),
+    liveSuite([], [fakeImage({ faces: 1, minorPossible: true, sexual: true, verdict: "reject", categories: ["sexual", "minor"] })]),
+  );
+  const out = await createSubmission(d, {
+    ipHash: ip,
+    presetId: "underwater",
+    image: { url: "/u/t.jpg", path: await imageFile() },
+  });
+  assert.ok(!out.ok && out.quarantine);
+  assert.deepEqual(out.findings?.map((f) => [f.category, f.label]), [["rejected", "Image rejected"]]);
+  assert.equal(out.error, "Image rejected");
+  d.dispose();
+});
+
+test("findings: a file that isn't an image is a 400 with a finding, and no strike", async () => {
+  const d = intakeDeps(settings(), liveSuite([], [fakeImage({}, { name: "gate" })]));
+  for (let i = 0; i < 3; i++) {
+    const out = await createSubmission(d, {
+      ipHash: ip,
+      presetId: "underwater",
+      image: { url: "/u/x.jpg", path: await imageFile({ bytes: Buffer.from("not an image") }) },
+    });
+    assert.ok(!out.ok);
+    assert.equal(out.status, 400);
+    assert.deepEqual(out.findings?.map((f) => f.category), ["structure"]);
+    assert.deepEqual(out.checks?.map((c) => c.state), ["fail", "skipped"]);
+  }
+  assert.equal(d.strikes.blocked(ip), false);
   d.dispose();
 });

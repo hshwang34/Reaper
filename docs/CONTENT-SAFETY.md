@@ -209,6 +209,42 @@ export interface ImageModerationProvider {
 
 Suspected CSAM (nudity + `minorPossible`) never reaches step 7 or any LLM.
 
+### S1/S2 · What the viewer is told (implemented 2026-10-20)
+
+The portal shows **every failure point**: which check caught it, what it
+caught, and for text the exact words, highlighted in the viewer's own prompt.
+It says what failed, never how to get around it. Types:
+`shared/src/safetyChecks.ts`. UI: `web/src/portal/SafetyChecks.tsx`.
+
+- **All checks run; the decision doesn't change.** "First reject wins" is
+  gone. Text classifiers run concurrently and all of them run even after a
+  blocklist hit, so a prompt with two blocked words, a floor category and an
+  impersonation shows all four. The verdict is still the AND of every check,
+  so this costs money on rejects (the policy LLM is paid for prompts the
+  blocklist already refused) and leaves safety unchanged. A rejected
+  submission is still one strike (CSAM: three); a file that simply isn't an
+  image is no strike.
+- **The photo minors gate still stops.** The minors-covering classifiers run
+  first, one at a time. A possible minor, or a gate that couldn't run, marks
+  every later photo check `skipped`, so those bytes reach no further vendor.
+  The S2 "nothing later runs" ordering above holds only at this gate. Past
+  it, the remaining photo checks run concurrently and all report.
+- **Suspected CSAM tells the viewer nothing descriptive**: one finding,
+  "Image rejected", with no categories.
+- **Live progress.** With `Accept: application/x-ndjson`, `POST /submissions`
+  answers 200 and streams `plan` (the exact checks this host will run, which
+  depends on the configured vendors), then a `check` line per state change,
+  then one `result` carrying the real status, `findings[]` and final
+  `checks[]`. Without that header it returns one JSON body with the same
+  fields and the real HTTP status. A request refused by a cheap gate (strikes,
+  ban, tier, consent) sends only the result.
+- **Outage vs reject.** A check that errors or times out is `unavailable`. If
+  anything else rejected, the response is a 422 with findings. Otherwise it
+  fails closed with a 503 "pick a preset", as before.
+- **The policy LLM quotes, the server verifies.** Claude returns
+  `flagged_text` (verbatim phrases) and categories from a fixed enum. Any quote
+  that doesn't occur in the viewer's text is dropped before it can be shown.
+
 ### S3 · Streamer approval queue (optional per policy)
 
 For `customPrompts: "classified+approval"` (and always for likeness swaps

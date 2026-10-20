@@ -41,17 +41,47 @@ function stubFetch(body: unknown, status = 200): void {
 
 // ── Chain ────────────────────────────────────────────────────────────────
 
-test("text chain: blocklist rejects before any vendor is called; first reject wins", async () => {
-  const vendor = fakeText();
-  const r = await moderateText("a NUDE beach", settings(), [], liveSuite([vendor]));
+test("text chain: every check runs and every failure point is a finding", async () => {
+  const floor = fakeText(() => ({ verdict: "reject", categories: ["sexual", "hate"], reason: "not allowed on stream" }), "floor");
+  const llm = fakeText(
+    () => ({
+      verdict: "reject",
+      categories: ["impersonation"],
+      reason: "Puts a real person on stream.",
+      // One real quote, one the viewer never wrote — the fake must be dropped.
+      matches: ["Taylor Swift", "something invented"],
+    }),
+    "llm",
+    "policy",
+  );
+  const r = await moderateText("a NUDE beach with taylor swift, naked", settings(), [], liveSuite([floor, llm]));
   assert.equal(r.verdict, "reject");
-  assert.equal(vendor.seen.length, 0);
+  assert.equal(floor.seen.length, 1, "a blocklist hit doesn't hide the classifiers' findings");
+  assert.equal(llm.seen.length, 1);
+  assert.deepEqual(
+    r.findings.map((f) => [f.check, f.category, f.matches ?? []]),
+    [
+      ["prompt:blocklist", "blocklist", ["nude"]],
+      ["prompt:blocklist", "blocklist", ["naked"]],
+      ["prompt:floor", "sexual", []],
+      ["prompt:floor", "hate", []],
+      ["prompt:llm", "impersonation", ["Taylor Swift"]],
+    ],
+  );
+  assert.equal(r.findings[2].label, "Sexual content");
+  assert.equal(r.findings[2].detail, undefined, "a vendor's generic line adds nothing");
+  assert.equal(r.findings[4].detail, "Puts a real person on stream.");
+});
 
-  const a = fakeText(() => ({ verdict: "reject", categories: ["x"], reason: "no" }), "a");
-  const b = fakeText(undefined, "b");
-  const r2 = await moderateText("a castle", settings(), [], liveSuite([a, b]));
-  assert.equal(r2.verdict, "reject");
-  assert.equal(b.seen.length, 0, "later classifiers are skipped (and not paid for)");
+test("text chain: a broken check is 'unavailable' unless something else rejected", async () => {
+  const down = fakeText(() => new Error("vendor down"), "down");
+  const states: Record<string, string> = {};
+  const r = await moderateText("a castle", settings(), [], liveSuite([down]), (id, s) => (states[id] = s));
+  assert.equal(r.verdict, "unavailable", "fail closed");
+  assert.deepEqual(states, { "prompt:blocklist": "pass", "prompt:down": "unavailable" });
+
+  const r2 = await moderateText("a nude castle", settings(), [], liveSuite([down]));
+  assert.equal(r2.verdict, "reject", "a real finding outranks an outage");
 });
 
 // ── Image hardening ──────────────────────────────────────────────────────

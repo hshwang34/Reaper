@@ -219,6 +219,10 @@ async function main() {
   // ── 4. content safety: moderation ledger, report, takedown ─────────────
   const nsfw = await api("/api/submissions", { prompt: "make everyone naked" });
   check("blocklisted custom prompt rejected (422)", nsfw.status === 422, nsfw.json?.error);
+  check(
+    "rejection names the check and the exact word",
+    nsfw.json?.findings?.some((f) => f.check === "prompt:blocklist" && f.matches?.includes("naked")),
+  );
   const log = await api("/api/moderation?limit=20");
   const hit = log.json?.events?.find((e) => e.stage === "text" && e.verdict === "reject");
   // The reason may name the blocklist term; the viewer's own text never lands.
@@ -255,6 +259,46 @@ async function main() {
   check("HTML declared as image/png is rejected by its bytes", fake.status === 400, fake.json?.error);
   const swap = await upload(png, "image/png", { presetId: "photo-swap" });
   check("face swap without the consent box is refused", swap.status === 400, swap.json?.error);
+
+  // Last, because each rejection is a strike and three pause this submitter's
+  // custom prompts and photos — the uploads above must run before that.
+  // The portal's path: the same decision, streamed as NDJSON (plan → checks → result).
+  const streamed = await fetch(`${base}/api/submissions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+    body: JSON.stringify({ prompt: "a naked castle, nude statues" }),
+  });
+  const lines = (await streamed.text()).trim().split("\n").map((l) => JSON.parse(l));
+  const final = lines.at(-1);
+  check(
+    "streamed checks: plan first, result last, every failure point listed",
+    streamed.headers.get("content-type")?.includes("application/x-ndjson") &&
+      lines[0]?.t === "plan" &&
+      final?.t === "result" &&
+      final.ok === false &&
+      final.status === 422 &&
+      final.findings?.length === 2,
+    final?.error,
+  );
+
+  // …and what the viewer actually sees: type, press Enter, read the findings.
+  const portal = await ctx.newPage();
+  await portal.goto(`${base}/portal`);
+  const promptBox = portal.getByPlaceholder(/snow globe/i);
+  if (await promptBox.isVisible().catch(() => false)) {
+    await promptBox.fill("a nude beach with naked surfers");
+    await promptBox.press("Enter");
+    const shownFindings = await waitFor(async () => /Didn't pass/.test(await portal.locator("body").innerText()), 8000);
+    const marks = await portal.locator("mark").allInnerTexts();
+    check(
+      "portal: Enter submits; failures listed with the words highlighted",
+      shownFindings && marks.includes("nude") && marks.includes("naked"),
+      marks.join(", "),
+    );
+  } else {
+    check("portal offers a custom prompt box", false);
+  }
+  await portal.close();
 }
 
 try {

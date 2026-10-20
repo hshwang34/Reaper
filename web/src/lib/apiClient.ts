@@ -12,12 +12,16 @@
 //                      onRotate, and retry; a second 401 surfaces as ApiError
 // Pages call typed methods and never see a header.
 
-import type {
-  ModerationEvent,
-  Preset,
-  ReferenceImageTier,
-  ReviewItem,
-  Settings,
+import {
+  NDJSON,
+  type ModerationEvent,
+  type Preset,
+  type ReferenceImageTier,
+  type ReviewItem,
+  type Settings,
+  type SubmitEvent,
+  type SubmitProgress,
+  type SubmitResult,
 } from "@rh/shared";
 
 // ── Response shapes ───────────────────────────────────────────────────────
@@ -186,6 +190,58 @@ export function createApiClient(opts: ApiClientOptions) {
     return body as T;
   }
 
+  /**
+   * POST /submissions as a stream: the server announces its safety checks,
+   * reports each as it resolves (→ onProgress), and ends with the result.
+   * A rejection is a RESULT, not a throw — the caller renders its findings.
+   * Throws only when the connection dies before a result arrives.
+   */
+  async function submitStreaming(
+    form: FormData,
+    onProgress: (ev: SubmitProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<SubmitResult> {
+    const res = await fetch(prefix() + "/submissions", {
+      method: "POST",
+      body: form,
+      headers: { accept: NDJSON, ...authHeaders() },
+      signal,
+    });
+    if (!res.body || !(res.headers.get("content-type") ?? "").includes(NDJSON)) {
+      // Refused before the stream opened (unknown channel, upload too big):
+      // a plain JSON body with a real status.
+      const body = (await res.json().catch(() => ({}))) as Partial<SubmitResult> & { error?: string };
+      if (res.ok) return { t: "result", ok: true, needsReview: false, checks: [], ...body } as SubmitResult;
+      return {
+        t: "result",
+        ok: false,
+        status: res.status,
+        error: res.status === 413 ? "That image is too large." : (body.error ?? `HTTP ${res.status}`),
+        findings: [],
+        checks: [],
+      };
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    let result: SubmitResult | null = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (value) buf += value;
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const ev = JSON.parse(line) as SubmitEvent;
+        if (ev.t === "result") result = ev;
+        else onProgress(ev);
+      }
+      if (done) break;
+    }
+    if (!result) throw new ApiError("Lost the connection while checking — try again.", 0);
+    return result;
+  }
+
   const json = (method: "POST", payload: unknown): RequestInit => ({
     method,
     headers: { "content-type": "application/json" },
@@ -195,11 +251,7 @@ export function createApiClient(opts: ApiClientOptions) {
   return {
     // public
     getConfig: () => request<PublicConfig>("/config"),
-    submit: (form: FormData) =>
-      request<{ code: string; expiresAt: number; needsReview?: boolean }>("/submissions", {
-        method: "POST",
-        body: form,
-      }),
+    submit: submitStreaming,
     report: (reason: string, ref: { code?: string; jobId?: string } = {}) =>
       request<{ ok: boolean; id: string }>("/report", json("POST", { reason, ...ref })),
     takedown: (req: { contact: string; description: string; imageUrl?: string; code?: string }) =>

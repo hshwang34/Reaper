@@ -12,10 +12,12 @@
 import { Router, type Request, type RequestHandler } from "express";
 import {
   CONSENT_STATEMENT,
+  NDJSON,
   PRESETS,
   presetAllowed,
   sanitizeSettingsPatch,
   type Settings,
+  type SubmitEvent,
 } from "@rh/shared";
 import { MintError } from "../mintPolicy.js";
 import { imagesReady, textReady } from "../moderation.js";
@@ -143,13 +145,30 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
 
   /** Viewer submission: prompt/preset + optional image, before tipping.
    *  The whole moderation chain runs here (see submissions.ts) — before a
-   *  claim code exists, so nothing the viewer sent can reach a job unchecked. */
+   *  claim code exists, so nothing the viewer sent can reach a job unchecked.
+   *
+   *  Two response shapes, same decision:
+   *    · `Accept: application/x-ndjson` (the portal) — 200, then one JSON
+   *      line per event: the check `plan`, each `check` state as it
+   *      resolves, and a final `result` carrying the real status. The checks
+   *      take seconds; the viewer watches them happen instead of a spinner.
+   *    · otherwise — one JSON body with the matching HTTP status. */
   r.post(
     "/submissions",
     guardedUpload,
     withCtx(async (ctx, req, res) => {
       const file = req.file;
       const rt = ctx.runtime;
+      const streaming = (req.headers.accept ?? "").includes(NDJSON);
+      const send = (ev: SubmitEvent) => res.write(`${JSON.stringify(ev)}\n`);
+      if (streaming) {
+        res.status(200);
+        res.setHeader("Content-Type", `${NDJSON}; charset=utf-8`);
+        // Defeat proxy buffering (nginx, compression) so each line lands live.
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders();
+      }
       let out;
       try {
         out = await createSubmission(
@@ -166,21 +185,32 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
             image: file ? { url: ctx.imageUrl(file), path: file.path } : null,
             ipHash: submitter(req),
           },
+          streaming ? send : undefined,
         );
       } catch (e) {
         // Never leave an unvetted file on disk behind an unexpected throw.
         if (file) ctx.discardUpload(file);
-        throw e;
+        if (!streaming) throw e;
+        // Headers are gone: the error has to travel as the result line.
+        warn("api", `submission failed: ${(e as Error).message}`);
+        send({ t: "result", ok: false, status: 500, error: "something went wrong — try again", findings: [], checks: [] });
+        return res.end();
       }
       if (!out.ok) {
         if (file) {
           if (out.quarantine) ctx.quarantineUpload(file);
           else ctx.discardUpload(file);
         }
-        return res.status(out.status).json({ error: out.error });
+        const body = { error: out.error, findings: out.findings ?? [], checks: out.checks ?? [] };
+        if (!streaming) return res.status(out.status).json(body);
+        send({ t: "result", ok: false, status: out.status, ...body });
+        return res.end();
       }
       ctx.onSubmission?.({ code: out.code, presetId: out.presetId, hasImage: Boolean(file) });
-      res.json({ code: out.code, expiresAt: out.expiresAt, needsReview: out.needsReview });
+      const body = { code: out.code, expiresAt: out.expiresAt, needsReview: out.needsReview, checks: out.checks };
+      if (!streaming) return res.json(body);
+      send({ t: "result", ok: true, ...body });
+      res.end();
     }),
   );
 

@@ -69,6 +69,8 @@ Sightengine (`SIGHTENGINE_API_USER`/`SECRET`), the minors check. Missing keys sw
 matching tier off (fail closed); presets always work. MOCK mode ("dev mode") runs blocklist +
 structural checks only. Invariants: the chain runs before a claim code exists; suspected CSAM
 stops before any further vendor and is quarantined, never deleted (`docs/runbooks/csam.md`);
+every other check runs to completion so the portal can list **every** failure point
+(`findings[]`, streamed live as NDJSON — CONTENT-SAFETY "What the viewer is told");
 uploads are deleted at job end / expiry / 1h; output-guard stops are ordinary `teardown()`s
 whose `job:done` reason starts with `safety:`.
 
