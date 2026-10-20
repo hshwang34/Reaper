@@ -29,3 +29,24 @@ jobs:
       # The pages must still bundle — the hosted portal and the packaged app
       # both serve web/dist.
       - run: npm run build --workspace web
+
+  # The two end-to-end suites, on a real browser + the real Electron app.
+  # Still zero secrets: MOCK Decart, DEV AUTH, a fake OBS and a fake Stripe.
+  #   e2e         — the local demo rig (sidecar)
+  #   e2e:hosted  — the commercial path: control plane + desktop app + portal
+  #                 checkout + signed webhooks + settle/refund
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CHROME_PATH: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run e2e
+      # Electron needs a display; xvfb-run provides a virtual one.
+      - run: xvfb-run -a npm run e2e:hosted
