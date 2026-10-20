@@ -224,6 +224,13 @@ export async function createCheckout(channelId: string, input: CheckoutInput): P
     throw new PaymentError(409, "this streamer hasn't finished setting up payments yet");
   }
 
+  // Only take money for a hijack that can actually play: the streamer's app
+  // (the router) must be connected. Otherwise the job would sit in a queue
+  // with nowhere to run until something refunds it.
+  if (rt.engine.snapshot().routerState === "OFFLINE") {
+    throw new PaymentError(409, "the streamer's Reality Hijack app isn't running right now — try again when they're live");
+  }
+
   const code = input.code.trim().toUpperCase();
   const sub = rt.correlation.get(code);
   if (!sub) throw new PaymentError(410, "that effect expired — submit it again");

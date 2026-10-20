@@ -88,10 +88,13 @@ const fake: StripeLike = {
 };
 setStripeForTests(fake);
 
-function payableChannel(id: string) {
+function payableChannel(id: string, online = true) {
   upsertChannel(id, id.replace("dev:", ""), id);
   db.update(channels).set({ stripeAccountId: "acct_paid", payoutsEnabled: 1 }).where(eq(channels.id, id)).run();
-  return getRuntime(id)!;
+  const rt = getRuntime(id)!;
+  // The streamer's app is connected (the router reports a non-OFFLINE state).
+  if (online) rt.engine.setRouterState("IDLE");
+  return rt;
 }
 
 function paidEvent(
@@ -288,4 +291,16 @@ test("onboarding creates ONE Express + Managed Risk account per channel, then re
   await onboardingLink("dev:onboard", "US", "/dashboard"); // resume: no second account
   await assert.rejects(onboardingLink("dev:onboard", "usa", "/dashboard"), (e) => e instanceof PaymentError && e.status === 400);
   getRuntime("dev:onboard")?.stop();
+});
+
+test("no payment is taken while the streamer's app is offline", async () => {
+  const rt = payableChannel("dev:offline", false);
+  const sub = rt.correlation.add({ prompt: "lava", presetId: "lava-room", tipperName: null, imageUrl: null });
+  const before = calls.sessions;
+  await assert.rejects(
+    createCheckout("dev:offline", { code: sub.code, amountUsd: 10, viewerName: "v", returnUrl: "https://x/c/o" }),
+    (e) => e instanceof PaymentError && e.status === 409,
+  );
+  assert.equal(calls.sessions, before, "no Stripe session created");
+  rt.stop();
 });

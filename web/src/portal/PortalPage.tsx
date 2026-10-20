@@ -421,10 +421,16 @@ export default function PortalPage() {
           </section>
 
           {error && <p className="text-sm text-red-400">{error}</p>}
+          {paid && !pay!.live && (
+            <p className="rounded-lg bg-amber-900/30 px-3 py-2 text-sm text-amber-300">
+              The streamer's Reality Hijack app isn't running right now, so
+              hijacks are paused. Check back when they're live.
+            </p>
+          )}
 
           <button
             onClick={submit}
-            disabled={submitting}
+            disabled={submitting || (paid && !pay!.live)}
             className="w-full rounded-xl bg-gradient-to-r from-fuchsia-600 to-cyan-600 px-4 py-3 font-bold hover:opacity-90 disabled:opacity-50"
           >
             {submitting

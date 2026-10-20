@@ -252,6 +252,8 @@ export type ApiClient = ReturnType<typeof createApiClient>;
 export interface PaymentsInfo {
   enabled: boolean;
   minUsd: number;
+  /** The streamer's app is connected; payments are refused otherwise. */
+  live: boolean;
 }
 
 export interface PayoutsInfo {

@@ -319,7 +319,12 @@ const paymentRoute =
 app.get("/api/c/:channel/payments", (req, res) => {
   const id = resolveChannelId(String(req.params.channel));
   if (!id || !getRuntime(id)) return res.status(404).json({ error: "unknown channel" });
-  res.json({ enabled: paymentsEnabled() && payoutStatus(id).enabled, minUsd: minPaymentUsd(id) });
+  res.json({
+    enabled: paymentsEnabled() && payoutStatus(id).enabled,
+    minUsd: minPaymentUsd(id),
+    // The streamer's app is connected — a payment now can actually play.
+    live: getRuntime(id)!.engine.snapshot().routerState !== "OFFLINE",
+  });
 });
 
 /** Viewer: pay for a submitted (already moderated) effect. */
