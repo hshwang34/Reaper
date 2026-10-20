@@ -254,7 +254,7 @@ async function boot(): Promise<void> {
     }
   });
   ipcMain.handle("rh:test-hijack", async (_e, prompt: string, d: number) => {
-    if (link) return link.devHijack(prompt, d);
+    if (link) return link.testHijack();
     return local!.engine.manual(prompt, d);
   });
   ipcMain.handle("rh:auto-launch", (_e, enabled: boolean) => {

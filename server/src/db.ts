@@ -4,13 +4,16 @@
 // as ONE machine with in-memory per-channel engines (no sticky routing, no
 // horizontal scale until post-alpha), so a local file DB removes an entire
 // managed dependency. Drizzle keeps the schema portable — the Neon/Postgres
-// swap at scale is a dialect change, not a rewrite. DDL is bootstrapped
-// inline (CREATE TABLE IF NOT EXISTS) instead of drizzle-kit migrations —
-// revisit when the schema starts moving under real users.
+// swap at scale is a dialect change, not a rewrite. DDL is applied by a
+// tiny versioned migrator (below) rather than drizzle-kit: one file, no
+// generated artifacts, and it runs at boot on the production volume.
 
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { resolve } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { log, warn } from "@rh/core";
 import { env } from "./env.js";
 
 // ── Schema ────────────────────────────────────────────────────────────────
@@ -96,11 +99,15 @@ export const moderationEvents = sqliteTable("moderation_events", {
   tipper: text("tipper"),
 });
 
-// ── Bootstrap ─────────────────────────────────────────────────────────────
+// ── Bootstrap + migrations ────────────────────────────────────────────────
+// Versioned with SQLite's own `PRAGMA user_version`: migration N runs once,
+// in order, inside a transaction, and bumps the version. Append new steps;
+// never edit a shipped one (it has already run on the production volume).
+// Migration 1 is the original schema, written with IF NOT EXISTS so a
+// database created before versioning (user_version 0) adopts it cleanly.
 
-const sqlite = new Database(env.databasePath);
-sqlite.pragma("journal_mode = WAL");
-sqlite.exec(`
+const MIGRATIONS: string[] = [
+  /* 1 — initial schema */ `
 CREATE TABLE IF NOT EXISTS channels (
   id TEXT PRIMARY KEY,
   login TEXT NOT NULL UNIQUE,
@@ -165,6 +172,46 @@ CREATE INDEX IF NOT EXISTS idx_moderation_channel ON moderation_events(channel_i
 CREATE INDEX IF NOT EXISTS idx_hijacks_channel ON hijacks(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_mints_channel ON token_mints(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_refresh_channel ON refresh_tokens(channel_id);
-`);
+`,
+];
+
+/** Apply pending migrations to `conn`; returns the resulting version. */
+export function migrate(conn: Database.Database, steps = MIGRATIONS): number {
+  let version = conn.pragma("user_version", { simple: true }) as number;
+  for (; version < steps.length; version++) {
+    const sql = steps[version];
+    const next = version + 1;
+    conn.transaction(() => {
+      conn.exec(sql);
+      conn.pragma(`user_version = ${next}`);
+    })();
+    log("db", `migrated to schema v${next}`);
+  }
+  return version;
+}
+
+const sqlite = new Database(env.databasePath);
+sqlite.pragma("journal_mode = WAL");
+migrate(sqlite);
 
 export const db = drizzle(sqlite);
+
+/** Online snapshot (better-sqlite3's backup API — consistent under WAL
+ *  while the server keeps writing). Keeps the newest 7. */
+export async function backupDatabase(): Promise<string | null> {
+  try {
+    mkdirSync(env.backupDir, { recursive: true });
+    const file = resolve(env.backupDir, `data-${new Date().toISOString().slice(0, 10)}.sqlite`);
+    await sqlite.backup(file);
+    const old = readdirSync(env.backupDir)
+      .filter((f) => /^data-\d{4}-\d{2}-\d{2}\.sqlite$/.test(f))
+      .sort()
+      .slice(0, -7);
+    for (const f of old) rmSync(resolve(env.backupDir, f), { force: true });
+    log("db", `backup → ${file}`);
+    return file;
+  } catch (e) {
+    warn("db", `backup failed: ${(e as Error).message}`);
+    return null;
+  }
+}

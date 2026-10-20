@@ -18,9 +18,9 @@ import multer from "multer";
 import { WebSocketServer } from "ws";
 import { eq } from "drizzle-orm";
 import type { HelloMsg } from "@rh/shared";
-import { buildApiRouter, log, sweepUploadDir, warn } from "@rh/core";
-import { channels, db, hijacks, submissionsLog } from "./db.js";
-import { devAuthEnabled, env, repoRoot } from "./env.js";
+import { buildApiRouter, ipHash, log, RateLimiter, sweepUploadDir, warn } from "@rh/core";
+import { backupDatabase, channels, db, hijacks, submissionsLog } from "./db.js";
+import { devAuthEnabled, devRoutesEnabled, env, isProduction, repoRoot } from "./env.js";
 import {
   APP_LOOPBACK_REDIRECT,
   exchangeTwitchCode,
@@ -37,14 +37,49 @@ import {
   upsertChannel,
   verifyAccess,
 } from "./auth.js";
-import { getRuntime } from "./channels.js";
+import { getRuntime, restoreTriggeredRuntimes } from "./channels.js";
 
 const app = express();
-app.use(express.json());
+// Fly (and any real host) terminates TLS at a proxy: without this, req.ip is
+// the proxy's address and every per-IP limit and strike lumps all viewers
+// into one bucket — one abuser would lock out everyone.
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.use(express.json({ limit: "64kb" }));
+
+const httpsOrigin = env.publicUrl.startsWith("https://");
+
+// Security headers (no helmet dependency for five lines). The portal is
+// never meant to be framed; uploads are images served with fixed extensions.
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (httpsOrigin) res.setHeader("Strict-Transport-Security", "max-age=31536000");
+  next();
+});
+
+/** Per-IP rate limit for public endpoints that cost us something (OAuth
+ *  round trips, classifier calls, disk writes). */
+function perIp(max: number, windowMs: number): express.RequestHandler {
+  const limiter = new RateLimiter(max, windowMs);
+  return (req, res, next) => {
+    if (limiter.allow(ipHash(req.ip))) return next();
+    res.status(429).json({ error: "too many requests — slow down" });
+  };
+}
+app.use("/auth", perIp(30, 60_000));
+// Registered before the channel API mount, so it runs first for this path.
+app.post("/api/c/:channel/submissions", perIp(20, 60_000));
 
 // ── Health ────────────────────────────────────────────────────────────────
 app.get("/healthz", (_req, res) => {
-  res.json({ ok: true, devAuth: devAuthEnabled, decart: Boolean(env.decartApiKey) });
+  res.json({
+    ok: true,
+    mode: isProduction ? "production" : "dev",
+    devAuth: devAuthEnabled,
+    decart: Boolean(env.decartApiKey),
+  });
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────
@@ -69,6 +104,7 @@ async function startOauth(
     .cookie("rh_oauth_nonce", nonce, {
       httpOnly: true,
       sameSite: "lax",
+      secure: httpsOrigin,
       maxAge: 10 * 60 * 1000,
     })
     .redirect(twitchAuthorizeUrl(await signState({ ...payload, nonce })));
@@ -219,6 +255,7 @@ app.use(
     },
     requireAuth: requireChannel,
     upload: upload.single("image"),
+    devRoutes: devRoutesEnabled,
   }),
 );
 
@@ -233,6 +270,18 @@ app.post("/api/c/:channel/trigger/streamlabs", requireChannel, (req, res) => {
   const token = String(req.body?.token ?? "").trim();
   rt.setStreamlabsToken(token);
   res.json({ ok: true, connected: Boolean(token) });
+});
+
+/** The free daily test hijack (setup wizard, "does it still work?"). Exists
+ *  in production — unlike /dev/hijack — because it is allowance-capped and
+ *  runs a fixed preset, never free text. */
+app.post("/api/c/:channel/test-hijack", requireChannel, (req, res) => {
+  const rt = getRuntime(String(res.locals.channelId));
+  if (!rt) return res.status(404).json({ error: "unknown channel" });
+  const presetId = typeof req.body?.presetId === "string" ? req.body.presetId : undefined;
+  const r = rt.testHijack(presetId);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  res.json({ ok: true, outcome: r.outcome });
 });
 
 /** Ledger view for the dashboard. */
@@ -290,9 +339,32 @@ if (existsSync(webDist)) {
 // local-plane and never talks to the cloud.
 
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
+// Every protocol message is small JSON; 64 KB is generous and stops a client
+// from parking 100 MB (the ws default) in our memory.
+const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 64 * 1024 });
+
+// Heartbeat: a socket that hasn't answered a ping by the next sweep is a dead
+// TCP connection (laptop slept, NAT dropped it) — terminate it so the hub
+// sees the router go away instead of holding a ghost forever.
+const alive = new WeakMap<object, boolean>();
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (alive.get(ws) === false) {
+      ws.terminate();
+      continue;
+    }
+    alive.set(ws, false);
+    ws.ping();
+  }
+}, 30_000).unref();
+
 wss.on("connection", (ws) => {
+  alive.set(ws, true);
+  ws.on("pong", () => alive.set(ws, true));
+  // A socket that never says hello holds a connection slot for nothing.
+  const helloTimer = setTimeout(() => ws.close(4408, "hello timeout"), 10_000);
   ws.once("message", (raw) => {
+    clearTimeout(helloTimer);
     void (async () => {
       let hello: HelloMsg;
       try {
@@ -333,6 +405,14 @@ wss.on("connection", (ws) => {
 // must never take all of them down. Log and carry on.
 process.on("uncaughtException", (e) => warn("process", `uncaught: ${(e as Error).stack ?? e}`));
 process.on("unhandledRejection", (e) => warn("process", `unhandled rejection: ${String(e)}`));
+
+// Channels with a live trigger (Streamlabs) must reconnect it after a deploy
+// or crash — before, a runtime only came back when a request touched it, so
+// tips sent in the meantime were silently missed.
+restoreTriggeredRuntimes();
+
+// Nightly SQLite snapshot (kept 7 days) — the ledger is the money record.
+setInterval(() => void backupDatabase(), 24 * 3600_000).unref();
 
 server.listen(env.port, () => {
   log("server", `control plane on ${env.publicUrl} (port ${env.port})`);

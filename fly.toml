@@ -1,0 +1,38 @@
+# Fly.io — the hosted control plane. One machine, one region, one volume.
+# Run from the REPO ROOT (the image needs the whole workspace).
+#
+# Secrets (fly secrets set …) — the server refuses to boot without them
+# (RH_ENV=production, see server/src/env.ts):
+#   RH_PUBLIC_URL=https://reality-hijack.fly.dev  RH_JWT_SECRET=<64 hex>
+#   DECART_API_KEY  TWITCH_CLIENT_ID  TWITCH_CLIENT_SECRET
+#   STRIPE_SECRET_KEY  STRIPE_WEBHOOK_SECRET
+# Optional: OPENAI_API_KEY / ANTHROPIC_API_KEY, SIGHTENGINE_API_USER/_SECRET
+#
+# Why one machine: every channel's engine (queue, active job) lives in this
+# process's memory. Two machines would split a channel's router socket from
+# its tips. Region only affects control traffic — video flows directly
+# between the streamer's PC and Decart, so one region serves everyone.
+app = "reality-hijack"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[mounts]]
+  source = "rh_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8790
+  force_https = true
+  # Long-lived WS connections: never auto-stop the machine, keep exactly one.
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+[[http_service.checks]]
+  method = "GET"
+  path = "/healthz"
+  interval = "15s"
+  timeout = "2s"
+  grace_period = "30s"

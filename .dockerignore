@@ -1,0 +1,21 @@
+# Never ship secrets or local state into the image.
+.env
+.env.*
+!.env.example
+**/settings.json
+server/data.sqlite*
+server/uploads
+server/safety
+server/backups
+sidecar/uploads
+sidecar/safety
+
+# Rebuilt inside the image / irrelevant to the server.
+**/node_modules
+web/dist
+app/release
+app/build-resources
+app/dist
+site
+.git
+.claude

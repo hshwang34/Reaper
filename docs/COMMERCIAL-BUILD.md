@@ -58,7 +58,7 @@ For the pure single-machine demo (no control plane), `npm run start` or
 
 ## Deployment shape — one instance, on purpose
 
-`server/fly.toml` pins **exactly one machine** (`min_machines_running = 1`,
+`fly.toml` (repo root) pins **exactly one machine** (`min_machines_running = 1`,
 auto-stop and auto-start off). That is not a cost setting; the control plane
 keeps three things in process memory and none of them survive a second
 instance:
@@ -97,11 +97,14 @@ These need a person with the right logins; none are code:
    DEV AUTH. Redirect URL: `<RH_PUBLIC_URL>/auth/twitch/callback`.
 3. **Streamlabs OAuth app** — replaces the pasted-token connect once approved
    (approval has a lead time; the pasted token works meanwhile).
-4. **Deploy the control plane**: `cd server && fly launch` (uses `fly.toml`),
-   then `fly secrets set DECART_API_KEY=… TWITCH_CLIENT_ID=… … RH_PUBLIC_URL=…`
-   plus the content-safety classifier keys (`OPENAI_API_KEY`,
-   `ANTHROPIC_API_KEY`, `SIGHTENGINE_API_USER`, `SIGHTENGINE_API_SECRET`) and a
-   volume path for `RH_QUARANTINE_DIR`.
+4. **Deploy the control plane** from the **repo root** (the image needs the
+   whole workspace): `fly launch --no-deploy` (adopts `fly.toml`), create the
+   volume (`fly volumes create rh_data --size 3`), `fly secrets set` the list
+   in `fly.toml`'s header, then `fly deploy`. The image runs with
+   `RH_ENV=production`: it **refuses to boot** if any required secret is
+   missing, never enables DEV AUTH, and doesn't mount the unpaid console
+   routes. Data, uploads, the CSAM quarantine and nightly backups all live on
+   the volume (`/data`).
 5. **Human-at-rig**: run `docs/VERIFICATION.md` against the packaged app, and
    the one-time Decart `allowedOrigins` spike (needs a live in-app hijack).
 

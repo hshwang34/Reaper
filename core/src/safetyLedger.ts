@@ -117,6 +117,11 @@ export class RateLimiter {
 
   allow(key: string): boolean {
     const now = Date.now();
+    // On a public host every distinct IP adds a key; drop finished windows
+    // before the map grows without bound.
+    if (this.windows.size > 10_000) {
+      for (const [k, w] of this.windows) if (now - w.start >= this.windowMs) this.windows.delete(k);
+    }
     const w = this.windows.get(key);
     if (!w || now - w.start >= this.windowMs) {
       this.windows.set(key, { start: now, n: 1 });

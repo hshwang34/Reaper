@@ -1,7 +1,7 @@
 // Hosted auth helpers: one-time exchange codes + constant-time compare.
 // Importing auth.ts opens the SQLite database (db.ts has import-time side
-// effects), so the npm script points RH_DATABASE_PATH at a scratch file
-// before importing.
+// effects), so test/env.ts (preloaded by the npm script) points
+// RH_DATABASE_PATH at a scratch file before importing.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
