@@ -310,29 +310,38 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     togglePause,
     status,
     start(port: number) {
-      // Uploads from a previous run lost their registry entries with the
-      // process; anything past the TTL goes now (CONTENT-SAFETY S2 step 9).
-      sweepUploadDir(host.uploadsDir);
-      for (const t of triggers) {
-        t.start((tip) => {
-          const outcome = engine.onTip(tip);
-          log(t.name, `$${tip.amount} from ${tip.username} → ${outcome}`);
-        });
-      }
-      if (!host.streamlabsToken) {
-        warn("server", "no Streamlabs token — only fake-tip trigger active");
-      }
-      // Loopback-only: this server holds panic/OBS/token-mint endpoints and
-      // must never be reachable from the LAN. (Was previously an implicit
-      // all-interfaces bind — flagged by security review.)
-      server.listen(port, "127.0.0.1", () => {
+      // Everything below runs ONCE, on the bind that succeeds. A host may
+      // call start() again on EADDRINUSE (the app's port fallback); doing the
+      // side effects per attempt started every trigger twice (each tip
+      // counted twice) and logged the busy port as if it were ours.
+      const onListening = () => {
+        server.removeListener("error", onError);
+        // Uploads from a previous run lost their registry entries with the
+        // process; anything past the TTL goes now (CONTENT-SAFETY S2 step 9).
+        sweepUploadDir(host.uploadsDir);
+        for (const t of triggers) {
+          t.start((tip) => {
+            const outcome = engine.onTip(tip);
+            log(t.name, `$${tip.amount} from ${tip.username} → ${outcome}`);
+          });
+        }
+        if (!host.streamlabsToken) {
+          warn("server", "no Streamlabs token — only fake-tip trigger active");
+        }
         log("server", `local server on http://localhost:${port}`);
         log("server", `decart: ${decartEnabled ? "LIVE" : "MOCK (no key)"}`);
         // Best-effort OBS connect; fine if OBS isn't running yet.
         obs.ensureConnected().catch(() => {
           warn("server", "OBS not reachable yet — will retry on first toggle");
         });
-      });
+      };
+      const onError = () => server.removeListener("listening", onListening);
+      server.once("listening", onListening);
+      server.once("error", onError);
+      // Loopback-only: this server holds panic/OBS/token-mint endpoints and
+      // must never be reachable from the LAN. (Was previously an implicit
+      // all-interfaces bind — flagged by security review.)
+      server.listen(port, "127.0.0.1");
     },
     async stop() {
       for (const t of triggers) t.stop();

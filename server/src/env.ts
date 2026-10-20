@@ -49,6 +49,10 @@ export function productionProblems(e: NodeJS.ProcessEnv): string[] {
     if (!get(n)) problems.push(`${n} is required`);
   }
   if (get("RH_JWT_SECRET").length < 32) problems.push("RH_JWT_SECRET must be at least 32 characters");
+  // Test seams (scripts/e2e-hosted.mjs) — a fake Stripe and a short offline
+  // grace. Harmless-looking, so refuse them loudly rather than ignore them.
+  if (get("STRIPE_API_BASE")) problems.push("STRIPE_API_BASE is a test seam — never set it in production");
+  if (get("RH_OFFLINE_GRACE_MS")) problems.push("RH_OFFLINE_GRACE_MS is a test seam — never set it in production");
   const url = get("RH_PUBLIC_URL");
   if (url && !url.startsWith("https://")) problems.push("RH_PUBLIC_URL must be https:// in production");
   return problems;
@@ -110,6 +114,12 @@ export const env = {
   /** Smallest payment we accept: Stripe's fixed 30¢ makes tiny charges
    *  mostly fee. A channel's own minTipUSD can raise it, never lower it. */
   minPaymentUsd: Number(process.env.RH_MIN_PAYMENT_USD ?? 3),
+  /** Test seam: point the Stripe SDK at the e2e harness's fake Stripe
+   *  (e.g. http://127.0.0.1:12111). Refused in production. */
+  stripeApiBase: str("STRIPE_API_BASE"),
+  /** How long the streamer's app may be offline before its queued paid
+   *  hijacks are refunded. Overridable only so the e2e needn't wait 2 min. */
+  offlineGraceMs: Number(process.env.RH_OFFLINE_GRACE_MS ?? 2 * 60_000),
 };
 
 /** No Twitch app registered (dev only) → dev auth, loudly. Never in prod:

@@ -1,0 +1,25 @@
+# Production smoke test (scripts/smoke-prod.mjs): read-only, no secrets, no
+# money. Hourly, plus on demand (run it right after `fly deploy`). A scheduled
+# failure emails the repo owner — treat it as an outage or a security
+# regression (dev routes exposed, webhooks unsigned), not as flakiness.
+#
+# The money-path twin, scripts/smoke-live.mjs, is deliberately NOT here: it
+# needs the streamer's app open and spends real Decart seconds.
+name: smoke
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+jobs:
+  prod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No npm ci: the smoke script uses only Node built-ins (fetch).
+      - run: node scripts/smoke-prod.mjs

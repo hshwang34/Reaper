@@ -101,6 +101,12 @@ export class Hub {
         ...(verify ? { verifyClient: (info: { req: IncomingMessage }) => verify(info.req) } : {}),
       });
       this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
+      // ws re-emits the HTTP server's own errors (EADDRINUSE on listen) on
+      // the WebSocketServer. Unhandled, that one becomes an uncaught
+      // exception — a crash dialog — before the host's port-fallback
+      // listener on the http server can try the next port. The server's
+      // owner handles listen errors; here they only need to not throw.
+      this.wss.on("error", () => {});
     }
   }
 

@@ -38,10 +38,17 @@ npm run dev               # demo rig: concurrently sidecar :7712 + web :5173
 npm run typecheck         # tsc --noEmit across all SIX workspaces
 npm test                  # node --test in core, web, server, sidecar, app (see below)
 npm run check             # typecheck + test — the gate to run after edits; CI (check.yml) runs it
-                          #   plus the web build on every PR and push to main
+                          #   plus the web build on every PR and push to main, and its e2e job
+                          #   runs e2e + e2e:hosted (Linux, xvfb)
 npm run e2e               # mock-mode end-to-end: real sidecar + headless Chrome router/viewer +
                           #   a fake OBS; asserts what the audience sees (needs Google Chrome;
                           #   CHROME_PATH overrides the macOS default path)
+npm run e2e:hosted        # the commercial path, zero secrets: real control plane + the real Electron
+                          #   app (CDP-driven) + portal checkout against a fake Stripe (signed
+                          #   webhooks) + fake OBS; asserts pay→play, settle, panic, refunds
+npm run smoke:prod        # read-only checks against the deployed server (hourly in CI: smoke.yml)
+npm run smoke:live        # on demand: a real test-mode Stripe Checkout (4242) on prod → real hijack;
+                          #   needs the streamer app open + armed; ~$0.06 of Decart per run
 npm run build             # builds the web app only
 npm run start             # production demo rig: build, then ONE process on :7712
 
