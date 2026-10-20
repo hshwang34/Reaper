@@ -40,7 +40,8 @@ import {
   type TriggerAdapter,
 } from "@rh/core";
 import { channels, db, hijacks, moderationEvents, tokenMints } from "./db.js";
-import { env } from "./env.js";
+import { env, isProduction } from "./env.js";
+import { settleJob } from "./payments.js";
 
 /** One classifier suite for every channel — it holds OUR vendor keys and is
  *  stateless; per-channel policy is passed on each call. Dev mode only when
@@ -226,6 +227,8 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
           })
           .run();
       },
+      // Money: a viewer-paid job settles exactly once, whatever ended it.
+      onJobEnded: (job, ok, reason) => settleJob(job, ok, reason),
       onJobDone: (jobId, ok, reason) => {
         db.update(hijacks)
           .set({ outcome: ok ? "completed" : "failed", reason: reason ?? null })
@@ -250,7 +253,9 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
     });
     streamlabs = sl;
   };
-  startStreamlabs(row.streamlabsToken ?? "");
+  // Production never listens to Streamlabs (unfunded GPU — see
+  // setStreamlabsToken), even for a token stored before that rule.
+  startStreamlabs(isProduction ? "" : (row.streamlabsToken ?? ""));
 
   let lastTestAt = 0;
 
@@ -274,6 +279,10 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
         ledger,
       ),
     setStreamlabsToken(token: string) {
+      // Hosted: a Streamlabs tip goes straight to the streamer, so nothing
+      // pays for the GPU it would trigger — it would run on our key, free.
+      // Viewers pay through the portal (Stripe) instead.
+      if (isProduction && token) throw new Error("Streamlabs tips can't fund hijacks on the hosted service — viewers pay through your page");
       db.update(channels)
         .set({ streamlabsToken: token })
         .where(eq(channels.id, channelId))

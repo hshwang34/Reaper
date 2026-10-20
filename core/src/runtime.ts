@@ -22,6 +22,11 @@ export interface RuntimeHooks {
   onDispatch?(job: HijackJob): void;
   /** The router reported a job finished (ledger outcome). */
   onJobDone?(jobId: string, ok: boolean, reason?: string): void;
+  /** Every terminal outcome of a job the engine accepted — finished, failed,
+   *  dropped (queue/backlog full), rejected in review, or cancelled by
+   *  dispose — exactly once. Hosts settle money here (a payment is refunded
+   *  unless `ok`). */
+  onJobEnded?(job: HijackJob, ok: boolean, reason: string): void;
   /** Mirror of every router lifecycle report, including the synthetic
    *  OFFLINE the hub raises when the last router socket drops. The Electron
    *  bridge forwards these to the cloud engine in cloud mode. */
@@ -93,7 +98,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     status: (snap) => hub.broadcastStatus(snap),
     submissionUpdate: (code, status) => hub.sendSubmissionUpdate(code, status),
-    jobEnded: (job, _ok, reason) => {
+    jobEnded: (job, ok, reason) => {
+      hooks.onJobEnded?.(job, ok, reason);
       // The reference image's only purpose was this job.
       uploads.release(job.imageUrl, `job ${reason}`);
       if (reason.startsWith(SAFETY_REASON_PREFIX)) {

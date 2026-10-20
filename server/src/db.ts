@@ -33,6 +33,11 @@ export const channels = sqliteTable("channels", {
     .default(env.monthlyGpuSecondsCap),
   suspended: integer("suspended").notNull().default(0),
   createdAt: integer("created_at").notNull(),
+  /** Stripe Connect (Express) account that receives the streamer's share. */
+  stripeAccountId: text("stripe_account_id"),
+  /** Mirrors the account's `transfers` capability: until Stripe has verified
+   *  the streamer, the portal can't take payments for this channel. */
+  payoutsEnabled: integer("payouts_enabled").notNull().default(0),
 });
 
 /** Rotating refresh tokens (hashed — a DB leak must not mint sessions). */
@@ -97,6 +102,36 @@ export const moderationEvents = sqliteTable("moderation_events", {
   inputHash: text("input_hash"),
   ipHash: text("ip_hash"),
   tipper: text("tipper"),
+});
+
+/** One row per viewer payment (Stripe Checkout). The money record: what was
+ *  paid, what we kept (application fee = Stripe fee + GPU + margin), and how
+ *  it settled. Status: pending → paid → delivered | refunded | refund_failed
+ *  (pending rows that never complete are abandoned checkouts). */
+export const payments = sqliteTable("payments", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull(),
+  checkoutSessionId: text("checkout_session_id").notNull().unique(),
+  paymentIntentId: text("payment_intent_id"),
+  code: text("code").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  applicationFeeCents: integer("application_fee_cents").notNull(),
+  gpuCents: integer("gpu_cents").notNull(),
+  durationSec: integer("duration_sec").notNull(),
+  viewerName: text("viewer_name").notNull(),
+  jobId: text("job_id"),
+  status: text("status").notNull(),
+  reason: text("reason"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+/** Stripe event ids already handled — webhooks are at-least-once, and a
+ *  replayed checkout.session.completed must never run a second hijack. */
+export const stripeEvents = sqliteTable("stripe_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  receivedAt: integer("received_at").notNull(),
 });
 
 // ── Bootstrap + migrations ────────────────────────────────────────────────
@@ -172,6 +207,34 @@ CREATE INDEX IF NOT EXISTS idx_moderation_channel ON moderation_events(channel_i
 CREATE INDEX IF NOT EXISTS idx_hijacks_channel ON hijacks(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_mints_channel ON token_mints(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_refresh_channel ON refresh_tokens(channel_id);
+`,
+  /* 2 — viewer payments (Stripe Connect) */ `
+ALTER TABLE channels ADD COLUMN stripe_account_id TEXT;
+ALTER TABLE channels ADD COLUMN payouts_enabled INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE payments (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  checkout_session_id TEXT NOT NULL UNIQUE,
+  payment_intent_id TEXT,
+  code TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  application_fee_cents INTEGER NOT NULL,
+  gpu_cents INTEGER NOT NULL,
+  duration_sec INTEGER NOT NULL,
+  viewer_name TEXT NOT NULL,
+  job_id TEXT,
+  status TEXT NOT NULL,
+  reason TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX idx_payments_channel ON payments(channel_id, created_at);
+CREATE INDEX idx_payments_status ON payments(status);
+CREATE TABLE stripe_events (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  received_at INTEGER NOT NULL
+);
 `,
 ];
 

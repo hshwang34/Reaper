@@ -118,6 +118,16 @@ export class CorrelationStore {
     return { submission: null, matchedBy: "default-preset" };
   }
 
+  /** Keep a pending submission alive until at least `untilMs` — the viewer
+   *  is on a payment page, and the code must still be claimable when the
+   *  payment confirmation arrives. Returns false if the code is gone. */
+  hold(code: string, untilMs: number): boolean {
+    const sub = this.pending.get(code);
+    if (!sub) return false;
+    sub.expiresAt = Math.max(sub.expiresAt, untilMs);
+    return true;
+  }
+
   get(code: string): Submission | undefined {
     return this.pending.get(code);
   }

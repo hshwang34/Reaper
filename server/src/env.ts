@@ -84,6 +84,17 @@ export const env = {
    *  hijacks this is no longer a budget we eat — it's a fraud/runaway
    *  backstop (a stolen card farm can't run one channel unbounded). */
   monthlyGpuSecondsCap: Number(process.env.RH_MONTHLY_GPU_SECONDS_CAP ?? 3600),
+  /** Stripe (Connect platform account). Empty in dev → payments disabled and
+   *  the portal falls back to claim codes. Required in production. */
+  stripeSecretKey: str("STRIPE_SECRET_KEY"),
+  stripeWebhookSecret: str("STRIPE_WEBHOOK_SECRET"),
+  /** Our cut and our cost basis (server/src/fees.ts). Server config, not
+   *  streamer Settings: a streamer can't change what we take. */
+  platformFeePct: Number(process.env.RH_PLATFORM_FEE_PCT ?? 5),
+  gpuCostPerSec: Number(process.env.RH_GPU_COST_PER_SEC ?? 0.02),
+  /** Smallest payment we accept: Stripe's fixed 30¢ makes tiny charges
+   *  mostly fee. A channel's own minTipUSD can raise it, never lower it. */
+  minPaymentUsd: Number(process.env.RH_MIN_PAYMENT_USD ?? 3),
 };
 
 /** No Twitch app registered (dev only) → dev auth, loudly. Never in prod:

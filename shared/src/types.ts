@@ -6,7 +6,7 @@ export type Role = "portal" | "router" | "viewer";
 /** Normalized trigger event — every trigger adapter emits this shape.
  *  "manual" = fired by the streamer from the router console (no payment). */
 export interface TipEvent {
-  source: "streamlabs" | "twitch-eventsub" | "fake" | "manual";
+  source: "streamlabs" | "twitch-eventsub" | "stripe" | "fake" | "manual";
   /** Amount in USD. */
   amount: number;
   /** Free-text message the tipper attached (may contain the claim code). */
@@ -15,6 +15,10 @@ export interface TipEvent {
   username: string;
   /** True for Streamlabs test donations / the fake dev trigger. */
   isTest?: boolean;
+  /** The host's record of the money behind this tip (hosted: a payments row
+   *  id). Rides on the job so its outcome can settle the payment —
+   *  delivered, or refunded if the hijack never happened. */
+  ref?: string;
 }
 
 /** A pending viewer submission awaiting a matching tip. */

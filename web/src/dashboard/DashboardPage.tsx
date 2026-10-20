@@ -21,6 +21,7 @@ import {
 } from "../lib/apiClient.js";
 import { GuardrailsEditor } from "../features/GuardrailsEditor.js";
 import { ModerationPanel, ReviewPanel } from "../features/SafetyPanels.js";
+import { PayoutsPanel } from "./PayoutsPanel.js";
 
 const REFRESH_KEY = "rhDashRefresh";
 
@@ -118,7 +119,6 @@ function Dashboard({
 
   const [settings, setSettings] = useState<Settings | null>(null);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
-  const [slToken, setSlToken] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -154,14 +154,6 @@ function Dashboard({
     if (next) {
       setSettings(next);
       flash("Saved.");
-    }
-  }
-
-  async function connectStreamlabs() {
-    const ok = await guarded(() => client.connectStreamlabs(slToken));
-    if (ok) {
-      setSlToken("");
-      flash("Streamlabs connected.");
     }
   }
 
@@ -212,28 +204,9 @@ function Dashboard({
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
-          Connect tips (Streamlabs)
+          Get paid
         </h2>
-        <p className="mb-2 text-sm text-zinc-400">
-          Paste your Streamlabs <b>Socket API token</b> (Dashboard → Account
-          Settings → API Settings). One-click OAuth replaces this soon.
-        </p>
-        <div className="flex gap-2">
-          <input
-            type="password"
-            value={slToken}
-            onChange={(e) => setSlToken(e.target.value)}
-            placeholder="eyJ…"
-            className="flex-1 rounded bg-zinc-900 px-3 py-2 text-sm"
-          />
-          <button
-            onClick={() => void connectStreamlabs()}
-            disabled={!slToken.trim()}
-            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500 disabled:opacity-40"
-          >
-            Connect
-          </button>
-        </div>
+        <PayoutsPanel client={client} from="dashboard" />
       </section>
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">

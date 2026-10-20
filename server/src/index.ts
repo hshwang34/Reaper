@@ -38,6 +38,18 @@ import {
   verifyAccess,
 } from "./auth.js";
 import { getRuntime, restoreTriggeredRuntimes } from "./channels.js";
+import {
+  createCheckout,
+  earnings,
+  handleWebhook,
+  minPaymentUsd,
+  onboardingLink,
+  PaymentError,
+  paymentsEnabled,
+  payoutStatus,
+  reconcileOnBoot,
+  refreshPayouts,
+} from "./payments.js";
 
 const app = express();
 // Fly (and any real host) terminates TLS at a proxy: without this, req.ip is
@@ -45,6 +57,18 @@ const app = express();
 // into one bucket — one abuser would lock out everyone.
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
+
+// Stripe webhook: signature verification needs the RAW body, so this route
+// is registered before express.json() can consume it.
+app.post("/stripe/webhook", express.raw({ type: "application/json", limit: "1mb" }), (req, res) => {
+  void handleWebhook(req.body as Buffer, String(req.headers["stripe-signature"] ?? ""))
+    .then((status) => res.status(status).end())
+    .catch((e) => {
+      warn("payments", `webhook error: ${(e as Error).message}`);
+      res.status(500).end(); // Stripe retries
+    });
+});
+
 app.use(express.json({ limit: "64kb" }));
 
 const httpsOrigin = env.publicUrl.startsWith("https://");
@@ -69,6 +93,7 @@ function perIp(max: number, windowMs: number): express.RequestHandler {
   };
 }
 app.use("/auth", perIp(30, 60_000));
+app.post("/api/c/:channel/checkout", perIp(10, 60_000));
 // Registered before the channel API mount, so it runs first for this path.
 app.post("/api/c/:channel/submissions", perIp(20, 60_000));
 
@@ -268,9 +293,83 @@ app.post("/api/c/:channel/trigger/streamlabs", requireChannel, (req, res) => {
   const rt = getRuntime(String(res.locals.channelId));
   if (!rt) return res.status(404).json({ error: "unknown channel" });
   const token = String(req.body?.token ?? "").trim();
-  rt.setStreamlabsToken(token);
+  try {
+    rt.setStreamlabsToken(token);
+  } catch (e) {
+    return res.status(403).json({ error: (e as Error).message });
+  }
   res.json({ ok: true, connected: Boolean(token) });
 });
+
+// ── Payments (Stripe Connect — server/src/payments.ts) ───────────────────
+
+const paymentRoute =
+  (h: (req: express.Request, res: express.Response) => Promise<void>): express.RequestHandler =>
+  (req, res) => {
+    h(req, res).catch((e) => {
+      if (e instanceof PaymentError) res.status(e.status).json({ error: e.message });
+      else {
+        warn("payments", `${req.path}: ${(e as Error).message}`);
+        res.status(502).json({ error: "payment provider error — try again" });
+      }
+    });
+  };
+
+/** Public: can this channel take payments, and from what amount? */
+app.get("/api/c/:channel/payments", (req, res) => {
+  const id = resolveChannelId(String(req.params.channel));
+  if (!id || !getRuntime(id)) return res.status(404).json({ error: "unknown channel" });
+  res.json({ enabled: paymentsEnabled() && payoutStatus(id).enabled, minUsd: minPaymentUsd(id) });
+});
+
+/** Viewer: pay for a submitted (already moderated) effect. */
+app.post(
+  "/api/c/:channel/checkout",
+  paymentRoute(async (req, res) => {
+    const id = resolveChannelId(String(req.params.channel));
+    if (!id) throw new PaymentError(404, "unknown channel");
+    const login = String(req.params.channel);
+    const url = await createCheckout(id, {
+      code: String(req.body?.code ?? ""),
+      amountUsd: Number(req.body?.amountUsd),
+      viewerName: String(req.body?.viewerName ?? ""),
+      // Always our own portal — never a client-supplied URL (open redirect).
+      returnUrl: `${env.publicUrl}/c/${encodeURIComponent(login)}`,
+    });
+    res.json({ url });
+  }),
+);
+
+/** Streamer: payout status + earnings summary. */
+app.get("/api/c/:channel/payouts", requireChannel, (_req, res) => {
+  const id = String(res.locals.channelId);
+  res.json({ ...payoutStatus(id), earnings: earnings(id) });
+});
+
+/** Streamer: start/resume Stripe onboarding → Stripe-hosted URL. */
+app.post(
+  "/api/c/:channel/payouts/onboard",
+  requireChannel,
+  paymentRoute(async (req, res) => {
+    const id = String(res.locals.channelId);
+    const country = String(req.body?.country ?? "US").toUpperCase();
+    const returnTo = req.body?.from === "app" ? "/payouts-done" : "/dashboard";
+    res.json({ url: await onboardingLink(id, country, returnTo) });
+  }),
+);
+
+/** Stripe sends the streamer's browser back here after onboarding. Public
+ *  (it's a browser redirect, no bearer token), and harmless: it only
+ *  re-reads the account's status from Stripe. */
+app.get(
+  "/api/c/:channel/payouts/return",
+  paymentRoute(async (req, res) => {
+    const id = resolveChannelId(String(req.params.channel));
+    if (id) await refreshPayouts(id).catch(() => false);
+    // Only our own two landing paths — never an arbitrary redirect target.
+    res.redirect(req.query.to === "/payouts-done" ? "/payouts-done" : "/dashboard");
+  }),
+);
 
 /** The free daily test hijack (setup wizard, "does it still work?"). Exists
  *  in production — unlike /dev/hijack — because it is allowance-capped and
@@ -321,7 +420,8 @@ if (existsSync(webDist)) {
     if (
       req.path.startsWith("/api") ||
       req.path.startsWith("/auth") ||
-      req.path.startsWith("/uploads")
+      req.path.startsWith("/uploads") ||
+      req.path.startsWith("/stripe")
     ) {
       return next();
     }
@@ -410,6 +510,8 @@ process.on("unhandledRejection", (e) => warn("process", `unhandled rejection: ${
 // or crash — before, a runtime only came back when a request touched it, so
 // tips sent in the meantime were silently missed.
 restoreTriggeredRuntimes();
+// Payments accepted by an engine this restart destroyed will never run.
+void reconcileOnBoot();
 
 // Nightly SQLite snapshot (kept 7 days) — the ledger is the money record.
 setInterval(() => void backupDatabase(), 24 * 3600_000).unref();

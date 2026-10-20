@@ -12,6 +12,7 @@ import ViewerPage from "./viewer/ViewerPage.js";
 import DecartTestPage from "./decarttest/DecartTestPage.js";
 import SetupPage from "./setup/SetupPage.js";
 import DashboardPage from "./dashboard/DashboardPage.js";
+import PayoutsDonePage from "./dashboard/PayoutsDonePage.js";
 
 const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/portal" replace /> },
@@ -21,8 +22,10 @@ const router = createBrowserRouter([
   { path: "/c/:channel", element: <PortalPage /> },
   // Desktop-only onboarding wizard (needs window.rhDesktop).
   { path: "/setup", element: <SetupPage /> },
-  // Hosted streamer dashboard (settings + tips connect + ledger).
+  // Hosted streamer dashboard (settings + payouts + ledger).
   { path: "/dashboard", element: <DashboardPage /> },
+  // Stripe's return page for payout setup started from the desktop app.
+  { path: "/payouts-done", element: <PayoutsDonePage /> },
   { path: "/router", element: <RouterPage /> },
   { path: "/viewer", element: <ViewerPage /> },
   { path: "/decart-test", element: <DecartTestPage /> },

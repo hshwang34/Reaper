@@ -21,3 +21,4 @@ process.on("exit", () => {
   }
 });
 process.env.RH_JWT_SECRET = "test-secret";
+process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
