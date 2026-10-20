@@ -13,9 +13,14 @@ Whether a claim-code portal counts as a "covered platform" is unsettled
 ## What the code does on receipt
 
 - **When the request names an image URL** (the upload's random filename): the
-  upload, every stored copy with the same sha256, and every near-duplicate (dHash
-  Hamming distance ≤ 6) are deleted at once, and the picture is blocked from being
-  uploaded again (`core/src/uploadRegistry.ts`).
+  upload and every stored **exact** copy (same sha256) are deleted at once, and
+  that exact picture is blocked from being uploaded again
+  (`core/src/uploadRegistry.ts`). Near-duplicates are **not** touched
+  automatically, because an anonymous request proves nothing about other people's
+  look-alike photos. Re-compressed or resized copies are the streamer's call (step 3).
+- **The requester's contact** goes to an operator-only store (`takedown_contacts`
+  hosted, `moderation.contacts.jsonl` locally). It is never written to the ledger
+  the streamer reads.
 - **When the request names only a claim code or description:** the request is
   recorded and nothing is deleted. A 4-character code can be guessed, so acting on
   it anonymously would let anyone delete strangers' uploads. A person follows up
@@ -32,13 +37,14 @@ most. Most requests will find the image already gone. Answer them anyway.
 
 1. Read the request in the moderation log (router page → Safety, or the hosted
    dashboard).
-2. If files were removed automatically, confirm to the requester at their contact
-   address.
-3. If not (code or description only), find the upload in the ledger: match the
-   claim code or time to an `image` row's `inputHash`. Then act on it:
-   - if it still exists, call `uploads.takedown({ sha256 })` on that channel's
-     runtime (the operator console is an open item), or delete the file by hash
-     and restart to apply the block;
+2. If files were removed automatically, confirm to the requester. Their contact is
+   in the operator-only store, keyed by the ticket id.
+3. If not (code or description only), or if the request is credible and
+   re-compressed copies may exist, find the upload in the ledger: match the claim
+   code or time to an `image` row's `inputHash`. Then act on it:
+   - call the streamer-authenticated `POST /moderation/takedown` with
+     `{ sha256 }` (or `{ imageUrl }`). This removes and blocks exact **and**
+     near-duplicate copies;
    - **ban the submitter** in the channel's settings (`bannedViewers`; the ledger's
      ban button does this) if the request is credible.
 4. If a stream VOD or clip shows the image, the copy is on the streaming platform,

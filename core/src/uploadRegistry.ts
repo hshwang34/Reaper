@@ -3,10 +3,21 @@
 // Uploads used to live forever — deleted only when their own submission was
 // rejected. Now every stored image is registered here and deleted on the
 // first of: its submission expires untipped, its job finishes (ok or not), a
-// takedown names it, or the hard TTL passes. The hashes outlive the bytes so
+// takedown names it, or the hard TTL passes. The hashes outlive the bytes, so
 // a takedown also removes — and blocks re-upload of — identical copies
-// (sha256) and near-duplicates (dHash), which is what the TAKE IT DOWN Act's
-// "known identical copies" duty asks for.
+// (sha256), which is what the TAKE IT DOWN Act's "known identical copies"
+// duty asks for.
+//
+// Two strengths of takedown, because the public endpoint is anonymous:
+//   · exact (anonymous requests): sha256 matches only. Possessing the image
+//     URL proves you saw that upload; it proves nothing about other uploads
+//     that merely LOOK alike, so a stranger can't use one request to wipe —
+//     and permanently block — everyone's similar photos.
+//   · near-duplicate (streamer/operator, or our own CSAM block): also dHash
+//     neighbours (re-compressed / resized copies).
+// Anonymous blocks are budgeted (per requester and in total) so an attacker
+// can't grow the list without bound; nothing is ever evicted, and a refused
+// block is reported back so the route can escalate it to the streamer.
 //
 // In-memory per runtime by design (same as the correlation store): a restart
 // loses the index, so hosts also run `sweepUploadDir` on boot to delete any
@@ -15,7 +26,7 @@
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { hamming } from "./images.js";
-import { log } from "./log.js";
+import { log, warn } from "./log.js";
 
 export interface UploadEntry {
   url: string;
@@ -32,9 +43,51 @@ const NEAR_DUPLICATE = 6;
 /** Hard cap on how long any upload may exist (the job itself needs minutes). */
 export const UPLOAD_TTL_MS = 60 * 60 * 1000;
 
+/** Budget for blocks created by ANONYMOUS takedown requests. When it's full,
+ *  new anonymous blocks are refused (the files are still deleted) — never
+ *  made room for by evicting older blocks, which would let anyone flood the
+ *  list to un-block a picture someone else had taken down. */
+export const MAX_ANONYMOUS_BLOCKS = 2000;
+
+/** Per-requester share of that budget. A real victim files a handful of
+ *  takedowns; one client filling the whole budget would otherwise lock every
+ *  later requester out of the re-upload block. */
+export const MAX_BLOCKS_PER_REQUESTER = 20;
+
+/** Who created a block. Only "anonymous" is budgeted; "streamer" blocks need
+ *  the channel's credential and "csam" blocks come from our own classifier
+ *  (rate-limited by strikes), so both are kept for the runtime's life. */
+export type BlockSource = "anonymous" | "streamer" | "csam";
+
+interface BlockEntry {
+  sha256: string;
+  /** Present only for near-duplicate blocks. */
+  dhash: string | null;
+  source: BlockSource;
+  /** Anonymous blocks only: the requester's clientKey, for the per-requester budget. */
+  requester: string | null;
+}
+
+export interface TakedownOptions {
+  /** Also remove/block dHash near-duplicates. Authenticated callers only. */
+  nearDuplicates?: boolean;
+  /** Default "anonymous" — the public endpoint's trust level. */
+  source?: BlockSource;
+  /** Anonymous requests: the requester's clientKey (per-requester budget). */
+  requester?: string;
+}
+
+export interface TakedownResult {
+  /** Files deleted. Deletion is never budgeted. */
+  removed: number;
+  /** False when the re-upload block was refused (anonymous budget full) —
+   *  the caller must escalate, not report the picture as blocked. */
+  blocked: boolean;
+}
+
 export class UploadRegistry {
   private byUrl = new Map<string, UploadEntry>();
-  private blocked: Array<{ sha256: string; dhash: string }> = [];
+  private blocked: BlockEntry[] = [];
   private sweepTimer: ReturnType<typeof setInterval> | null;
 
   constructor(
@@ -57,12 +110,39 @@ export class UploadRegistry {
   /** True when a takedown (or a CSAM hit) blocked this picture. */
   isBlocked(sha256: string, dhash: string): boolean {
     return this.blocked.some(
-      (b) => b.sha256 === sha256 || hamming(b.dhash, dhash) <= NEAR_DUPLICATE,
+      (b) => b.sha256 === sha256 || (b.dhash !== null && hamming(b.dhash, dhash) <= NEAR_DUPLICATE),
     );
   }
 
-  block(sha256: string, dhash: string): void {
-    this.blocked.push({ sha256, dhash });
+  /**
+   * Block a picture from being uploaded again. `dhash` widens the block to
+   * near-duplicates; pass null for an exact-only block. Nothing is ever
+   * evicted: an anonymous block past its budget (per requester, or in total)
+   * is refused instead (returns false), so flooding the list can't undo an
+   * existing takedown.
+   */
+  block(sha256: string, dhash: string | null, source: BlockSource, requester: string | null = null): boolean {
+    if (this.blocked.some((b) => b.sha256 === sha256 && (b.dhash === dhash || b.dhash !== null))) return true;
+    if (source === "anonymous") {
+      const mine = requester ? this.anonymousBlocks(requester) : 0;
+      if (this.anonymousBlocks() >= MAX_ANONYMOUS_BLOCKS || mine >= MAX_BLOCKS_PER_REQUESTER) {
+        warn("uploads", "anonymous block budget full — new block refused (files still removed)");
+        return false;
+      }
+    }
+    this.blocked.push({ sha256, dhash, source, requester: source === "anonymous" ? requester : null });
+    return true;
+  }
+
+  private anonymousBlocks(requester?: string): number {
+    return this.blocked.reduce(
+      (n, b) => n + (b.source === "anonymous" && (requester === undefined || b.requester === requester) ? 1 : 0),
+      0,
+    );
+  }
+
+  get blockedCount(): number {
+    return this.blocked.length;
   }
 
   release(url: string | null | undefined, why: string): void {
@@ -80,27 +160,44 @@ export class UploadRegistry {
   }
 
   /**
-   * Takedown: delete the named upload(s) plus every identical / near-identical
-   * copy we still hold, and block the picture from being uploaded again.
-   * Returns how many files were removed.
+   * Takedown: delete the named upload(s) plus every copy we still hold —
+   * exact (sha256) copies by default, and dHash near-duplicates too when
+   * `nearDuplicates` is set (authenticated callers only) — and block the
+   * picture from being uploaded again. Reports how many files were removed
+   * and whether every re-upload block landed.
    */
-  takedown(target: { url?: string; code?: string; sha256?: string }): number {
+  takedown(
+    target: { url?: string; code?: string; sha256?: string },
+    opts: TakedownOptions = {},
+  ): TakedownResult {
+    const near = opts.nearDuplicates === true;
+    const source = opts.source ?? "anonymous";
     const seeds = [...this.byUrl.values()].filter(
       (e) =>
         (target.url && e.url === target.url) ||
         (target.code && e.code === target.code) ||
         (target.sha256 && e.sha256 === target.sha256),
     );
-    for (const s of seeds) this.block(s.sha256, s.dhash);
-    if (target.sha256 && !seeds.length) this.blocked.push({ sha256: target.sha256, dhash: "0".repeat(16) });
+    const shas = new Set(seeds.map((s) => s.sha256));
+    if (target.sha256) shas.add(target.sha256);
+    const dhashes = near ? seeds.map((s) => s.dhash) : [];
+    const requester = opts.requester ?? null;
+    let blocked = true;
+    for (const s of seeds) blocked = this.block(s.sha256, near ? s.dhash : null, source, requester) && blocked;
+    // A hash-only request (nothing stored right now) still blocks re-upload —
+    // exactly, never by a placeholder dHash that would match flat images.
+    if (target.sha256 && !seeds.length) blocked = this.block(target.sha256, null, source, requester) && blocked;
+
     let n = 0;
     for (const e of [...this.byUrl.values()]) {
-      if (this.isBlocked(e.sha256, e.dhash)) {
+      const hit =
+        shas.has(e.sha256) || dhashes.some((d) => hamming(d, e.dhash) <= NEAR_DUPLICATE);
+      if (hit) {
         this.release(e.url, "takedown");
         n++;
       }
     }
-    return n;
+    return { removed: n, blocked };
   }
 
   get size(): number {

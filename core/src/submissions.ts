@@ -11,17 +11,26 @@
 //   · a reference image is sniffed, re-encoded, hashed, checked against
 //     blocked pictures, classified (minors-covering classifier first), and
 //     — when it shows a face — accepted only with a consent attestation
-//   · checks run cheap → expensive, so a rejected request never pays for (or
-//     sends bytes to) a vendor it didn't need
+//   · cheap gates (strikes, bans, tiers, consent) run before any vendor; past
+//     them, every safety check runs and EVERY failure point comes back as a
+//     finding — the portal lists them all, live, as each check resolves
+//   · the image minors gate still stops the chain: bytes that may show a
+//     child go to no further vendor
 // Hosts own the transport (multer, response codes, file disposal, ledger
 // storage); the decision and its audit records come from here.
 
 import {
+  categoryLabel,
   CONSENT_STATEMENT,
   getPreset,
   presetAllowed,
+  type CheckResult,
+  type CheckState,
   type ConsentRecord,
+  type SafetyCheck,
+  type SafetyFinding,
   type Settings,
+  type SubmitProgress,
 } from "@rh/shared";
 import type { CorrelationStore } from "./correlation.js";
 import { ImageRejected, prepareUpload, sha256Hex, type PreparedImage } from "./images.js";
@@ -30,8 +39,14 @@ import {
   moderateImage,
   moderateText,
   ModerationUnavailable,
+  PHOTO_FILE_CHECK,
+  photoChecks,
+  summarize,
+  textChecks,
   textReady,
   type ChainStep,
+  type ChainVerdict,
+  type CheckReporter,
   type ModerationSuite,
 } from "./moderation.js";
 import type { SafetyLedger, StrikeTracker } from "./safetyLedger.js";
@@ -76,12 +91,19 @@ export type SubmissionOutcome =
       expiresAt: number;
       presetId: string | null;
       needsReview: boolean;
+      /** Every check that ran, with its final state. */
+      checks: CheckResult[];
     }
   | {
       ok: false;
       /** HTTP status the host should answer with. */
       status: 400 | 403 | 422 | 429 | 503;
+      /** One-line summary of the failure. */
       error: string;
+      /** Every failure point, in check order. Absent when the request failed
+       *  a cheap gate before any safety check ran. */
+      findings?: SafetyFinding[];
+      checks?: CheckResult[];
       /** Keep the stored image for the CSAM runbook instead of deleting it. */
       quarantine?: boolean;
     };
@@ -126,24 +148,38 @@ export function isBanned(s: Pick<Settings, "bannedViewers">, name: string | null
  *  is legal only in dev mode (no classifiers behind a MOCK model). */
 function decidingStep(steps: ChainStep[]): ChainStep {
   return (
+    steps.find((st) => st.verdict === "reject") ??
     steps.find((st) => st.verdict !== "allow") ??
     steps[steps.length - 1] ?? { source: "dev-mode", verdict: "allow", categories: [], reason: "no classifiers (MOCK model)" }
   );
 }
 
+/**
+ * `progress` receives the check plan and every check state change as they
+ * happen — the host streams them to the portal's live checklist.
+ */
 export async function createSubmission(
   deps: IntakeDeps,
   input: SubmissionInput,
+  progress?: (ev: SubmitProgress) => void,
 ): Promise<SubmissionOutcome> {
-  const { store, settings: s, moderation, ledger, strikes } = deps;
+  const { store, settings: s, moderation, strikes } = deps;
   const presetId = str(input.presetId, 64) || null;
   const customPrompt = str(input.prompt, MAX_PROMPT_CHARS);
   const tipperName = str(input.tipperName, MAX_NAME_CHARS) || null;
   const ipHash = input.ipHash;
 
   // ── Cheap gates first ──────────────────────────────────────────────────
-  if (strikes.blocked(ipHash)) {
-    return { ok: false, status: 429, error: "too many rejected requests — try again later" };
+  // Strikes pause only the UNTRUSTED tiers for this submitter. A preset with
+  // no photo carries no viewer bytes, so it stays open — which also bounds
+  // the damage if many viewers ever share one key (e.g. a misconfigured
+  // proxy): the worst case is "presets only", never "nobody can hijack".
+  if (strikes.blocked(ipHash) && (!presetId || input.image)) {
+    return {
+      ok: false,
+      status: 429,
+      error: "too many rejected requests — custom prompts and photos are paused for you; presets still work",
+    };
   }
   if (isBanned(s, tipperName)) {
     return { ok: false, status: 403, error: "you can't submit effects on this stream" };
@@ -156,6 +192,10 @@ export async function createSubmission(
   let finalPresetId: string | null;
   let needsReview = false;
   let reviewWhy = "";
+  // Approval is opt-in (CONTENT-SAFETY §5). With no approval tier on, nobody
+  // is watching the queue, so a borderline classifier result is rejected
+  // up front — never parked, where a paid tip would wait on no one.
+  const approvalOn = approvalEnabled(s);
   const preset = presetId ? getPreset(presetId) : undefined;
 
   if (presetId) {
@@ -199,101 +239,91 @@ export async function createSubmission(
     }
   }
 
-  // ── Text chain (custom prompts only) ───────────────────────────────────
-  if (!finalPresetId) {
-    const inputHash = sha256Hex(prompt);
-    try {
-      const r = await moderateText(prompt, s, s.blocklistExtra, moderation);
-      const step = decidingStep(r.steps);
-      ledger.record({
-        stage: "text",
-        verdict: r.verdict,
-        source: step.source,
-        reason: r.reason,
-        categories: step.categories,
-        inputHash,
-        ipHash,
-        tipper: tipperName,
-      });
-      if (r.verdict === "reject") {
-        strikes.strike(ipHash);
-        return { ok: false, status: 422, error: r.reason };
+  // ── The safety checks ──────────────────────────────────────────────────
+  // Announce exactly the checks this host will run, then run the prompt and
+  // photo chains concurrently, streaming each check's state as it resolves.
+  // Every failure point is collected — the viewer sees all of them at once.
+  const plan: SafetyCheck[] = [
+    ...(finalPresetId ? [] : textChecks(moderation)),
+    ...(input.image ? photoChecks(moderation) : []),
+  ];
+  const states = new Map<string, CheckState>(plan.map((c) => [c.id, "pending"]));
+  const report: CheckReporter = (id, state) => {
+    if (!states.has(id)) return;
+    states.set(id, state);
+    progress?.({ t: "check", id, state });
+  };
+  const checks = (): CheckResult[] => plan.map((c) => ({ ...c, state: states.get(c.id)! }));
+  if (plan.length) progress?.({ t: "plan", checks: plan });
+
+  const [text, photo] = await Promise.all([
+    finalPresetId ? null : runTextChecks(deps, prompt, ipHash, tipperName, report),
+    input.image ? runPhotoChecks(deps, input.image.path, ipHash, tipperName, report) : null,
+  ]);
+
+  const findings = [...(text?.findings ?? []), ...(photo?.findings ?? [])];
+  if (findings.length) {
+    const quarantine = photo?.csamSuspected === true;
+    // One strike per rejected submission (CSAM: three). A file that simply
+    // isn't an image is a mistake, not abuse — no strike.
+    const strikesDue = quarantine ? 3 : findings.some((f) => f.category !== "structure") ? 1 : 0;
+    for (let i = 0; i < strikesDue; i++) strikes.strike(ipHash);
+    return {
+      ok: false,
+      status: findings.every((f) => f.category === "structure") ? 400 : 422,
+      error: summarize(findings),
+      findings,
+      checks: checks(),
+      ...(quarantine ? { quarantine } : {}),
+    };
+  }
+  if (text?.verdict === "unavailable" || photo?.verdict === "unavailable") {
+    return {
+      ok: false,
+      status: 503,
+      error:
+        text?.verdict === "unavailable"
+          ? "custom prompts are unavailable right now — pick a preset"
+          : "photo uploads are unavailable right now",
+      findings: [],
+      checks: checks(),
+    };
+  }
+  for (const r of [text, photo]) {
+    if (r?.verdict === "review") {
+      // Approval is opt-in (CONTENT-SAFETY §5). With no approval tier on,
+      // nobody is watching the queue, so a borderline result is refused up
+      // front — never parked where a paid tip would wait on no one. It's
+      // borderline, not abusive: no strike.
+      if (!approvalOn) {
+        return { ok: false, status: 422, error: r.reason, findings: [], checks: checks() };
       }
-      if (r.verdict === "review") {
-        needsReview = true;
-        reviewWhy = `classifier: ${r.reason}`;
-      }
-    } catch (e) {
-      return unavailable(ledger, "text", e, inputHash, ipHash, "custom prompts are unavailable right now — pick a preset");
+      needsReview = true;
+      // The classifier's reason is more useful to the reviewer than the
+      // generic "approval tier" set earlier, so it wins.
+      reviewWhy = `classifier: ${r.reason}`;
     }
   }
 
-  // ── Image pipeline ─────────────────────────────────────────────────────
+  // ── Likeness: a face swap needs a face and a consent attestation ───────
   let consent: ConsentRecord | undefined;
-  let prepared: PreparedImage | null = null;
-  if (input.image) {
-    try {
-      prepared = await prepareUpload(input.image.path);
-    } catch (e) {
-      const msg = e instanceof ImageRejected ? e.message : "image could not be processed";
-      ledger.record({ stage: "image", verdict: "reject", source: "structure", reason: msg, categories: ["structure"], ipHash, tipper: tipperName });
-      return { ok: false, status: 400, error: msg };
-    }
-    const inputHash = prepared.sha256;
-    if (deps.uploads.isBlocked(prepared.sha256, prepared.dhash)) {
-      ledger.record({ stage: "image", verdict: "reject", source: "takedown-list", reason: "previously removed image", categories: ["blocked-hash"], inputHash, ipHash, tipper: tipperName });
-      strikes.strike(ipHash);
-      return { ok: false, status: 422, error: "this image isn't allowed" };
-    }
-
-    let faces = 0;
-    try {
-      const r = await moderateImage(prepared.classifierJpeg, s, moderation);
-      faces = r.faces;
-      const step = decidingStep(r.steps);
-      if (r.csamSuspected) {
-        // CONTENT-SAFETY S5: we now have "actual knowledge" (18 U.S.C. §2258A).
-        // Preserve, block, and follow docs/runbooks/csam.md — the bytes have
-        // already stopped before any further vendor saw them.
-        deps.uploads.block(prepared.sha256, prepared.dhash);
-        ledger.record({ stage: "image", verdict: "reject", source: step.source, reason: "suspected CSAM — runbook", categories: ["csam-suspected"], inputHash, ipHash, tipper: tipperName });
-        warn("safety", `SUSPECTED CSAM upload quarantined (sha256 ${inputHash.slice(0, 12)}…) — follow docs/runbooks/csam.md`);
-        strikes.strike(ipHash);
-        strikes.strike(ipHash);
-        strikes.strike(ipHash);
-        return { ok: false, status: 422, error: "image rejected", quarantine: true };
-      }
-      ledger.record({
-        stage: "image",
-        verdict: r.verdict,
-        source: step.source,
-        reason: r.reason,
-        categories: step.categories,
-        inputHash,
-        ipHash,
-        tipper: tipperName,
-      });
-      if (r.verdict === "reject") {
-        strikes.strike(ipHash);
-        return { ok: false, status: 422, error: r.reason };
-      }
-      if (r.verdict === "review") {
-        needsReview = true;
-        reviewWhy = `classifier: ${r.reason}`;
-      }
-    } catch (e) {
-      return unavailable(ledger, "image", e, inputHash, ipHash, "photo uploads are unavailable right now");
-    }
-
+  const prepared = photo?.prepared ?? null;
+  if (photo && prepared) {
     // A likeness swap needs a face; in dev mode no classifier counts faces,
     // so the needsImage preset itself is what tells us a person is pictured.
-    const likeness = faces > 0 || Boolean(preset?.needsImage);
-    if (preset?.needsImage && !moderation.devMode && faces === 0) {
-      return { ok: false, status: 400, error: "this effect needs a clear photo of a person" };
+    const likeness = photo.faces > 0 || Boolean(preset?.needsImage);
+    if (preset?.needsImage && !moderation.devMode && photo.faces === 0) {
+      return { ok: false, status: 400, error: "this effect needs a clear photo of a person", findings: [], checks: checks() };
     }
     if (likeness) {
       if (!ticked(input.consent)) {
-        return { ok: false, status: 400, error: "confirm you have consent to use this person's likeness" };
+        return {
+          ok: false,
+          status: 400,
+          error: "confirm you have consent to use this person's likeness",
+          findings: [],
+          checks: checks(),
+        };
       }
       consent = { statement: CONSENT_STATEMENT, at: Date.now(), ipHash };
       if (s.reviewLikeness) {
@@ -327,19 +357,147 @@ export async function createSubmission(
     });
     deps.uploads.bindCode(input.image.url, sub.code);
   }
-  return { ok: true, code: sub.code, expiresAt: sub.expiresAt, presetId: finalPresetId, needsReview };
+  return { ok: true, code: sub.code, expiresAt: sub.expiresAt, presetId: finalPresetId, needsReview, checks: checks() };
 }
 
-function unavailable(
+interface TextChecksOutcome {
+  verdict: ChainVerdict;
+  reason: string;
+  findings: SafetyFinding[];
+}
+
+/** The prompt chain + its ledger line. Never throws: a broken chain is
+ *  "unavailable", which the caller turns into a fail-closed 503. */
+async function runTextChecks(
+  deps: IntakeDeps,
+  prompt: string,
+  ipHash: string,
+  tipper: string | null,
+  report: CheckReporter,
+): Promise<TextChecksOutcome> {
+  const { settings: s, moderation, ledger } = deps;
+  const inputHash = sha256Hex(prompt);
+  try {
+    const r = await moderateText(prompt, s, s.blocklistExtra, moderation, report);
+    recordChain(ledger, "text", r, inputHash, ipHash, tipper, approvalEnabled(s));
+    return r;
+  } catch (e) {
+    recordUnavailable(ledger, "text", e, inputHash, ipHash);
+    return { verdict: "unavailable", reason: (e as Error).message, findings: [] };
+  }
+}
+
+interface PhotoChecksOutcome extends TextChecksOutcome {
+  faces: number;
+  csamSuspected: boolean;
+  /** Set once the file passed the structural pipeline. */
+  prepared: PreparedImage | null;
+}
+
+/**
+ * The photo pipeline: structure (sniff, re-encode, hash) → the takedown list
+ * → the classifier chain. A structural or takedown failure skips the
+ * classifiers — there is nothing (or nothing new) to classify.
+ */
+async function runPhotoChecks(
+  deps: IntakeDeps,
+  path: string,
+  ipHash: string,
+  tipper: string | null,
+  report: CheckReporter,
+): Promise<PhotoChecksOutcome> {
+  const { settings: s, moderation, ledger, uploads } = deps;
+  const base = { faces: 0, csamSuspected: false, prepared: null };
+  const fileFailure = (category: string, reason: string, detail?: string): PhotoChecksOutcome => {
+    report(PHOTO_FILE_CHECK, "fail");
+    for (const c of photoChecks(moderation)) if (c.id !== PHOTO_FILE_CHECK) report(c.id, "skipped");
+    const finding: SafetyFinding = {
+      check: PHOTO_FILE_CHECK,
+      subject: "photo",
+      category,
+      label: categoryLabel(category),
+      ...(detail ? { detail } : {}),
+    };
+    return { ...base, verdict: "reject", reason, findings: [finding] };
+  };
+
+  report(PHOTO_FILE_CHECK, "running");
+  let prepared: PreparedImage;
+  try {
+    prepared = await prepareUpload(path);
+  } catch (e) {
+    const msg = e instanceof ImageRejected ? e.message : "image could not be processed";
+    ledger.record({ stage: "image", verdict: "reject", source: "structure", reason: msg, categories: ["structure"], ipHash, tipper });
+    return fileFailure("structure", msg, msg);
+  }
+  const inputHash = prepared.sha256;
+  if (uploads.isBlocked(prepared.sha256, prepared.dhash)) {
+    ledger.record({ stage: "image", verdict: "reject", source: "takedown-list", reason: "previously removed image", categories: ["blocked-hash"], inputHash, ipHash, tipper });
+    return fileFailure("blocked-hash", "previously removed image");
+  }
+  report(PHOTO_FILE_CHECK, "pass");
+
+  try {
+    const r = await moderateImage(prepared.classifierJpeg, s, moderation, report);
+    if (r.csamSuspected) {
+      // CONTENT-SAFETY S5: we now have "actual knowledge" (18 U.S.C. §2258A).
+      // Preserve, block, and follow docs/runbooks/csam.md — the bytes have
+      // already stopped before any further vendor saw them.
+      uploads.block(prepared.sha256, prepared.dhash, "csam"); // near-dup, never evicted
+      ledger.record({ stage: "image", verdict: "reject", source: decidingStep(r.steps).source, reason: "suspected CSAM — runbook", categories: ["csam-suspected"], inputHash, ipHash, tipper });
+      warn("safety", `SUSPECTED CSAM upload quarantined (sha256 ${inputHash.slice(0, 12)}…) — follow docs/runbooks/csam.md`);
+    } else {
+      recordChain(ledger, "image", r, inputHash, ipHash, tipper, approvalEnabled(s));
+    }
+    return { ...r, prepared };
+  } catch (e) {
+    recordUnavailable(ledger, "image", e, inputHash, ipHash);
+    return { ...base, verdict: "unavailable", reason: (e as Error).message, findings: [] };
+  }
+}
+
+/** Is anyone watching the approval queue? Approval is opt-in
+ *  (CONTENT-SAFETY §5): with no tier on, a borderline result is refused
+ *  rather than parked. */
+function approvalEnabled(s: Settings): boolean {
+  return s.customPrompts === "classified+approval" || s.reviewLikeness;
+}
+
+/** One ledger line per chain: the deciding step, and every category found.
+ *  A "review" verdict is logged as the refusal it becomes when approval is
+ *  off, so the streamer's log says what actually happened. */
+function recordChain(
+  ledger: SafetyLedger,
+  stage: "text" | "image",
+  r: { verdict: ChainVerdict; reason: string; steps: ChainStep[]; findings: SafetyFinding[] },
+  inputHash: string,
+  ipHash: string,
+  tipper: string | null,
+  approvalOn: boolean,
+): void {
+  const step = decidingStep(r.steps);
+  ledger.record({
+    stage,
+    verdict:
+      r.verdict === "unavailable" ? "error" : r.verdict === "review" && !approvalOn ? "reject" : r.verdict,
+    source: step.source,
+    reason: r.reason,
+    categories: r.findings.length ? [...new Set(r.findings.map((f) => f.category))] : step.categories,
+    inputHash,
+    ipHash,
+    tipper,
+  });
+  if (r.verdict === "unavailable") warn("moderation", `${stage} check unavailable (${step.source}): ${r.reason}`);
+}
+
+function recordUnavailable(
   ledger: SafetyLedger,
   stage: "text" | "image",
   e: unknown,
   inputHash: string,
   ipHash: string,
-  error: string,
-): SubmissionOutcome {
+): void {
   const source = e instanceof ModerationUnavailable ? e.source : "unknown";
   ledger.record({ stage, verdict: "error", source, reason: (e as Error).message, categories: [], inputHash, ipHash });
   warn("moderation", (e as Error).message);
-  return { ok: false, status: 503, error };
 }

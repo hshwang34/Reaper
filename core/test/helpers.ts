@@ -38,10 +38,12 @@ export const allow: ClassifierVerdict = { verdict: "allow", categories: [], reas
 export function fakeText(
   decide: (text: string) => ClassifierVerdict | Error = () => allow,
   name = "fake-text",
+  role: TextClassifier["role"] = "floor",
 ): TextClassifier & { seen: string[] } {
   const seen: string[] = [];
   return {
     name,
+    role,
     seen,
     async classifyText(text) {
       seen.push(text);

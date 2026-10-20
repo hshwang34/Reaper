@@ -21,6 +21,14 @@ export const serverRoot = resolve(__dirname, "..");
 export const repoRoot = resolve(serverRoot, "..");
 loadDotenv({ path: resolve(repoRoot, ".env"), quiet: true });
 
+function trustProxySetting(): number | false {
+  const raw = process.env.RH_TRUST_PROXY?.trim().toLowerCase();
+  if (raw === "false" || raw === "0") return false;
+  const n = Number(raw);
+  if (raw && Number.isInteger(n) && n > 0) return n;
+  return process.env.FLY_APP_NAME ? 1 : false;
+}
+
 export const isProduction = process.env.RH_ENV?.trim() === "production";
 
 const str = (name: string) => process.env[name]?.trim() || "";
@@ -75,6 +83,13 @@ export const env = {
   twitchClientSecret: str("TWITCH_CLIENT_SECRET"),
   databasePath: str("RH_DATABASE_PATH") || resolve(serverRoot, "data.sqlite"),
   uploadsDir: str("RH_UPLOADS_DIR") || resolve(serverRoot, "uploads"),
+  /** Express `trust proxy`: how many reverse-proxy hops sit in front of us,
+   *  so `req.ip` is the real viewer and not the proxy. Strikes and the
+   *  public rate limits key on it — get it wrong and every viewer shares one
+   *  identity. RH_TRUST_PROXY=<hops> | false; default 1 on Fly (its edge
+   *  proxy appends the client to X-Forwarded-For), false elsewhere so a
+   *  directly-exposed server can't be spoofed with a forged header. */
+  trustProxy: trustProxySetting(),
   /** Suspected-CSAM quarantine (docs/runbooks/csam.md). Outside uploadsDir
    *  so it is never served; on Fly, a volume path. */
   quarantineDir: str("RH_QUARANTINE_DIR") || resolve(serverRoot, "safety", "quarantine"),
