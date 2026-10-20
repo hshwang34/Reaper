@@ -352,3 +352,36 @@ test("no payment is taken while the streamer has paused (panic)", async () => {
   );
   rt.stop();
 });
+
+test("the sweep never refunds a hijack that's playing (dispatched just before the deadline)", async () => {
+  const rt = payableChannel("dev:playing"); // router IDLE → the paid job dispatches immediately
+  const sub = rt.correlation.add({ prompt: "lava", presetId: "lava-room", tipperName: null, imageUrl: null });
+  await createCheckout("dev:playing", { code: sub.code, amountUsd: 5, viewerName: "p", returnUrl: "https://x/c/pl" });
+  const sessionId = `cs_test_${calls.sessions}`;
+  await handleWebhook(paidEvent("evt_playing", sessionId), "ok");
+  const row = db.select().from(payments).where(eq(payments.checkoutSessionId, sessionId)).get()!;
+  assert.ok(row.jobId, "jobId is recorded at dispatch, not at settlement");
+  assert.equal(rt.engine.snapshot().activeJob?.jobId, row.jobId);
+  const before = calls.refunds.length;
+  await sweepStalePaid(Date.now() + START_DEADLINE_MS + 60_000);
+  assert.equal(statusOf(sessionId), "paid", "playing — not refunded");
+  assert.equal(calls.refunds.length, before);
+  // It finishes: delivered.
+  settleJob({ jobId: row.jobId!, tip: { source: "stripe", amount: 5, message: sub.code, username: "p", ref: row.id } } as never, true, "done");
+  assert.equal(statusOf(sessionId), "delivered");
+  rt.stop();
+});
+
+test("races: a refund happens once, and a late 'delivered' can't overwrite it (or vice versa)", async () => {
+  const { rt, sessionId } = await queuedPaidJob("dev:race");
+  const row = db.select().from(payments).where(eq(payments.checkoutSessionId, sessionId)).get()!;
+  const before = calls.refunds.length;
+  const { refund } = await import("../src/payments.js");
+  await Promise.all([refund(row.id, "a"), refund(row.id, "b")]);
+  assert.equal(calls.refunds.length, before + 1, "one Stripe refund");
+  assert.equal(statusOf(sessionId), "refunded");
+  settleJob({ jobId: "late", tip: { source: "stripe", amount: 5, message: "x", username: "w", ref: row.id } } as never, true, "done");
+  assert.equal(statusOf(sessionId), "refunded", "a late delivery doesn't rewrite history");
+  rt.engine.dropQueued(() => true, "cleanup");
+  rt.stop();
+});

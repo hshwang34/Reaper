@@ -39,7 +39,7 @@
 //      not settled) belonged to a job the restart destroyed → refunded.
 
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import Stripe from "stripe";
 import { computeDurationSec, type HijackJob } from "@rh/shared";
 import { log, warn } from "@rh/core";
@@ -345,11 +345,29 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
   return 200;
 }
 
-function setStatus(paymentId: string, status: string, extra: Partial<typeof payments.$inferInsert> = {}) {
-  db.update(payments)
-    .set({ status, updatedAt: Date.now(), ...extra })
-    .where(eq(payments.id, paymentId))
-    .run();
+/** Payment status is a state machine; every change is ONE conditional
+ *  UPDATE, so concurrent paths (webhook, job end, offline drop, sweep, boot
+ *  reconcile) can't both act on a payment or overwrite each other:
+ *
+ *    pending → paid → delivered
+ *                   → failed_after_start        (manual review)
+ *                   → refunding → refunded | refund_failed
+ *
+ *  Returns false when the payment wasn't in an allowed `from` state — the
+ *  caller lost the race and must do nothing. */
+function transition(
+  paymentId: string,
+  from: string[],
+  to: string,
+  extra: Partial<typeof payments.$inferInsert> = {},
+): boolean {
+  return (
+    db
+      .update(payments)
+      .set({ status: to, updatedAt: Date.now(), ...extra })
+      .where(and(eq(payments.id, paymentId), inArray(payments.status, from)))
+      .run().changes === 1
+  );
 }
 
 async function onPaid(session: Stripe.Checkout.Session, account: string | null): Promise<void> {
@@ -364,7 +382,6 @@ async function onPaid(session: Stripe.Checkout.Session, account: string | null):
     warn("payments", `paid session ${session.id} is not one we created — ignoring`);
     return;
   }
-  if (p.status !== "pending") return;
   const row = channelRow(p.channelId);
   const mismatch =
     !row?.stripeAccountId || account !== row.stripeAccountId
@@ -378,7 +395,7 @@ async function onPaid(session: Stripe.Checkout.Session, account: string | null):
   }
   const paymentIntentId =
     typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null);
-  setStatus(p.id, "paid", { paymentIntentId });
+  if (!transition(p.id, ["pending"], "paid", { paymentIntentId })) return;
 
   const rt = getRuntime(p.channelId);
   // The viewer paid for THEIR effect. If the submission is gone (expired, or
@@ -410,21 +427,34 @@ function jobWasMinted(jobId: string): boolean {
   return Boolean(db.select({ id: tokenMints.id }).from(tokenMints).where(eq(tokenMints.jobId, jobId)).get());
 }
 
+/** Hooked to the runtime's onDispatch: the moment a paid job leaves the
+ *  queue for the streamer's app, the payment knows its job. From here on
+ *  the sweep treats it as started and leaves settlement to the job's end. */
+export function recordDispatch(job: HijackJob): void {
+  if (job.tip.source !== "stripe" || !job.tip.ref) return;
+  db.update(payments)
+    .set({ jobId: job.jobId, updatedAt: Date.now() })
+    .where(and(eq(payments.id, job.tip.ref), eq(payments.status, "paid")))
+    .run();
+}
+
 /** Hooked to the runtime's onJobEnded: every accepted job ends exactly once. */
 export function settleJob(job: HijackJob, ok: boolean, reason: string): void {
   const paymentId = job.tip.source === "stripe" ? job.tip.ref : undefined;
   if (!paymentId) return;
   if (ok) {
-    setStatus(paymentId, "delivered", { jobId: job.jobId, reason: null });
+    if (!transition(paymentId, ["paid"], "delivered", { jobId: job.jobId, reason: null })) {
+      warn("payments", `payment ${paymentId.slice(0, 8)}: delivered but already settled — left as is`);
+    }
     return;
   }
-  db.update(payments).set({ jobId: job.jobId }).where(eq(payments.id, paymentId)).run();
   if (jobWasMinted(job.jobId)) {
     // GPU time was spent on this job; whether the viewer saw it is only the
     // router's claim. Don't let a forged "failed" report refund it — park it
     // for a human (refundable from the Stripe dashboard if genuine).
-    setStatus(paymentId, "failed_after_start", { reason });
-    warn("payments", `payment ${paymentId.slice(0, 8)}: job failed after its token was minted (${reason}) — manual review`);
+    if (transition(paymentId, ["paid"], "failed_after_start", { jobId: job.jobId, reason })) {
+      warn("payments", `payment ${paymentId.slice(0, 8)}: job failed after its token was minted (${reason}) — manual review`);
+    }
     return;
   }
   void refund(paymentId, reason);
@@ -435,16 +465,19 @@ export function settleJob(job: HijackJob, ok: boolean, reason: string): void {
  *  charge isn't returned — it lands on the streamer's account, the cost of
  *  a hijack their setup couldn't start.) */
 export async function refund(paymentId: string, reason: string): Promise<void> {
-  const p = db.select().from(payments).where(eq(payments.id, paymentId)).get();
-  if (!p || p.status === "refunded" || p.status === "delivered") return;
+  // Claim it atomically: only a `paid` payment can start refunding, and only
+  // once — whoever loses the race (a second path, or a delivery that got
+  // there first) does nothing.
+  if (!transition(paymentId, ["paid"], "refunding", { reason })) return;
+  const p = db.select().from(payments).where(eq(payments.id, paymentId)).get()!;
   const s = stripe();
-  if (!s || !p.paymentIntentId) {
-    setStatus(p.id, "refund_failed", { reason: `${reason} (no payment intent)` });
+  const row = channelRow(p.channelId);
+  if (!s || !p.paymentIntentId || !row?.stripeAccountId) {
+    transition(p.id, ["refunding"], "refund_failed", { reason: `${reason} (no payment intent / account)` });
+    warn("payments", `REFUND FAILED ${p.id}: missing payment intent or account — needs manual action`);
     return;
   }
   try {
-    const row = channelRow(p.channelId);
-    if (!row?.stripeAccountId) throw new Error("channel has no Stripe account");
     await s.refunds.create(
       {
         payment_intent: p.paymentIntentId,
@@ -453,13 +486,14 @@ export async function refund(paymentId: string, reason: string): Promise<void> {
         refund_application_fee: true,
         metadata: { paymentId: p.id, reason: reason.slice(0, 200) },
       },
-      // On the streamer's account (direct charge); idempotent at Stripe too.
+      // On the streamer's account (direct charge); idempotent at Stripe too,
+      // so a retry after a crash mid-refund can't refund twice.
       { stripeAccount: row.stripeAccountId, idempotencyKey: `refund-${p.id}` },
     );
-    setStatus(p.id, "refunded", { reason });
+    transition(p.id, ["refunding"], "refunded");
     log("payments", `refunded ${p.id.slice(0, 8)} ($${(p.amountCents / 100).toFixed(2)}): ${reason}`);
   } catch (e) {
-    setStatus(p.id, "refund_failed", { reason: `${reason} — ${(e as Error).message}` });
+    transition(p.id, ["refunding"], "refund_failed", { reason: `${reason} — ${(e as Error).message}` });
     warn("payments", `REFUND FAILED ${p.id}: ${(e as Error).message} — needs manual action`);
   }
 }
@@ -499,15 +533,14 @@ export async function sweepStalePaid(now = Date.now()): Promise<number> {
   for (const p of stale) {
     const reason = "the hijack didn't start within 15 minutes";
     const rt = getRuntime(p.channelId);
-    // In the queue: drop it (settleJob refunds). Not in the queue (lost,
-    // or the channel is gone): refund directly — unless it actually started.
+    // Dispatched (jobId is recorded at dispatch): it has started — the job
+    // settles through its own end (and the engine's deadline backstop), so
+    // the sweep must never refund it, even if it's playing right now.
+    if (p.jobId) continue;
+    // Still queued: drop it — that ends it as failed and settleJob refunds.
     const dropped = rt ? rt.engine.dropQueued((j) => j.tip.ref === p.id, reason) : 0;
-    if (dropped === 0) {
-      const active = rt?.engine.snapshot().activeJob;
-      if (p.jobId && active?.jobId === p.jobId) continue; // playing right now
-      if (p.jobId && jobWasMinted(p.jobId)) continue; // started — settles on its own
-      await refund(p.id, reason);
-    }
+    // Neither queued nor dispatched (the job was lost): refund directly.
+    if (dropped === 0) await refund(p.id, reason);
     n++;
   }
   if (n) warn("payments", `refunded ${n} paid hijack(s) that never started`);
@@ -520,6 +553,10 @@ export async function sweepStalePaid(now = Date.now()): Promise<number> {
  *  at boot was accepted by an engine that no longer exists — its hijack will
  *  never run. Refund it. */
 export async function reconcileOnBoot(): Promise<number> {
+  // A crash between claiming a refund and Stripe confirming it leaves
+  // `refunding`; put it back to `paid` so it's retried (the Stripe
+  // idempotency key makes the retry safe).
+  db.update(payments).set({ status: "paid" }).where(eq(payments.status, "refunding")).run();
   const orphans = db.select().from(payments).where(eq(payments.status, "paid")).all();
   for (const p of orphans) await refund(p.id, "server restarted before the hijack ran");
   if (orphans.length) warn("payments", `refunded ${orphans.length} payment(s) orphaned by a restart`);
