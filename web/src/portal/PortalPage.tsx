@@ -439,7 +439,7 @@ export default function PortalPage() {
             {paid ? (
               <>
                 Minimum ${pay!.minUsd}. Secure payment by Stripe. If the hijack
-                doesn't run, you're refunded automatically.
+                never starts, you're refunded automatically.
               </>
             ) : (
               <>
@@ -581,7 +581,10 @@ function ClaimView(props: {
       <div className="space-y-6 text-center">
         <StatusTimeline status={status} expired={false} paid />
         {status?.state === "failed" && (
-          <p className="text-sm text-zinc-400">You've been refunded — it can take a few days to show on your statement.</p>
+          <p className="text-sm text-zinc-400">
+            If it never started, you're refunded automatically — it can take a
+            few days to show on your statement.
+          </p>
         )}
         <button onClick={props.onReset} className="text-sm text-zinc-500 underline hover:text-zinc-300">
           Hijack again

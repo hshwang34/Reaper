@@ -21,10 +21,16 @@
 //   3. Webhook checkout.session.completed (signature-verified, idempotent on
 //      the event id) → a TipEvent { source: "stripe", message: code, ref:
 //      paymentId } into the SAME engine path as every other trigger.
-//   4. The job's terminal outcome settles the payment: ok → delivered;
-//      anything else (failed, dropped, rejected in review, cancelled) → a
-//      full refund, transfer reversed, fee returned. The viewer only pays for
-//      a hijack that happened.
+//   4. The job's terminal outcome settles the payment, but the refund
+//      decision rests on SERVER-SIDE evidence, never on the router's word
+//      (the router runs on the streamer's machine; a "failed" report is
+//      theirs to forge). The evidence is the mint ledger — only this server
+//      can issue the job's Decart token:
+//        · no token minted → nothing could have played → automatic full
+//          refund (transfer reversed, fee returned);
+//        · token minted, router says failed → GPU was spent; status
+//          `failed_after_start` for manual review, no automatic refund.
+//      ok → delivered.
 //   5. Boot: runtimes are in-memory, so any payment still `paid` (accepted,
 //      not settled) belonged to a job the restart destroyed → refunded.
 
@@ -33,7 +39,7 @@ import { and, eq, sql } from "drizzle-orm";
 import Stripe from "stripe";
 import { computeDurationSec, type HijackJob } from "@rh/shared";
 import { log, warn } from "@rh/core";
-import { channels, db, payments, stripeEvents } from "./db.js";
+import { channels, db, payments, stripeEvents, tokenMints } from "./db.js";
 import { env } from "./env.js";
 import { splitPayment, type FeeConfig } from "./fees.js";
 import { getRuntime } from "./channels.js";
@@ -342,6 +348,13 @@ async function onPaid(session: Stripe.Checkout.Session): Promise<void> {
 
 // ── 4. Settlement ─────────────────────────────────────────────────────────
 
+/** Was a Decart token ever minted for this job? Server-side truth: the
+ *  router (streamer's machine) can claim anything, but only this server can
+ *  issue the token the hijack needs to run at all. */
+function jobWasMinted(jobId: string): boolean {
+  return Boolean(db.select({ id: tokenMints.id }).from(tokenMints).where(eq(tokenMints.jobId, jobId)).get());
+}
+
 /** Hooked to the runtime's onJobEnded: every accepted job ends exactly once. */
 export function settleJob(job: HijackJob, ok: boolean, reason: string): void {
   const paymentId = job.tip.source === "stripe" ? job.tip.ref : undefined;
@@ -351,6 +364,14 @@ export function settleJob(job: HijackJob, ok: boolean, reason: string): void {
     return;
   }
   db.update(payments).set({ jobId: job.jobId }).where(eq(payments.id, paymentId)).run();
+  if (jobWasMinted(job.jobId)) {
+    // GPU time was spent on this job; whether the viewer saw it is only the
+    // router's claim. Don't let a forged "failed" report refund it — park it
+    // for a human (refundable from the Stripe dashboard if genuine).
+    setStatus(paymentId, "failed_after_start", { reason });
+    warn("payments", `payment ${paymentId.slice(0, 8)}: job failed after its token was minted (${reason}) — manual review`);
+    return;
+  }
   void refund(paymentId, reason);
 }
 

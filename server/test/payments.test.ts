@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { upsertChannel } from "../src/auth.js";
 import { getRuntime } from "../src/channels.js";
-import { channels, db, payments } from "../src/db.js";
+import { channels, db, payments, tokenMints } from "../src/db.js";
 import { splitPayment } from "../src/fees.js";
 import {
   createCheckout,
@@ -218,4 +218,25 @@ test("boot reconciliation refunds payments a restart orphaned", async () => {
     .run();
   assert.ok((await reconcileOnBoot()) >= 1);
   assert.equal(statusOf("cs_orphan"), "refunded");
+});
+
+test("a job that failed AFTER its token was minted is never auto-refunded on the router's word", async () => {
+  const rt = payableChannel("dev:forged");
+  const sub = rt.correlation.add({ prompt: "lava", presetId: "lava-room", tipperName: null, imageUrl: null });
+  await createCheckout("dev:forged", { code: sub.code, amountUsd: 10, viewerName: "e", returnUrl: "https://x/c/f" });
+  const sessionId = `cs_test_${calls.sessions}`;
+  await handleWebhook(paidEvent("evt_forged", sessionId), "ok");
+  const p = db.select().from(payments).where(eq(payments.checkoutSessionId, sessionId)).get()!;
+  // The server minted the job's Decart token → GPU time was spent.
+  db.insert(tokenMints).values({ channelId: "dev:forged", jobId: "job-forged", durationSec: 10, cappedSec: 25, createdAt: Date.now() }).run();
+  const before = calls.refunds.length;
+  settleJob(
+    { jobId: "job-forged", tip: { source: "stripe", amount: 10, message: sub.code, username: "e", ref: p.id } } as never,
+    false,
+    "router says it failed",
+  );
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(statusOf(sessionId), "failed_after_start");
+  assert.equal(calls.refunds.length, before, "no automatic refund");
+  rt.stop();
 });
