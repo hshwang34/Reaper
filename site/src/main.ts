@@ -9,6 +9,7 @@
 // plays those for the presets it has (see site/CLIPS.md).
 
 import "./style.css";
+import "./product.css";
 import { Particles, type ParticleMode } from "./particles";
 
 /* ---------- theme hook for screenshots (?theme=dark|light) ---------- */
@@ -252,6 +253,9 @@ class Demo {
   constructor() {
     this.playBtn.addEventListener("click", () => (this.paused ? this.play() : this.pause()));
     $("nextBtn").addEventListener("click", () => this.next());
+    document.querySelectorAll<HTMLButtonElement>("[data-demo-preset]").forEach((button) => {
+      button.addEventListener("click", () => this.select(button.dataset.demoPreset!));
+    });
     this.syncPlayButton();
     if (!REDUCED) window.setInterval(() => this.tickUptime(), 1000);
     this.tickUptime();
@@ -276,10 +280,23 @@ class Demo {
 
   next(): void {
     if (this.paused) {
-      void this.runOne(++this.gen);
+      this.select(this.cycle(1).preset);
       return;
     }
     this.skip?.();
+  }
+
+  select(preset: string): void {
+    const index = CYCLES.findIndex((cycle) => cycle.preset === preset);
+    if (index < 0) return;
+    this.pause();
+    this.i = index;
+    if (REDUCED) {
+      this.renderStatic();
+      this.source.textContent = "Illustrative preview on a stock photo. Press play to run a timed hijack.";
+    } else {
+      this.play();
+    }
   }
 
   private play(): void {
@@ -295,6 +312,8 @@ class Demo {
     this.gen++;
     this.skip = null;
     this.chat.stop();
+    this.stopClip();
+    this.wipe.classList.remove("in", "out");
     this.render("idle", 0);
   }
 
@@ -359,8 +378,8 @@ class Demo {
       this.tick(left, c.amount);
       await sleep(100);
     }
-    this.skip = null;
     if (!live()) return;
+    this.skip = null;
 
     this.flash("out");
     await sleep(WIPE_MS / 2);
@@ -412,6 +431,9 @@ class Demo {
   private render(phase: Phase, remaining: number): void {
     const c = this.cycle();
     const look = phase === "live" ? c.preset : "raw";
+    document.querySelectorAll<HTMLButtonElement>("[data-demo-preset]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.demoPreset === c.preset));
+    });
     this.remaining = remaining;
 
     for (const f of [this.hero, this.mini, this.obs]) {
@@ -518,3 +540,22 @@ const demo = new Demo();
 loadManifest()
   .then((clips) => demo.setClips(clips))
   .finally(() => demo.start());
+
+const menuToggle = document.querySelector<HTMLButtonElement>(".mobile-menu-toggle")!;
+const navigation = $("main-navigation");
+const closeMenu = () => {
+  menuToggle.setAttribute("aria-expanded", "false");
+  navigation.classList.remove("is-open");
+};
+menuToggle.addEventListener("click", () => {
+  const open = menuToggle.getAttribute("aria-expanded") !== "true";
+  menuToggle.setAttribute("aria-expanded", String(open));
+  navigation.classList.toggle("is-open", open);
+});
+navigation.querySelectorAll("a").forEach((link) => link.addEventListener("click", closeMenu));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && menuToggle.getAttribute("aria-expanded") === "true") {
+    closeMenu();
+    menuToggle.focus();
+  }
+});

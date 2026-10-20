@@ -104,37 +104,53 @@
           <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
           <span class="wordmark">Reality <strong>Hijack</strong></span>
         </a>
-        <nav class="nav-links" aria-label="Sections">
+        <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="main-navigation">Menu <span aria-hidden="true">+</span></button>
+        <nav class="nav-links" id="main-navigation" aria-label="Sections">
           <a href="#how">How it works</a>
           <a href="#looks">Looks</a>
           <a href="#control">Control</a>
           <a href="#obs">OBS</a>
           <a href="#faq">FAQ</a>
         </nav>
-        <a class="btn btn-primary btn-sm" href="#alpha">Get the app</a>
+        <a class="btn btn-primary btn-sm" href="#alpha">Join the alpha</a>
       </div>
     </header>
 
     <main id="top">
       <!-- ============ Hero ============ -->
       <section class="hero wrap" aria-labelledby="hero-h">
-        <div class="mascot-intro"><img src="/brand/mascot-640.png" width="260" height="260" alt="Reality Hijack’s grinning trickster mascot in a red-banded hat" fetchpriority="high" /><div><span class="brand-eyebrow">GOOD CHAT. GREAT CHAOS.</span><p>A little mischief.<br />A whole new stream.</p><a href="#control">You’re always in control <span aria-hidden="true">↗</span></a></div></div>
-        <div class="hero-copy">
-          <div>
-            <p class="status-line"><span class="status-dot"></span>Free alpha. Onboarding the first streamers by hand.</p>
-            <h1 id="hero-h">Your stream.<br />Chat’s <em>chaos.</em></h1>
-          </div>
-          <div>
-            <p class="lead">
-              Let chat hijack your camera with live AI transformations. Viewers pick the look and tip for their moment. You set the limits. When time’s up, reality returns.
-            </p>
+        <div class="launch-hero">
+          <div class="launch-copy">
+            <p class="launch-eyebrow"><span></span> FOR STREAMERS. FUELED BY CHAT.</p>
+            <h1 id="hero-h">Give chat<br />the power to<br /><em>steal the show.</em></h1>
+            <p class="lead">Your camera becomes their playground. Viewers tip to transform your stream with live AI effects. You decide how wild it gets.</p>
             <div class="actions">
-              <a class="btn btn-primary" href="#alpha">Get the app</a>
-              <a class="btn btn-quiet" href="#how">How it works</a>
+              <a class="btn btn-primary btn-lg" href="#alpha">Join the free alpha <span aria-hidden="true">↗</span></a>
+              <a class="btn btn-quiet btn-lg" href="#demo"><span aria-hidden="true">▶</span> Try the demo</a>
             </div>
+            <p class="launch-note">Made for OBS · macOS alpha · Your tips stay yours</p>
+          </div>
+          <div class="mascot-stage" aria-label="Reality Hijack mascot">
+            <span class="mascot-caption">YOUR CHAT’S NEW PARTNER IN CRIME</span>
+            <img src="/brand/mascot-640.png" width="420" height="420" alt="A mischievous grinning hijacker with a red-banded hat" fetchpriority="high" />
+            <div class="mascot-sticker sticker-top"><span aria-hidden="true">✦</span> A little chaos looks good on you.</div>
+            <div class="mascot-sticker sticker-bottom"><span class="mini-live"></span> HIJACK MODE: ON</div>
+            <span class="mascot-serial" aria-hidden="true">RH / 001 — THE INSTIGATOR</span>
           </div>
         </div>
 
+        <div class="demo-heading" id="demo">
+          <div><p class="brand-eyebrow">DON’T JUST WATCH. TAKE OVER.</p><h2>Go on. Pick your chaos.</h2></div>
+          <p>An interactive preview of a hijack.<br />Choose a look and watch the takeover.</p>
+        </div>
+        <div class="demo-picker" role="group" aria-label="Choose a demo effect">
+          <button type="button" data-demo-preset="lava-room" aria-pressed="true">🌋 <span>Lava Room</span></button>
+          <button type="button" data-demo-preset="underwater" aria-pressed="false">🌊 <span>Underwater</span></button>
+          <button type="button" data-demo-preset="80s-anime" aria-pressed="false">📼 <span>80s Anime</span></button>
+          <button type="button" data-demo-preset="cyberpunk" aria-pressed="false">🌃 <span>Cyberpunk</span></button>
+          <button type="button" data-demo-preset="haunted" aria-pressed="false">👻 <span>Haunted</span></button>
+          <button type="button" data-demo-preset="winter-wonderland" aria-pressed="false">❄️ <span>Winter</span></button>
+        </div>
         <!--
           The hero is a live-stream watch page the way a viewer sees one: player, channel row,
           chat. Platform conventions only (dark chrome, player left / chat right, badges, a
@@ -238,11 +254,9 @@
       <!-- ============ How it works ============ -->
       <section class="section wrap" id="how" aria-labelledby="how-h">
         <div class="section-head">
-          <h2 id="how-h">How a tip becomes a moment</h2>
+          <div><p class="brand-eyebrow">FROM “WHAT IF” TO “CLIP THAT”</p><h2 id="how-h">Three steps.<br />One very different stream.</h2></div>
           <p class="lead">
-            Viewers already pay to be noticed. This gives them something to buy that happens on
-            your camera, where the whole room sees it. Below is the hijack playing above, seen from
-            the viewer's phone, your stream, and your dashboard.
+            Give viewers a way to be part of the show. Their idea. Their name on screen. A moment everyone gets to react to.
           </p>
         </div>
 
@@ -250,7 +264,7 @@
           <li class="beat">
             <div class="beat-text">
               <span class="beat-n">1</span>
-              <h3>A viewer pays for a look</h3>
+              <h3>Pick it. Tip it.</h3>
               <p>Your portal page lists the looks you allow. The viewer picks one, gets a short code, and tips with the code in the message. The tip goes to you through Streamlabs, as it does today.</p>
             </div>
             <div class="shot">
@@ -282,7 +296,7 @@
           <li class="beat">
             <div class="beat-text">
               <span class="beat-n">2</span>
-              <h3>Their name is on your camera, live</h3>
+              <h3>Watch reality switch.</h3>
               <p>The tip lands and your webcam is redrawn in that look for as many seconds as they paid. Their name and the countdown sit on the picture, so everyone watching knows who did it and what it cost.</p>
             </div>
             <div class="shot">
@@ -309,8 +323,8 @@
           <li class="beat">
             <div class="beat-text">
               <span class="beat-n">3</span>
-              <h3>It ends on time. The clip travels.</h3>
-              <p>When the seconds run out, your normal camera returns and the hijack is written to your ledger. Every one is a paid moment chat will clip, and the next viewer wants their name up there too.</p>
+              <h3>Back to you. Just like that.</h3>
+              <p>When the seconds run out, your normal camera returns and the hijack is written to your ledger. You get a clear record of what ran, who triggered it, and how long it lasted.</p>
             </div>
             <div class="shot">
               <div class="app ledger ui" role="img" aria-label="The streamer dashboard's hijack ledger">
@@ -335,8 +349,8 @@
       <!-- ============ The looks ============ -->
       <section class="section wrap" id="looks" aria-labelledby="looks-h">
         <div class="section-head">
-          <h2 id="looks-h">The menu viewers pay from</h2>
-          <p class="lead">Seven looks built in. You choose which are on your menu. Each is a fixed prompt on our side, so a viewer buys a name, never the text behind it.</p>
+          <div><p class="brand-eyebrow">SAME STREAMER. DIFFERENT UNIVERSE.</p><h2 id="looks-h">What kind of chaos<br />is your chat?</h2></div>
+          <p class="lead">Start with a menu of built-in looks, or allow custom ideas. You choose what’s available. These illustrations show the direction of each effect, not recorded AI output.</p>
         </div>
         <ul class="looks-grid">
           <li class="look">
@@ -372,7 +386,7 @@
           <li class="look">
             <div class="look-art scene look-photo" data-look="raw" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><div class="photo-chip"><i></i><span>reference photo</span></div></div>
             <h3>Become the Photo</h3>
-            <p>The viewer attaches a photo and the person on camera becomes whoever is in it. Same pose, same room.</p>
+            <p>A viewer submits a reference image to inspire a transformation, subject to your settings and safety checks.</p>
           </li>
           <li class="look look-custom">
             <div class="look-art custom-art ui" aria-hidden="true">
@@ -390,12 +404,12 @@
       <section class="section wrap" id="control" aria-labelledby="control-h">
         <div class="split">
           <div class="split-text">
-            <p class="brand-eyebrow">MISCHIEF, WITH BOUNDARIES</p><h2 id="control-h">Chat gets the spotlight.<br />You keep the controls.</h2>
+            <p class="brand-eyebrow">YOU’RE STILL THE BOSS</p><h2 id="control-h">Unleash chat.<br /><em>Keep the off switch.</em></h2>
             <ul class="facts">
               <li><b>You build the menu.</b> Turn looks on or off, set the minimum tip and the longest a hijack can run.</li>
               <li><b>Custom prompts are off until you say.</b> When you allow them, a blocklist and a moderation pass run before anything reaches your camera.</li>
               <li><b>One key ends it.</b> <kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd> from anywhere cuts back to your camera and pauses the queue.</li>
-              <li><b>Every hijack ends on time.</b> Three separate timers cap the run: one in the app, one watchdog on your machine, and one on the model provider's servers. If any of them fire, your camera comes back.</li>
+              <li><b>Every hijack ends on time.</b> Automatic time limits bring your normal camera back. You set the maximum length before anyone tips.</li>
             </ul>
           </div>
           <div class="shot">
@@ -513,10 +527,10 @@
       <!-- ============ Alpha CTA ============ -->
       <section class="section wrap" id="alpha" aria-labelledby="alpha-h">
         <div class="cta-card">
-          <div class="cta-text">
-            <h2 id="alpha-h">Give chat their main-character moment.</h2>
+          <div class="cta-text"><p class="brand-eyebrow">LET’S MAKE YOUR NEXT STREAM WEIRD.</p>
+            <h2 id="alpha-h">Your chat has ideas.<br />Give them the button.</h2>
             <p>
-              We are onboarding the first streamers by hand. It is not a Twitch extension and does not use Bits.
+              Join the free alpha. We’ll help you get set up and bring your first hijack to life. Small cohort. Real streams. Your feedback shapes what’s next.
             </p>
             <dl class="reqs">
               <div><dt>App</dt><dd>macOS 13 or newer. Download details provided during onboarding.</dd></div>
@@ -524,9 +538,9 @@
               <div><dt>Tips</dt><dd>A Streamlabs account. Tips keep landing where they do today.</dd></div>
             </dl>
           </div>
-          <div class="cta-actions">
-            <a class="btn btn-primary btn-lg" href="https://github.com/hshwang34/Reaper/issues/new?title=Alpha%20access%20request&body=Channel%3A%20%0AAverage%20viewers%3A%20%0AWhat%20I%20stream%3A%20%0ATipping%20setup%20today%20(Streamlabs%2C%20other)%3A%20%0A">Get the app</a>
-            <span class="cta-note">Opens a short request form on GitHub. We reply with a download.</span>
+          <div class="cta-actions"><img class="cta-mascot" src="/brand/icon-180.png" width="96" height="96" alt="" loading="lazy" />
+            <a class="btn btn-primary btn-lg" href="https://github.com/hshwang34/Reaper/issues/new?title=Alpha%20access%20request&body=Channel%3A%20%0AAverage%20viewers%3A%20%0AWhat%20I%20stream%3A%20%0ATipping%20setup%20today%20(Streamlabs%2C%20other)%3A%20%0A">Join the alpha</a>
+            <span class="cta-note">Request access on GitHub. An account is required; requests are public. We follow up with onboarding and download details.</span>
             <a class="cta-link" href="https://github.com/hshwang34/Reaper/commits/main">Release notes on GitHub</a>
           </div>
         </div>
@@ -534,37 +548,16 @@
 
       <!-- ============ FAQ ============ -->
       <section class="section wrap faq" id="faq" aria-labelledby="faq-h">
-        <h2 id="faq-h">Questions</h2>
-        <dl>
-          <div class="qa">
-            <dt>What do I need?</dt>
-            <dd>OBS Studio with its WebSocket server on, a Streamlabs account for tips, and the Reality Hijack desktop app. It builds for macOS today.</dd>
-          </div>
-          <div class="qa">
-            <dt>Is this a Twitch extension?</dt>
-            <dd>No. Tips come in through Streamlabs, so it works on any platform where you take tips that way. No Bits, no extension review.</dd>
-          </div>
-          <div class="qa">
-            <dt>Where does the money go?</dt>
-            <dd>To you, through Streamlabs, exactly as your tips do now. The app only listens for the tip event; it never touches the payment.</dd>
-          </div>
-          <div class="qa">
-            <dt>How long does a hijack last?</dt>
-            <dd>As many seconds as the tip, up to the maximum you set. A short wipe covers the cut in and the cut out.</dd>
-          </div>
-          <div class="qa">
-            <dt>Is there a delay?</dt>
-            <dd>The restyled picture runs a little behind your camera, as any live AI video does. The wipe hides the jump at both ends, and the countdown is on screen so viewers know what is happening.</dd>
-          </div>
-          <div class="qa">
-            <dt>What can a viewer make it do?</dt>
-            <dd>Only a look you have turned on. Custom prompts are off unless you allow them, and when you do, they are checked against your guardrails before they run.</dd>
-          </div>
-          <div class="qa">
-            <dt>Does it cost me anything?</dt>
-            <dd>Not during alpha. Pricing after alpha is not decided yet.</dd>
-          </div>
-        </dl>
+        <div class="faq-intro"><p class="brand-eyebrow">BEFORE YOU HIT GO</p><h2 id="faq-h">Good questions.<br />Straight answers.</h2><p>Still curious? <a href="https://github.com/hshwang34/Reaper/issues">Ask us on GitHub ↗</a></p></div>
+        <div class="faq-list">
+          <details class="faq-item"><summary>What do I need?</summary><p>OBS Studio with its WebSocket server on, a Streamlabs account for tips, and the Reality Hijack desktop app. It builds for macOS today.</p></details>
+          <details class="faq-item"><summary>Is this a Twitch extension?</summary><p>No. Tips come in through Streamlabs, so it works on any platform where you take tips that way. No Bits, no extension review.</p></details>
+          <details class="faq-item"><summary>Where does the money go?</summary><p>To you, through Streamlabs, exactly as your tips do now. The app only listens for the tip event; it never touches the payment.</p></details>
+          <details class="faq-item"><summary>How long does a hijack last?</summary><p>As many seconds as the tip, up to the maximum you set. A short wipe covers the cut in and the cut out.</p></details>
+          <details class="faq-item"><summary>Is there a delay?</summary><p>The restyled picture runs a little behind your camera, as any live AI video does. The wipe hides the jump at both ends, and the countdown is on screen so viewers know what is happening.</p></details>
+          <details class="faq-item"><summary>What can a viewer make it do?</summary><p>Only a look you have turned on. Custom prompts are off unless you allow them, and when you do, they are checked against your guardrails before they run.</p></details>
+          <details class="faq-item"><summary>Does it cost me anything?</summary><p>Not during alpha. Pricing after alpha is not decided yet.</p></details>
+        </div>
       </section>
     </main>
 
@@ -575,7 +568,7 @@
             <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
             <span class="wordmark">Reality <strong>Hijack</strong></span>
           </a>
-          <p>A companion app for OBS Studio. Alpha.</p>
+          <p>A little mischief.<br />A whole new stream.</p>
         </div>
         <nav class="footer-cols" aria-label="Footer">
           <div>
@@ -583,19 +576,19 @@
             <a href="#how">How it works</a>
             <a href="#looks">Looks</a>
             <a href="#control">Control</a>
-            <a href="#alpha">Get the app</a>
+            <a href="#alpha">Join the alpha</a>
           </div>
           <div>
-            <h4>Project</h4>
+            <h4>Behind the scenes</h4>
             <a href="https://github.com/hshwang34/Reaper">Source on GitHub</a>
             <a href="https://github.com/hshwang34/Reaper/blob/main/FEASIBILITY.md">Feasibility notes</a>
             <a href="https://github.com/hshwang34/Reaper/commits/main">Release notes</a>
             <a href="https://github.com/hshwang34">Built by Hyunseok Hwang</a>
           </div>
           <div>
-            <h4>Legal</h4>
-            <span class="soon">Privacy policy <small>coming</small></span>
-            <span class="soon">Terms of use <small>coming</small></span>
+            <h4>Early access</h4>
+            <a href="#alpha">Join the free alpha</a>
+            <a href="#control">Your controls</a>
           </div>
         </nav>
         <p class="footer-legal">
