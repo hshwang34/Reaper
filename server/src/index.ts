@@ -343,7 +343,11 @@ app.post(
 /** Streamer: payout status + earnings summary. */
 app.get("/api/c/:channel/payouts", requireChannel, (_req, res) => {
   const id = String(res.locals.channelId);
-  res.json({ ...payoutStatus(id), earnings: earnings(id) });
+  // Onboarding started but not verified yet: ask Stripe now rather than rely
+  // only on webhooks (cheap — one call, and only until it flips to enabled).
+  const before = payoutStatus(id);
+  const fresh = before.started && !before.enabled ? refreshPayouts(id).catch(() => false) : Promise.resolve(false);
+  void fresh.then(() => res.json({ ...payoutStatus(id), earnings: earnings(id) }));
 });
 
 /** Streamer: start/resume Stripe onboarding → Stripe-hosted URL. */

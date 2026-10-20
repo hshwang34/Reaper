@@ -36,3 +36,10 @@ primary_region = "iad"
   interval = "15s"
   timeout = "2s"
   grace_period = "30s"
+
+# The server runs TypeScript from source via tsx; 256 MB (the default) is too
+# tight for tsx + every channel's runtime. ~$6/mo.
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

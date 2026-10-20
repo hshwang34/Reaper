@@ -1,25 +1,29 @@
 // Viewer payments — Stripe Connect. The reason the hosted plane can hold the
 // Decart key without spending our own money: every GPU second is bought by a
-// viewer, through us, and we keep a fee that covers it (server/src/fees.ts).
+// viewer, and our application fee covers it (server/src/fees.ts).
 //
 // Why Stripe Connect and not "take a cut of the Streamlabs tip": Streamlabs
 // pays the streamer directly — the server only HEARS about a tip and can
-// never subtract anything from it. To fund the GPU, the money has to pass
-// through an account we control. Connect makes that legal and boring: Stripe
-// holds the funds, transfers the streamer's share to their own Express
-// account, keeps our application fee, and pays everyone out. We never hold
-// or transmit money ourselves.
+// never subtract anything from it. The payment has to be created by us.
+//
+// Model: DIRECT charges with Stripe "Managed Risk". The viewer pays on the
+// streamer's own Stripe account (the streamer is the seller of record and
+// pays Stripe's fee); our application fee is split off automatically. Stripe
+// screens fraud and absorbs unrecoverable losses (stolen-card chargebacks) —
+// a new platform can't take that liability on without Stripe's review, and
+// a one-person platform shouldn't. We never hold or move the money.
 //
 // The flow:
-//   1. Streamer onboards (dashboard / setup wizard): an Express account,
-//      Stripe-hosted KYC. `payouts_enabled` mirrors the account's `transfers`
-//      capability; until it's active the portal can't take payments.
+//   1. Streamer onboards (dashboard / setup wizard): an Accounts v2 account
+//      with the full Stripe Dashboard, Stripe as fees + losses collector,
+//      Stripe-hosted onboarding. `payouts_enabled` mirrors the account's
+//      `charges_enabled`; until then the portal can't take payments.
 //   2. Viewer submits an effect (moderated, as before) → gets a code → POST
-//      /checkout → Stripe Checkout (a destination charge: amount to the
-//      streamer, application fee to us). The submission is held open for the
-//      life of the Checkout session.
-//   3. Webhook checkout.session.completed (signature-verified, idempotent on
-//      the event id) → a TipEvent { source: "stripe", message: code, ref:
+//      /checkout → Stripe Checkout created ON the streamer's account with our
+//      application fee. The submission is held open for the session's life.
+//   3. Webhook checkout.session.completed — a Connect event, since the
+//      session lives on the streamer's account (signature-verified,
+//      idempotent on the event id) → a TipEvent { source: "stripe", message: code, ref:
 //      paymentId } into the SAME engine path as every other trigger.
 //   4. The job's terminal outcome settles the payment, but the refund
 //      decision rests on SERVER-SIDE evidence, never on the router's word
@@ -27,7 +31,7 @@
 //      theirs to forge). The evidence is the mint ledger — only this server
 //      can issue the job's Decart token:
 //        · no token minted → nothing could have played → automatic full
-//          refund (transfer reversed, fee returned);
+//          refund (our fee returned too);
 //        · token minted, router says failed → GPU was spent; status
 //          `failed_after_start` for manual review, no automatic refund.
 //      ok → delivered.
@@ -47,19 +51,31 @@ import { getRuntime } from "./channels.js";
 /** The slice of the Stripe SDK we use — narrow enough to fake in tests. */
 export interface StripeLike {
   accounts: {
-    create(p: Stripe.AccountCreateParams): Promise<{ id: string }>;
-    retrieve(id: string): Promise<{ id: string; capabilities?: { transfers?: string } | null }>;
+    retrieve(id: string): Promise<{ id: string; charges_enabled?: boolean }>;
+  };
+  v2: {
+    core: {
+      accounts: {
+        create(p: Stripe.V2.Core.AccountCreateParams): Promise<{ id: string }>;
+      };
+    };
   };
   accountLinks: {
     create(p: Stripe.AccountLinkCreateParams): Promise<{ url: string }>;
   };
   checkout: {
     sessions: {
-      create(p: Stripe.Checkout.SessionCreateParams): Promise<{ id: string; url: string | null }>;
+      create(
+        p: Stripe.Checkout.SessionCreateParams,
+        opts: { stripeAccount: string },
+      ): Promise<{ id: string; url: string | null }>;
     };
   };
   refunds: {
-    create(p: Stripe.RefundCreateParams, opts?: { idempotencyKey?: string }): Promise<{ id: string }>;
+    create(
+      p: Stripe.RefundCreateParams,
+      opts: { stripeAccount: string; idempotencyKey: string },
+    ): Promise<{ id: string }>;
   };
   webhooks: {
     constructEvent(payload: Buffer | string, header: string, secret: string): Stripe.Event;
@@ -108,20 +124,20 @@ function channelRow(channelId: string) {
 
 // ── 1. Streamer onboarding ────────────────────────────────────────────────
 
-/** Countries where Stripe can pay out a Connect Express account. A US
- *  platform pays non-US streamers through Stripe's cross-border payouts,
- *  which use the "recipient" service agreement (transfers only — the
- *  streamer's account receives our transfer; it never charges cards). */
-function accountParams(channelId: string, login: string, country: string): Stripe.AccountCreateParams {
-  const crossBorder = country !== "US";
+/** A Connect account the streamer sells through: Accounts v2, full Stripe
+ *  Dashboard (they're a real Stripe merchant), card payments, and Stripe as
+ *  both fees and losses collector — "Managed Risk". (Accounts v1 `type:
+ *  express` is refused for new platforms unless the platform assumes loss
+ *  liability, which we deliberately don't.) */
+function accountParams(channelId: string, login: string, country: string): Stripe.V2.Core.AccountCreateParams {
   return {
-    type: "express",
-    country,
-    capabilities: { transfers: { requested: true } },
-    ...(crossBorder ? { tos_acceptance: { service_agreement: "recipient" } } : {}),
-    business_profile: { product_description: `Reality Hijack payouts for twitch.tv/${login}` },
+    display_name: `twitch.tv/${login}`,
+    dashboard: "full",
+    identity: { country: country.toLowerCase() },
+    configuration: { merchant: { capabilities: { card_payments: { requested: true } } } },
+    defaults: { responsibilities: { fees_collector: "stripe", losses_collector: "stripe" } },
     metadata: { channelId, login },
-  };
+  } as Stripe.V2.Core.AccountCreateParams;
 }
 
 /** Start or resume Stripe onboarding; returns the Stripe-hosted URL. */
@@ -134,7 +150,7 @@ export async function onboardingLink(channelId: string, country: string, returnT
 
   let accountId = row.stripeAccountId;
   if (!accountId) {
-    accountId = (await s.accounts.create(accountParams(channelId, row.login, country))).id;
+    accountId = (await s.v2.core.accounts.create(accountParams(channelId, row.login, country))).id;
     db.update(channels).set({ stripeAccountId: accountId }).where(eq(channels.id, channelId)).run();
     log("payments", `created Connect account ${accountId} for ${row.login} (${country})`);
   }
@@ -155,7 +171,7 @@ export async function refreshPayouts(channelId: string): Promise<boolean> {
   const row = channelRow(channelId);
   if (!s || !row?.stripeAccountId) return false;
   const acct = await s.accounts.retrieve(row.stripeAccountId);
-  const enabled = acct.capabilities?.transfers === "active";
+  const enabled = acct.charges_enabled === true;
   db.update(channels)
     .set({ payoutsEnabled: enabled ? 1 : 0 })
     .where(eq(channels.id, channelId))
@@ -234,14 +250,16 @@ export async function createCheckout(channelId: string, input: CheckoutInput): P
     ],
     payment_intent_data: {
       application_fee_amount: split.applicationFeeCents,
-      transfer_data: { destination: row.stripeAccountId },
       metadata: { paymentId, channelId, code },
     },
     metadata: { paymentId, channelId, code },
     expires_at: Math.floor(expiresAt / 1000),
     success_url: `${input.returnUrl}${input.returnUrl.includes("?") ? "&" : "?"}paid=${encodeURIComponent(code)}`,
     cancel_url: input.returnUrl,
-  });
+  },
+  // Direct charge: the session (and the payment) live on the streamer's account.
+  { stripeAccount: row.stripeAccountId },
+  );
   if (!session.url) throw new PaymentError(502, "Stripe returned no checkout URL");
 
   rt.correlation.hold(code, expiresAt + HOLD_GRACE_MS);
@@ -298,7 +316,7 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
     const channelId = account.metadata?.channelId;
     if (channelId) {
       db.update(channels)
-        .set({ payoutsEnabled: account.capabilities?.transfers === "active" ? 1 : 0 })
+        .set({ payoutsEnabled: account.charges_enabled ? 1 : 0 })
         .where(eq(channels.id, channelId))
         .run();
     }
@@ -375,10 +393,10 @@ export function settleJob(job: HijackJob, ok: boolean, reason: string): void {
   void refund(paymentId, reason);
 }
 
-/** Full refund of a destination charge: the transfer to the streamer is
- *  reversed and our application fee returned, so the viewer gets everything
- *  back. (Stripe keeps its own processing fee — the cost of a failed
- *  hijack, ~59¢ on $10, is ours.) */
+/** Full refund of a direct charge, with our application fee returned, so the
+ *  viewer gets everything back. (Stripe's processing fee on the original
+ *  charge isn't returned — it lands on the streamer's account, the cost of
+ *  a hijack their setup couldn't start.) */
 export async function refund(paymentId: string, reason: string): Promise<void> {
   const p = db.select().from(payments).where(eq(payments.id, paymentId)).get();
   if (!p || p.status === "refunded" || p.status === "delivered") return;
@@ -388,15 +406,18 @@ export async function refund(paymentId: string, reason: string): Promise<void> {
     return;
   }
   try {
+    const row = channelRow(p.channelId);
+    if (!row?.stripeAccountId) throw new Error("channel has no Stripe account");
     await s.refunds.create(
       {
         payment_intent: p.paymentIntentId,
-        reverse_transfer: true,
+        // Our application fee goes back too, so the viewer is made whole and
+        // the streamer isn't charged our fee for a hijack that never ran.
         refund_application_fee: true,
         metadata: { paymentId: p.id, reason: reason.slice(0, 200) },
       },
-      // Stripe-side idempotency too: a retried refund can't refund twice.
-      { idempotencyKey: `refund-${p.id}` },
+      // On the streamer's account (direct charge); idempotent at Stripe too.
+      { stripeAccount: row.stripeAccountId, idempotencyKey: `refund-${p.id}` },
     );
     setStatus(p.id, "refunded", { reason });
     log("payments", `refunded ${p.id.slice(0, 8)} ($${(p.amountCents / 100).toFixed(2)}): ${reason}`);

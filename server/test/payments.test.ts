@@ -21,11 +21,11 @@ import {
 
 // ── Fee math ──────────────────────────────────────────────────────────────
 
-test("fees: $10 for 10s → $1.29 to us (59¢ Stripe + 20¢ GPU + 50¢ margin), $8.71 to the streamer", () => {
+test("fees: $10 for 10s → 70¢ to us (20¢ GPU + 50¢ margin), ~59¢ to Stripe, $8.71 to the streamer", () => {
   const s = splitPayment(1000, 10);
   assert.deepEqual(
     [s.stripeFeeCents, s.gpuCents, s.marginCents, s.applicationFeeCents, s.streamerCents],
-    [59, 20, 50, 129, 871],
+    [59, 20, 50, 70, 871],
   );
 });
 
@@ -33,23 +33,23 @@ test("fees: GPU rounds up, and the fee never exceeds the payment", () => {
   assert.equal(splitPayment(300, 3, { platformFeePct: 0, gpuCostPerSec: 0.0101, stripePct: 0, stripeFixedCents: 0 }).gpuCents, 4);
   const tiny = splitPayment(50, 60);
   assert.equal(tiny.applicationFeeCents, 50);
-  assert.equal(tiny.streamerCents, 0);
+  assert.equal(tiny.streamerCents, 0, "never negative");
 });
 
 // ── Fake Stripe ───────────────────────────────────────────────────────────
 
-const calls = { sessions: 0, refunds: [] as { pi: string; reverse: boolean; fee: boolean; key?: string }[] };
+const calls = { sessions: 0, refunds: [] as { pi: string; fee: boolean; account: string; key: string }[] };
 const fake: StripeLike = {
-  accounts: {
-    create: async () => ({ id: "acct_test" }),
-    retrieve: async (id) => ({ id, capabilities: { transfers: "active" } }),
-  },
+  accounts: { retrieve: async (id) => ({ id, charges_enabled: true }) },
+  v2: { core: { accounts: { create: async () => ({ id: "acct_test" }) } } },
   accountLinks: { create: async () => ({ url: "https://connect.stripe.test/onboard" }) },
   checkout: {
     sessions: {
-      create: async (p) => {
+      create: async (p, opts) => {
         calls.sessions++;
-        assert.equal(p.payment_intent_data?.transfer_data?.destination, "acct_paid");
+        // Direct charge: created ON the streamer's account, fee to us.
+        assert.equal(opts.stripeAccount, "acct_paid");
+        assert.equal(p.payment_intent_data?.transfer_data, undefined);
         assert.ok(p.payment_intent_data?.application_fee_amount! > 0);
         return { id: `cs_test_${calls.sessions}`, url: `https://checkout.stripe.test/${calls.sessions}` };
       },
@@ -59,9 +59,9 @@ const fake: StripeLike = {
     create: async (p, opts) => {
       calls.refunds.push({
         pi: String(p.payment_intent),
-        reverse: p.reverse_transfer === true,
         fee: p.refund_application_fee === true,
-        key: opts?.idempotencyKey,
+        account: opts.stripeAccount,
+        key: opts.idempotencyKey,
       });
       return { id: `re_${calls.refunds.length}` };
     },
@@ -153,13 +153,13 @@ test("paid webhook runs the viewer's effect once; a replay is ignored; a bad sig
   assert.equal(rt.engine.snapshot().queueLength, queued);
 
   // The job never ran (the router never connected) and the runtime stops:
-  // the viewer is refunded in full — transfer reversed, our fee returned.
+  // the viewer is refunded in full, on the streamer's account, fee returned.
   const before = calls.refunds.length;
   rt.stop();
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(statusOf(sessionId), "refunded");
   const r = calls.refunds[before]!;
-  assert.deepEqual([r.pi, r.reverse, r.fee], [`pi_${sessionId}`, true, true]);
+  assert.deepEqual([r.pi, r.fee, r.account], [`pi_${sessionId}`, true, "acct_paid"]);
   assert.match(r.key ?? "", /^refund-/, "idempotent at Stripe too");
 });
 
@@ -197,7 +197,7 @@ test("payment arriving after the effect expired is refunded — never a default 
 });
 
 test("boot reconciliation refunds payments a restart orphaned", async () => {
-  upsertChannel("dev:orphan", "orphan", "Orphan");
+  payableChannel("dev:orphan").stop(); // a paid payment's channel always has an account
   const now = Date.now();
   db.insert(payments)
     .values({

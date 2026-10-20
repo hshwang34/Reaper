@@ -9,15 +9,16 @@
 import { useEffect, useState } from "react";
 import type { ApiClient, PayoutsInfo } from "../lib/api.js";
 
-/** Countries Stripe can pay out to from a US platform (Express accounts,
- *  cross-border payouts). Not exhaustive — the common streaming markets. */
+/** Countries where a streamer can open a Stripe account (they sell through
+ *  their own account — direct charges). Not exhaustive — the common
+ *  streaming markets among Stripe's supported countries. */
 export const PAYOUT_COUNTRIES: [string, string][] = [
   ["US", "United States"], ["CA", "Canada"], ["GB", "United Kingdom"], ["AU", "Australia"],
   ["NZ", "New Zealand"], ["IE", "Ireland"], ["DE", "Germany"], ["FR", "France"],
   ["ES", "Spain"], ["IT", "Italy"], ["NL", "Netherlands"], ["BE", "Belgium"],
   ["AT", "Austria"], ["CH", "Switzerland"], ["SE", "Sweden"], ["NO", "Norway"],
   ["DK", "Denmark"], ["FI", "Finland"], ["PL", "Poland"], ["PT", "Portugal"],
-  ["JP", "Japan"], ["KR", "South Korea"], ["SG", "Singapore"], ["HK", "Hong Kong"],
+  ["JP", "Japan"], ["SG", "Singapore"], ["HK", "Hong Kong"],
   ["MX", "Mexico"], ["BR", "Brazil"],
 ];
 
