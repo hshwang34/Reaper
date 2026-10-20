@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import type { ApiClient, PayoutsInfo } from "../lib/api.js";
+import { desktopBridge } from "../lib/desktop.js";
 
 /** Countries where a streamer can open a Stripe account (they sell through
  *  their own account — direct charges). Not exhaustive — the common
@@ -39,7 +40,16 @@ export function PayoutsPanel({ client, from }: { client: ApiClient; from: "app" 
     setError(null);
     try {
       const { url } = await client.startPayouts(country, from);
-      location.href = url; // Stripe-hosted onboarding; returns to /dashboard
+      // Stripe-hosted onboarding. The desktop app opens it in the system
+      // browser (its window only ever shows our own pages); it returns to
+      // /payouts-done, and this panel re-reads on the next visit.
+      const desktop = desktopBridge();
+      if (desktop) {
+        await desktop.openExternal(url);
+        setBusy(false);
+      } else {
+        location.href = url; // returns to /dashboard
+      }
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
