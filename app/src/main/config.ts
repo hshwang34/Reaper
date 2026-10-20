@@ -2,7 +2,7 @@
 // CLI keeps in the repo (.env + settings.json + uploads/).
 //
 // Layout under app.getPath("userData") (e.g. ~/Library/Application Support/
-// Reality Hijack/):
+// Stream Hijack/):
 //   settings.json — the same Settings shape as the demo rig
 //   keys.json     — Decart/Streamlabs/OBS credentials (M2 "paste keys" mode;
 //                   moves to safeStorage with the settings UI, and mostly

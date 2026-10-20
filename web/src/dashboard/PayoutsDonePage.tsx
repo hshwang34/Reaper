@@ -8,7 +8,7 @@ export default function PayoutsDonePage() {
       <div className="max-w-sm space-y-3">
         <h1 className="text-2xl font-bold">Stripe setup saved</h1>
         <p className="text-zinc-400">
-          You can close this tab and go back to Reality Hijack — it picks up
+          You can close this tab and go back to Stream Hijack — it picks up
           your payout status on its own. If Stripe still needs something from
           you, the app will offer to continue.
         </p>

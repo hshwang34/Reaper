@@ -239,7 +239,7 @@ export async function createCheckout(channelId: string, input: CheckoutInput): P
   // with nowhere to run until something refunds it.
   const snap = rt.engine.snapshot();
   if (snap.routerState === "OFFLINE") {
-    throw new PaymentError(409, "the streamer's Reality Hijack app isn't running right now — try again when they're live");
+    throw new PaymentError(409, "the streamer's Stream Hijack app isn't running right now — try again when they're live");
   }
   if (snap.paused) {
     throw new PaymentError(409, "the streamer has paused hijacks right now — try again in a bit");
@@ -273,7 +273,7 @@ export async function createCheckout(channelId: string, input: CheckoutInput): P
           currency: "usd",
           unit_amount: amountCents,
           product_data: {
-            name: `${durationSec}s Reality Hijack on twitch.tv/${row.login}`,
+            name: `${durationSec}s Stream Hijack on twitch.tv/${row.login}`,
             description: sub.presetId ? `Effect: ${sub.presetId}` : "Custom effect",
           },
         },

@@ -7,14 +7,14 @@ turn an unsigned test build into something a stranger will actually install.
 
 | Platform | File | Size | Installs to |
 |---|---|---|---|
-| macOS 13+ (Apple silicon and Intel, one universal build) | `Reality-Hijack-mac.dmg` | ~220 MB | drag to /Applications |
-| Windows 10/11, x64 | `Reality-Hijack-Setup.exe` | ~100 MB | one click, per user (`%LOCALAPPDATA%\Programs`), no admin prompt |
+| macOS 13+ (Apple silicon and Intel, one universal build) | `Stream-Hijack-mac.dmg` | ~220 MB | drag to /Applications |
+| Windows 10/11, x64 | `Stream-Hijack-Setup.exe` | ~100 MB | one click, per user (`%LOCALAPPDATA%\Programs`), no admin prompt |
 
 File names carry no version, so these links are permanent and always point
 at the newest release:
 
-- `https://github.com/hshwang34/Reaper/releases/latest/download/Reality-Hijack-mac.dmg`
-- `https://github.com/hshwang34/Reaper/releases/latest/download/Reality-Hijack-Setup.exe`
+- `https://github.com/hshwang34/Reaper/releases/latest/download/Stream-Hijack-mac.dmg`
+- `https://github.com/hshwang34/Reaper/releases/latest/download/Stream-Hijack-Setup.exe`
 
 The Mac build is **universal** on purpose. Most people don't know which chip
 their Mac has, and a download page can't detect it either (Safari reports
@@ -23,7 +23,7 @@ option with no wrong choice. It costs ~100 MB over a single-chip DMG.
 
 The `.zip` (macOS) and `latest*.yml` files beside them are for electron-updater,
 not for people. Settings live in the OS's per-user app-data folder named
-"Reality Hijack" (`~/Library/Application Support/`, `%APPDATA%\`).
+"Stream Hijack" (`~/Library/Application Support/`, `%APPDATA%\`).
 
 Most of the size is Electron's bundled Chromium (~90 MB per chip) — the router
 page needs a known-good `getUserMedia`/WebRTC stack. The rest is sharp's
@@ -126,7 +126,7 @@ signing is a launch requirement, not polish.
 
 ### macOS: Apple Developer Program ($99/yr)
 
-Without it: *"Apple could not verify 'Reality Hijack' is free of malware"*.
+Without it: *"Apple could not verify 'Stream Hijack' is free of malware"*.
 Since macOS 15 the user can't even right-click → Open. They have to go to
 System Settings → Privacy & Security → Open Anyway.
 
@@ -143,7 +143,7 @@ secrets are absent), using the hardened runtime and
 `app/build/entitlements.mac.plist`. To confirm on a Mac:
 
 ```bash
-spctl --assess --type execute -v "/Applications/Reality Hijack.app"   # → accepted, source=Notarized Developer ID
+spctl --assess --type execute -v "/Applications/Stream Hijack.app"   # → accepted, source=Notarized Developer ID
 ```
 
 ### Windows: a code-signing certificate
@@ -195,6 +195,6 @@ every later launch it re-checks the overlay source at boot.
 Create a second macOS user account (System Settings → Users & Groups) and
 install there: it has an empty app-data folder and no camera permission
 granted, so it behaves exactly like a new streamer's Mac. Deleting
-`~/Library/Application Support/Reality Hijack/` on a dev account is the
+`~/Library/Application Support/Stream Hijack/` on a dev account is the
 cheaper approximation (it keeps the camera permission). `RH_SKIP_SETUP=1`
 skips the wizard for dev runs.

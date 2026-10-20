@@ -89,7 +89,7 @@ let obsWiring = { scene: "Scene", source: "AI Hijack" };
 // Windows keys taskbar grouping, notifications and the pinned shortcut on
 // this id; it must match electron-builder's appId or the installed shortcut
 // and the running window show up as two different apps.
-if (process.platform === "win32") app.setAppUserModelId("com.realityhijack.app");
+if (process.platform === "win32") app.setAppUserModelId("com.streamhijack.app");
 
 // ── Single instance ────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -328,7 +328,7 @@ async function boot(): Promise<void> {
   win = new BrowserWindow({
     width: 1280,
     height: 840,
-    title: "Reality Hijack",
+    title: "Stream Hijack",
     // Windows/Linux draw Electron's default File/Edit/View bar inside the
     // window; the router has no use for it (Alt still reveals it).
     autoHideMenuBar: true,
@@ -515,7 +515,7 @@ function refreshTray(): void {
   // so the state goes in the hover tooltip instead.
   if (process.platform === "darwin") tray.setTitle(` ${stateGlyph}`);
   tray.setToolTip(
-    `Reality Hijack — ${snap.paused ? "PAUSED" : snap.routerState}` +
+    `Stream Hijack — ${snap.paused ? "PAUSED" : snap.routerState}` +
       (snap.queueLength ? ` · ${snap.queueLength} queued` : ""),
   );
   tray.setContextMenu(
@@ -560,7 +560,7 @@ function refreshTray(): void {
         },
       },
       { type: "separator" },
-      { label: "Quit Reality Hijack", role: "quit" },
+      { label: "Quit Stream Hijack", role: "quit" },
     ]),
   );
 }

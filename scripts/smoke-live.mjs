@@ -59,7 +59,7 @@ async function main() {
   console.log(`live smoke: ${BASE}/c/${CHANNEL}\n`);
   const pay = await (await fetch(`${BASE}/api/c/${CHANNEL}/payments`)).json();
   if (!check("channel takes payments", pay.enabled === true, JSON.stringify(pay))) return;
-  if (!check("streamer app is live (open + armed)", pay.live === true, pay.live ? "" : "open Reality Hijack and arm the camera, then rerun")) return;
+  if (!check("streamer app is live (open + armed)", pay.live === true, pay.live ? "" : "open Stream Hijack and arm the camera, then rerun")) return;
   const amount = pay.minUsd;
 
   browser = await chromium.launch({ executablePath: CHROME, headless: !process.env.SMOKE_HEADED });

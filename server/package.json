@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Reality Hijack hosted control plane — accounts, engine, minting, triggers, hosted portal",
+  "description": "Stream Hijack hosted control plane — accounts, engine, minting, triggers, hosted portal",
   "main": "./src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",

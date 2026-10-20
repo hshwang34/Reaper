@@ -1,10 +1,10 @@
 {
   "name": "@rh/app",
-  "productName": "Reality Hijack",
+  "productName": "Stream Hijack",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Reality Hijack companion app — the single download for streamers",
+  "description": "Stream Hijack companion app — the single download for streamers",
   "main": "dist/main.mjs",
   "scripts": {
     "build:main": "node scripts/build-main.mjs",

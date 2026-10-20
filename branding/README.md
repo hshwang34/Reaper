@@ -1,4 +1,4 @@
-# Reality Hijack identity
+# Stream Hijack identity
 
 The approved direction is the expressive cartoon hijacker in
 `hijacker-v2/mascot-expressive.png`. Earlier H and geometric-spy concepts are

@@ -6,9 +6,9 @@
 # binaries for every target arch — scripts/stage-resources.mjs). Signing is
 # gated on secrets: with them unset, builds are unsigned (fine for testing,
 # but Gatekeeper / SmartScreen warn); CI sets them for release.
-appId: com.realityhijack.app
-productName: Reality Hijack
-copyright: © Reality Hijack
+appId: com.streamhijack.app
+productName: Stream Hijack
+copyright: © Stream Hijack
 # Electron is hoisted to the workspace root, so electron-builder can't infer
 # the version from app/node_modules — pin it explicitly.
 electronVersion: 35.7.5
@@ -39,7 +39,7 @@ extraResources:
 # and the site links to .../releases/latest/download/<name>, which only stays
 # valid if the name doesn't change per release. The version is in the
 # release page and the app's About.
-artifactName: Reality-Hijack-${os}.${ext}
+artifactName: Stream-Hijack-${os}.${ext}
 
 mac:
   icon: build/icon.png
@@ -68,10 +68,10 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    NSCameraUsageDescription: Reality Hijack restyles your OBS Virtual Camera in real time.
+    NSCameraUsageDescription: Stream Hijack restyles your OBS Virtual Camera in real time.
 
 dmg:
-  title: Reality Hijack
+  title: Stream Hijack
 
 win:
   target:
@@ -85,8 +85,8 @@ win:
 nsis:
   oneClick: true
   perMachine: false
-  artifactName: Reality-Hijack-Setup.${ext}
-  shortcutName: Reality Hijack
+  artifactName: Stream-Hijack-Setup.${ext}
+  shortcutName: Stream Hijack
   createDesktopShortcut: true
   createStartMenuShortcut: true
   runAfterFinish: true
