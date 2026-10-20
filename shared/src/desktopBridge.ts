@@ -16,8 +16,10 @@
 export interface DesktopSetupState {
   cloudMode: boolean;
   login: string | null;
-  cloudUrl: string;
-  obs: { discovery: string; connected: boolean };
+  /** The hosted control plane, or null when none is configured — then the
+   *  wizard offers local mode only (no Twitch sign-in button to fail). */
+  cloudUrl: string | null;
+  obs: { discovery: string; connected: boolean; running: boolean };
   /** Which credentials are configured — booleans only, no secret values. */
   keys: Record<string, boolean>;
   port: number;
@@ -42,6 +44,12 @@ export interface DesktopBridge {
   /** Create/repair the hidden OBS Browser Source now. */
   provisionObs(): Promise<{ ok: boolean; detail: string }>;
   launchObs(): Promise<void>;
+  /** Switch obs-websocket on in OBS's own config (only while OBS is closed). */
+  enableObsWebsocket(): Promise<
+    "enabled" | "already-enabled" | "obs-running" | "no-config"
+  >;
+  /** Mark setup finished and relaunch into the router (picks up saved keys). */
+  setupComplete(): Promise<void>;
   /** Fire a test hijack through whichever engine owns money logic. */
   testHijack(prompt: string, durationSec: number): Promise<string>;
   setAutoLaunch(enabled: boolean): Promise<void>;

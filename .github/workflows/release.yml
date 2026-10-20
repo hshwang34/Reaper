@@ -57,8 +57,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14 # Apple silicon runner; the Intel build is cross-packaged
-            platform: --mac
+          - os: macos-14 # Apple silicon runner; the universal build needs both chips' resources staged
+            platform: --mac --universal
             archs: arm64,x64
           - os: windows-latest
             platform: --win

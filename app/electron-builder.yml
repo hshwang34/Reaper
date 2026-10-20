@@ -35,18 +35,33 @@ extraResources:
   - from: build-resources
     to: .
 
-# Fixed, space-free names: GitHub Releases mangles spaces, and the download
-# page links to these.
-artifactName: Reality-Hijack-${version}-${arch}.${ext}
+# Fixed names with no spaces and no version: GitHub Releases mangles spaces,
+# and the site links to .../releases/latest/download/<name>, which only stays
+# valid if the name doesn't change per release. The version is in the
+# release page and the app's About.
+artifactName: Reality-Hijack-${os}.${ext}
 
 mac:
   category: public.app-category.video
+  # One universal build (Apple silicon + Intel in one binary) rather than a
+  # per-chip choice on the download page: most people don't know which Mac
+  # they have, and Safari deliberately reports Apple silicon as Intel, so the
+  # page can't tell either. Costs ~100 MB over a single-arch DMG.
   # dmg = the download; zip = what electron-updater installs from.
   target:
     - target: dmg
-      arch: [arm64, x64]
+      arch: [universal]
     - target: zip
-      arch: [arm64, x64]
+      arch: [universal]
+  # @electron/universal refuses native files that are byte-identical in the
+  # arm64 and x64 builds unless they're listed here — and sharp's prebuilt
+  # binaries are, because stage-resources.mjs ships BOTH chips' copies in
+  # each build (that's what makes the merge trivial).
+  x64ArchFiles: "**/node_modules/@img/**"
+  # Signs + notarizes when the APPLE_* env vars exist (CI secrets); logs a
+  # warning and skips otherwise. Without this line electron-builder 25 never
+  # notarizes, and a signed-but-unnotarized app still hits the Gatekeeper wall.
+  notarize: true
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -69,7 +84,7 @@ win:
 nsis:
   oneClick: true
   perMachine: false
-  artifactName: Reality-Hijack-Setup-${version}.${ext}
+  artifactName: Reality-Hijack-Setup.${ext}
   shortcutName: Reality Hijack
   createDesktopShortcut: true
   createStartMenuShortcut: true

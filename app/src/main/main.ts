@@ -35,6 +35,7 @@ import {
 import { createLocalServer, type LocalServer } from "@rh/sidecar";
 import { log, warn } from "@rh/core";
 import {
+  getAppState,
   getAuthToken,
   getSettings,
   keysStatus,
@@ -42,6 +43,7 @@ import {
   moderationEnvFrom,
   safetyDir,
   saveKeys,
+  updateAppState,
   updateSettings,
   uploadsDir,
   webDistDir,
@@ -53,7 +55,12 @@ import {
   saveCloudConfig,
   type CloudConfig,
 } from "./cloudLink.js";
-import { discoverObsWebsocket, launchObs } from "./obsDiscovery.js";
+import {
+  discoverObsWebsocket,
+  enableObsWebsocket,
+  isObsRunning,
+  launchObs,
+} from "./obsDiscovery.js";
 import { signInWithBrowser } from "./signIn.js";
 import { startAutoUpdate } from "./updater.js";
 
@@ -68,6 +75,8 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 /** Canonical viewer URL (with auth) — set at boot, reused by tray actions. */
 let viewerUrlGlobal = "";
+/** The bridge's origin — the only thing the router window may navigate to. */
+let ownOriginGlobal = "";
 /** OBS scene + source the overlay lives in — resolved once at boot from
  *  keys.json / .env (machine wiring, not streamer Settings). */
 let obsWiring = { scene: "Scene", source: "AI Hijack" };
@@ -177,11 +186,19 @@ async function boot(): Promise<void> {
     void link.start();
   }
 
+  // ── First run vs. returning ────────────────────────────────────────────
+  // Until the wizard has finished once, every launch opens /setup. The
+  // router page is the product, but it's a capture surface with an "Arm
+  // camera" button — not a first screen. RH_SKIP_SETUP=1 is the dev escape.
+  const firstRun = !getAppState().setupDone && !process.env.RH_SKIP_SETUP;
+
   // ── OBS auto-provisioning (best-effort; retried via tray or next boot) ──
   // The viewer URL carries the privilege token: the OBS page must register
   // the "viewer" hub role, which is auth-gated (stream-hijack hardening).
+  // On a first run this is the wizard's consent-gated step instead: the app
+  // shouldn't add a source to someone's OBS before they've seen it explained.
   viewerUrlGlobal = `http://127.0.0.1:${port}/viewer?auth=${authToken}`;
-  void provisionObs(viewerUrlGlobal);
+  if (!firstRun) void provisionObs(viewerUrlGlobal);
 
   // ── Keys/settings IPC for the in-app setup panel ───────────────────────
   // Only our own loopback pages get the install token (see preload.ts).
@@ -211,8 +228,13 @@ async function boot(): Promise<void> {
   });
 
   // ── Setup-wizard IPC ───────────────────────────────────────────────────
+  // The hosted control plane: RH_CLOUD_URL, or the dev server when running
+  // from the repo. A packaged build with no URL configured has nothing to
+  // sign in to, so it gets null and the wizard offers local mode only —
+  // better than a "Sign in with Twitch" button that fails.
   const cloudUrl =
-    process.env.RH_CLOUD_URL?.trim() || "http://127.0.0.1:8790";
+    process.env.RH_CLOUD_URL?.trim() ||
+    (app.isPackaged ? null : "http://127.0.0.1:8790");
   ipcMain.handle("rh:setup-state", () => ({
     cloudMode,
     login: cloudCfg?.login ?? null,
@@ -220,6 +242,7 @@ async function boot(): Promise<void> {
     obs: {
       discovery: discoverObsWebsocket().status,
       connected: local?.obs.isConnected() ?? false,
+      running: isObsRunning(),
     },
     keys: keysStatus(),
     port,
@@ -228,6 +251,7 @@ async function boot(): Promise<void> {
     autoLaunch: app.getLoginItemSettings().openAtLogin,
   }));
   ipcMain.handle("rh:sign-in", async () => {
+    if (!cloudUrl) return { ok: false };
     const cfg = await signInWithBrowser(cloudUrl);
     if (!cfg) return { ok: false };
     // Rebuild the composition in cloud mode.
@@ -256,6 +280,26 @@ async function boot(): Promise<void> {
   // Throws (→ the wizard shows the message) when OBS isn't where its
   // installer puts it; the streamer can always start OBS themselves.
   ipcMain.handle("rh:launch-obs", () => launchObs());
+  ipcMain.handle("rh:enable-obs-websocket", () => {
+    const result = enableObsWebsocket();
+    if (result === "enabled" || result === "already-enabled") {
+      // The bridge connected (or failed to) at boot with whatever discovery
+      // found then — re-read the file so the next connect uses the real
+      // port/password, then start OBS so the wizard's next poll sees it.
+      const d = discoverObsWebsocket();
+      if (d.status === "found" && d.url) local?.obs.reconfigure(d.url, d.password ?? "");
+      void launchObs().catch((e) => warn("app", `launch OBS: ${(e as Error).message}`));
+    }
+    return result;
+  });
+  ipcMain.handle("rh:setup-complete", () => {
+    updateAppState({ setupDone: true });
+    log("app", "setup complete — relaunching into the router");
+    // A relaunch (not a navigation) so keys pasted during setup are loaded
+    // by the bridge, which only reads them at boot.
+    app.relaunch();
+    app.exit(0);
+  });
   ipcMain.handle("rh:test-hijack", async (_e, prompt: string, d: number) => {
     if (link) return link.devHijack(prompt, d);
     return local!.engine.manual(prompt, d);
@@ -286,6 +330,7 @@ async function boot(): Promise<void> {
   // it holds the install token and the desktop bridge. External links go
   // through rh:open-external → the system browser.
   const ownOrigin = `http://127.0.0.1:${port}`;
+  ownOriginGlobal = ownOrigin;
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -295,7 +340,7 @@ async function boot(): Promise<void> {
   });
   // Closing the window quits the app (the router IS the product for now);
   // tray-only residency arrives with the M4 wizard polish.
-  void win.loadURL(`http://127.0.0.1:${port}/router`);
+  void win.loadURL(`http://127.0.0.1:${port}/${firstRun ? "setup" : "router"}`);
   win.on("closed", () => {
     win = null;
   });
@@ -467,6 +512,15 @@ function refreshTray(): void {
       {
         label: "Re-provision OBS source",
         click: () => void provisionObs(viewerUrlGlobal),
+      },
+      {
+        label: "Run setup again…",
+        click: () => {
+          if (!win || !local) return;
+          void win.loadURL(`${ownOriginGlobal}/setup`);
+          win.show();
+          win.focus();
+        },
       },
       { type: "separator" },
       {

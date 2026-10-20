@@ -149,6 +149,8 @@ function SignInStep({
   next: () => void;
 }) {
   const [waiting, setWaiting] = useState(false);
+  const [decartKey, setDecartKey] = useState("");
+  const [saved, setSaved] = useState(false);
   if (state.cloudMode) {
     return (
       <Card>
@@ -158,6 +160,49 @@ function SignInStep({
           keys on this machine.
         </p>
         <Primary onClick={next}>Continue</Primary>
+      </Card>
+    );
+  }
+  // No hosted control plane configured (the case for every build until the
+  // server is deployed): the app runs on this machine with keys the streamer
+  // pastes. The Decart key is the only one that changes what the test
+  // hijack does — without it the app passes the camera through unchanged.
+  if (!state.cloudUrl) {
+    const hasKey = state.keys.decartApiKey || saved;
+    return (
+      <Card>
+        <p className="text-zinc-300">
+          Reality Hijack runs on this computer. Paste your <b>Decart API key</b>{" "}
+          to get real AI effects — without one, the app runs in a passthrough
+          demo mode so you can still try the whole flow.
+        </p>
+        {hasKey ? (
+          <p className="text-sm text-emerald-400">✓ Decart key saved — it loads when setup finishes.</p>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={decartKey}
+              onChange={(e) => setDecartKey(e.target.value)}
+              placeholder="sk-…"
+              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"
+            />
+            <button
+              disabled={!decartKey.trim()}
+              onClick={() =>
+                void d.saveKeys({ decartApiKey: decartKey.trim() }).then(() => setSaved(true))
+              }
+              className="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700 disabled:opacity-40"
+            >
+              Save
+            </button>
+          </div>
+        )}
+        <p className="text-xs text-zinc-500">
+          Tips, moderation keys and OBS details can be added later from the
+          router page's <b>App credentials</b> panel.
+        </p>
+        <Primary onClick={next}>{hasKey ? "Continue" : "Continue in demo mode"}</Primary>
       </Card>
     );
   }
@@ -263,7 +308,9 @@ function ObsStep({
   next: () => void;
 }) {
   const [result, setResult] = useState<string | null>(null);
+  const [enabling, setEnabling] = useState(false);
   const disc = state.obs.discovery;
+  const obsRunning = state.obs.running;
 
   return (
     <Card>
@@ -280,11 +327,42 @@ function ObsStep({
         </>
       )}
       {disc === "disabled" && (
-        <p className="text-zinc-300">
-          OBS is installed but its <b>WebSocket server is off</b>. In OBS:
-          Tools → WebSocket Server Settings → Enable. The app picks it up
-          automatically.
-        </p>
+        <>
+          <p className="text-zinc-300">
+            OBS is installed but its <b>WebSocket server is off</b> — that's
+            how the app talks to OBS. We can switch it on for you; OBS only
+            reads the setting when it starts, so it has to be closed first.
+          </p>
+          {obsRunning ? (
+            <p className="text-sm text-amber-400">
+              OBS is running — quit it, and this button unlocks on its own.
+            </p>
+          ) : (
+            <p className="text-sm text-zinc-500">
+              Or do it by hand in OBS: Tools → WebSocket Server Settings → Enable.
+            </p>
+          )}
+          <Primary
+            disabled={obsRunning || enabling}
+            onClick={() => {
+              setEnabling(true);
+              setResult(null);
+              void d
+                .enableObsWebsocket()
+                .then((r) => {
+                  if (r === "obs-running") setResult("OBS is still running — quit it and try again.");
+                  else if (r === "no-config") setResult("OBS has never been started on this computer — launch it once, quit, and try again.");
+                  else setResult("Enabled. Starting OBS — this page connects on its own.");
+                  refresh();
+                })
+                .catch((e) => setResult(`Couldn't enable it: ${ipcMessage(e)}`))
+                .finally(() => setEnabling(false));
+            }}
+          >
+            {enabling ? "Enabling…" : "Enable it for me and start OBS"}
+          </Primary>
+          {result && <p className="text-sm text-zinc-300">{result}</p>}
+        </>
       )}
       {(disc === "found" || disc === "unreadable") && !state.obs.connected && (
         <>
@@ -463,6 +541,7 @@ function TestStep({ d, next }: { d: RhDesktopSetup; next: () => void }) {
 
 function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
   const [auto, setAuto] = useState(state.autoLaunch);
+  const [finishing, setFinishing] = useState(false);
   const portal = state.portalUrl;
   return (
     <Card>
@@ -504,12 +583,17 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
         />
         Start Reality Hijack when I log in
       </label>
-      <a
-        href="/router"
-        className="inline-block rounded-lg bg-fuchsia-600 px-5 py-2 font-semibold hover:bg-fuchsia-500"
+      {/* Marks setup done and relaunches: from now on the app opens straight
+          into the router, and any key pasted in step 1 is loaded. */}
+      <Primary
+        disabled={finishing}
+        onClick={() => {
+          setFinishing(true);
+          void d.setupComplete();
+        }}
       >
-        Open the router →
-      </a>
+        {finishing ? "Restarting…" : "Open Reality Hijack →"}
+      </Primary>
     </Card>
   );
 }

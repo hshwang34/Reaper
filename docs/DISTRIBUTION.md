@@ -7,18 +7,28 @@ turn an unsigned test build into something a stranger will actually install.
 
 | Platform | File | Size | Installs to |
 |---|---|---|---|
-| macOS, Apple silicon | `Reality-Hijack-<v>-arm64.dmg` | ~145 MB | drag to /Applications |
-| macOS, Intel | `Reality-Hijack-<v>-x64.dmg` | ~150 MB | drag to /Applications |
-| Windows 10/11, x64 | `Reality-Hijack-Setup-<v>.exe` | ~100 MB | one click, per user (`%LOCALAPPDATA%\Programs`), no admin prompt |
+| macOS 13+ (Apple silicon and Intel, one universal build) | `Reality-Hijack-mac.dmg` | ~220 MB | drag to /Applications |
+| Windows 10/11, x64 | `Reality-Hijack-Setup.exe` | ~100 MB | one click, per user (`%LOCALAPPDATA%\Programs`), no admin prompt |
+
+File names carry no version, so these links are permanent and always point
+at the newest release:
+
+- `https://github.com/hshwang34/Reaper/releases/latest/download/Reality-Hijack-mac.dmg`
+- `https://github.com/hshwang34/Reaper/releases/latest/download/Reality-Hijack-Setup.exe`
+
+The Mac build is **universal** on purpose. Most people don't know which chip
+their Mac has, and a download page can't detect it either (Safari reports
+Apple silicon as Intel), so one file that runs natively on both is the only
+option with no wrong choice. It costs ~100 MB over a single-chip DMG.
 
 The `.zip` (macOS) and `latest*.yml` files beside them are for electron-updater,
 not for people. Settings live in the OS's per-user app-data folder named
 "Reality Hijack" (`~/Library/Application Support/`, `%APPDATA%\`).
 
-Most of the size is Electron's bundled Chromium (~90 MB) — the router page
-needs a known-good `getUserMedia`/WebRTC stack. The rest is sharp's native
-image binaries (content safety) and the Decart SDK with its LiveKit deps,
-staged by `app/scripts/stage-resources.mjs`.
+Most of the size is Electron's bundled Chromium (~90 MB per chip) — the router
+page needs a known-good `getUserMedia`/WebRTC stack. The rest is sharp's
+native image binaries (content safety) and the Decart SDK with its LiveKit
+deps, staged by `app/scripts/stage-resources.mjs`.
 
 ## Building
 
@@ -32,9 +42,13 @@ bundled Wine for icon/metadata stamping):
 
 ```bash
 cd app
-RH_ARCHS=arm64,x64 npm run prepackage && npx electron-builder --mac --publish never
+RH_ARCHS=arm64,x64 npm run prepackage && npx electron-builder --mac --universal --publish never
 RH_PLATFORM=win32 RH_ARCHS=x64 node scripts/stage-resources.mjs && npx electron-builder --win --publish never
 ```
+
+The universal build packages arm64 and x64 apps and merges them; it needs
+both chips' sharp binaries staged (`RH_ARCHS=arm64,x64`), which is also what
+lets the merge go through without special-casing (`mac.x64ArchFiles`).
 
 `RH_ARCHS`/`RH_PLATFORM` tell the staging step which sharp binaries to ship —
 npm only installs the build machine's own, so the rest are fetched with
@@ -78,9 +92,14 @@ System Settings → Privacy & Security → Open Anyway.
 4. Repo secrets: `CSC_LINK` (base64 of the .p12), `CSC_KEY_PASSWORD`,
    `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`.
 
-The next tagged build is then signed **and notarized**. Notarization is
-automatic when the `APPLE_*` secrets exist, using the hardened runtime and
-`app/build/entitlements.mac.plist`.
+The next tagged build is then signed **and notarized** (`mac.notarize: true`
+in `electron-builder.yml`; it skips with a warning while the `APPLE_*`
+secrets are absent), using the hardened runtime and
+`app/build/entitlements.mac.plist`. To confirm on a Mac:
+
+```bash
+spctl --assess --type execute -v "/Applications/Reality Hijack.app"   # → accepted, source=Notarized Developer ID
+```
 
 ### Windows: a code-signing certificate
 
@@ -100,17 +119,32 @@ when the account exists.
 
 1. Download and open the DMG/installer. macOS asks for **camera** access on
    first launch; on Windows, camera access follows the OS privacy setting.
-2. The setup wizard (`/setup`) covers these steps:
-   - Twitch sign-in
+2. **First launch opens the setup wizard** (`/setup`), and keeps doing so
+   until it has been finished once (`app-state.json` → `setupDone`). The
+   wizard's steps:
+   - account: Twitch sign-in when a hosted control plane is configured
+     (`RH_CLOUD_URL`); otherwise **local mode**, with an optional Decart key
+     paste (no key = passthrough demo)
    - camera
-   - OBS: the app finds OBS's websocket settings itself and creates the
-     hidden **AI Hijack** source in one click
+   - OBS: the app finds OBS's websocket settings itself. If the server is
+     off, **"Enable it for me and start OBS"** flips it in OBS's config
+     (only while OBS is closed, since OBS rewrites that file on quit) and
+     launches OBS. Then one click creates the hidden **AI Hijack** source.
    - tips
    - the safety acknowledgement
    - a test hijack
+   - done → the app relaunches into the router with everything loaded
 3. The app then lives in the menu bar (macOS) or notification area (Windows).
-   Panic is ⌘⇧H or Ctrl+Shift+H.
+   Panic is ⌘⇧H or Ctrl+Shift+H. "Run setup again…" is in the tray menu.
 
-OBS's WebSocket server is off by default in fresh installs. The wizard detects
-that and says where to switch it on (Tools → WebSocket Server Settings). It's
-the one manual step left.
+On a first run the app never touches OBS before the wizard's OBS step; on
+every later launch it re-checks the overlay source at boot.
+
+### Testing a first run honestly
+
+Create a second macOS user account (System Settings → Users & Groups) and
+install there: it has an empty app-data folder and no camera permission
+granted, so it behaves exactly like a new streamer's Mac. Deleting
+`~/Library/Application Support/Reality Hijack/` on a dev account is the
+cheaper approximation (it keeps the camera permission). `RH_SKIP_SETUP=1`
+skips the wizard for dev runs.
