@@ -171,7 +171,7 @@ export default function ViewerPage() {
             </span>
           )}
           {chips.attribution && (
-            <span className="rounded-md bg-black/70 px-2.5 py-1 text-sm text-fuchsia-200 ring-1 ring-fuchsia-300/30">
+            <span className="rounded-md bg-black/70 px-2.5 py-1 text-sm text-brand-200 ring-1 ring-brand-300/30">
               hijacked by {chips.attribution}
             </span>
           )}

@@ -102,7 +102,7 @@ export function DesktopCredentials() {
       <button
         onClick={() => void save()}
         disabled={!dirty || saving}
-        className="mt-4 rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-semibold hover:bg-sky-500 disabled:opacity-40"
+        className="mt-4 rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-semibold hover:bg-brand-700 disabled:opacity-40"
       >
         {saving ? "Saving…" : "Save & restart app"}
       </button>
