@@ -12,8 +12,9 @@ import ViewerPage from "./viewer/ViewerPage.js";
 import DecartTestPage from "./decarttest/DecartTestPage.js";
 import SetupPage from "./setup/SetupPage.js";
 import DashboardPage from "./dashboard/DashboardPage.js";
+import BrandShell from "./BrandShell.js";
 
-const router = createBrowserRouter([
+const router = createBrowserRouter([{ element: <BrandShell />, children: [
   { path: "/", element: <Navigate to="/portal" replace /> },
   { path: "/portal", element: <PortalPage /> },
   // Hosted portal: the control plane serves the same SPA at /c/<channel>
@@ -26,7 +27,7 @@ const router = createBrowserRouter([
   { path: "/router", element: <RouterPage /> },
   { path: "/viewer", element: <ViewerPage /> },
   { path: "/decart-test", element: <DecartTestPage /> },
-]);
+]}]);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

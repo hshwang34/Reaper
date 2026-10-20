@@ -269,6 +269,7 @@ async function boot(): Promise<void> {
     width: 1280,
     height: 840,
     title: "Reality Hijack",
+    icon: resolve(webDistDir(), "brand/icon-512.png"),
     webPreferences: {
       // The countdown + teardown timers must run while minimized/occluded.
       backgroundThrottling: false,
@@ -404,9 +405,10 @@ async function provisionObs(viewerUrl: string): Promise<void> {
 // ── Tray ──────────────────────────────────────────────────────────────────
 
 function setupTray(port: number): void {
-  // Text-only tray (macOS): an empty image + a title glyph. A real template
-  // icon lands with M5 packaging.
-  tray = new Tray(nativeImage.createEmpty());
+  const trayIcon = nativeImage.createFromPath(
+    resolve(webDistDir(), "brand/icon-180.png"),
+  ).resize({ width: 18, height: 18 });
+  tray = new Tray(trayIcon);
   tray.setToolTip("Reality Hijack");
   void port; // reserved: shown in a future tray "about" line
   refreshTray();

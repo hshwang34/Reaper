@@ -195,8 +195,8 @@ export default function PortalPage() {
   return (
     <div className="mx-auto max-w-xl p-6">
       <header className="mb-6 text-center">
-        <h1 className="bg-gradient-to-r from-fuchsia-400 to-cyan-400 bg-clip-text text-3xl font-black text-transparent">
-          Reality Hijack
+        <h1 className="text-3xl font-black text-zinc-100">
+          Your turn to hijack the stream.
         </h1>
         <p className="mt-1 text-sm text-zinc-400">
           Transform the streamer's room in real time. $
@@ -223,7 +223,7 @@ export default function PortalPage() {
                   onClick={() => pickPreset(p.id)}
                   className={`relative rounded-xl border p-3 text-left transition ${
                     presetId === p.id
-                      ? "border-fuchsia-500 bg-fuchsia-500/10"
+                      ? "border-brand-500 bg-brand-500/10"
                       : "border-zinc-800 bg-zinc-900 hover:border-zinc-600"
                   }`}
                 >
@@ -265,7 +265,7 @@ export default function PortalPage() {
                 }}
                 placeholder="e.g. turn the room into a snow globe"
                 rows={2}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-sm outline-none focus:border-cyan-500"
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-sm outline-none focus:border-brand-500"
               />
               <p className="mt-1 text-xs text-zinc-600">
                 Checked by an AI moderator against the streamer's rules before
@@ -349,7 +349,7 @@ export default function PortalPage() {
                 type="checkbox"
                 checked={enhance}
                 onChange={(e) => setEnhance(e.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-fuchsia-500"
+                className="mt-0.5 h-4 w-4 accent-brand-500"
               />
               <span className="text-sm">
                 <span className="font-semibold text-zinc-200">Enhance prompt</span>
@@ -393,7 +393,7 @@ export default function PortalPage() {
           <button
             onClick={submit}
             disabled={submitting}
-            className="w-full rounded-xl bg-gradient-to-r from-fuchsia-600 to-cyan-600 px-4 py-3 font-bold hover:opacity-90 disabled:opacity-50"
+            className="w-full rounded-xl bg-brand-600 px-4 py-3 font-bold hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? "Submitting…" : "Get my claim code"}
           </button>
@@ -528,11 +528,11 @@ function ClaimView(props: {
 
   return (
     <div className="space-y-6 text-center">
-      <div className="rounded-2xl border border-fuchsia-500/40 bg-fuchsia-500/5 p-6">
+      <div className="rounded-2xl border border-brand-500/40 bg-brand-500/5 p-6">
         <p className="text-sm text-zinc-400">
           Include this code in your tip message:
         </p>
-        <p className="my-2 font-mono text-5xl font-black tracking-[0.3em] text-fuchsia-300">
+        <p className="my-2 font-mono text-5xl font-black tracking-[0.3em] text-brand-300">
           {code}
         </p>
         {stillWaiting && secsLeft != null && !expired && (
@@ -594,7 +594,7 @@ function StatusTimeline({
   };
   const tone =
     state === "live"
-      ? "text-fuchsia-300"
+      ? "text-brand-300"
       : state === "done"
         ? "text-emerald-400"
         : state === "expired" || state === "failed"

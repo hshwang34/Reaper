@@ -69,7 +69,7 @@ export default function SetupPage() {
               key={label}
               className={`rounded-full px-3 py-1 ${
                 i === step
-                  ? "bg-fuchsia-600 font-semibold"
+                  ? "bg-brand-600 font-semibold"
                   : i < step
                     ? "bg-emerald-800 text-emerald-200"
                     : "bg-zinc-800 text-zinc-500"
@@ -121,7 +121,7 @@ function Primary(props: {
     <button
       onClick={props.onClick}
       disabled={props.disabled}
-      className="rounded-lg bg-fuchsia-600 px-5 py-2 font-semibold hover:bg-fuchsia-500 disabled:opacity-40"
+      className="rounded-lg bg-brand-600 px-5 py-2 font-semibold hover:bg-brand-700 disabled:opacity-40"
     >
       {props.children}
     </button>
@@ -152,7 +152,7 @@ function SignInStep({
     return (
       <Card>
         <p>
-          Signed in as <b className="text-fuchsia-400">{state.login}</b>. Your
+          Signed in as <b className="text-brand-400">{state.login}</b>. Your
           viewer portal and tips run through the Reality Hijack cloud — no API
           keys on this machine.
         </p>
@@ -499,7 +499,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
       </label>
       <a
         href="/router"
-        className="inline-block rounded-lg bg-fuchsia-600 px-5 py-2 font-semibold hover:bg-fuchsia-500"
+        className="inline-block rounded-lg bg-brand-600 px-5 py-2 font-semibold hover:bg-brand-700"
       >
         Open the router →
       </a>
