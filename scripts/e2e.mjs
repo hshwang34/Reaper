@@ -296,7 +296,9 @@ async function main() {
   const portal = await ctx.newPage();
   await portal.goto(`${base}/portal`);
   const promptBox = portal.getByPlaceholder(/snow globe/i);
-  if (await promptBox.isVisible().catch(() => false)) {
+  // The box renders only after the portal fetches its config — isVisible()
+  // doesn't wait, so on a slow CI runner it raced the first render.
+  if (await promptBox.waitFor({ timeout: 10_000 }).then(() => true, () => false)) {
     await promptBox.fill("a nude beach with naked surfers");
     await promptBox.press("Enter");
     const shownFindings = await waitFor(async () => /Didn't pass/.test(await portal.locator("body").innerText()), 8000);

@@ -13,12 +13,12 @@
 // same wizard is covered by scripts/e2e-hosted.mjs.
 //
 // Needs Google Chrome (CHROME_PATH to override).
+
+import { spawn, execSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { join } from "node:path";
-
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { encode, decode } from "@msgpack/msgpack";
