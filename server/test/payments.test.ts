@@ -10,6 +10,7 @@ import { getRuntime } from "../src/channels.js";
 import { channels, db, payments, tokenMints } from "../src/db.js";
 import { splitPayment } from "../src/fees.js";
 import {
+  onboardingLink,
   createCheckout,
   handleWebhook,
   PaymentError,
@@ -41,7 +42,18 @@ test("fees: GPU rounds up, and the fee never exceeds the payment", () => {
 const calls = { sessions: 0, refunds: [] as { pi: string; fee: boolean; account: string; key: string }[] };
 const fake: StripeLike = {
   accounts: { retrieve: async (id) => ({ id, charges_enabled: true }) },
-  v2: { core: { accounts: { create: async () => ({ id: "acct_test" }) } } },
+  v2: {
+    core: {
+      accounts: {
+        create: async (p, opts) => {
+          // Express + Managed Risk is preview-only: the version must ride along.
+          assert.equal(p.dashboard, "express");
+          assert.equal(opts.apiVersion, "2026-09-30.preview");
+          return { id: "acct_test" };
+        },
+      },
+    },
+  },
   accountLinks: { create: async () => ({ url: "https://connect.stripe.test/onboard" }) },
   checkout: {
     sessions: {
@@ -265,4 +277,15 @@ test("a forged session can't pay for someone else's payment (wrong session, acco
   await handleWebhook(paidEvent("evt_f4", sessionId), "ok");
   assert.equal(statusOf(sessionId), "paid");
   rt.stop();
+});
+
+test("onboarding creates ONE Express + Managed Risk account per channel, then reuses it", async () => {
+  upsertChannel("dev:onboard", "onboard", "Onboard");
+  const url = await onboardingLink("dev:onboard", "US", "/dashboard");
+  assert.equal(url, "https://connect.stripe.test/onboard");
+  const row = db.select().from(channels).where(eq(channels.id, "dev:onboard")).get()!;
+  assert.equal(row.stripeAccountId, "acct_test");
+  await onboardingLink("dev:onboard", "US", "/dashboard"); // resume: no second account
+  await assert.rejects(onboardingLink("dev:onboard", "usa", "/dashboard"), (e) => e instanceof PaymentError && e.status === 400);
+  getRuntime("dev:onboard")?.stop();
 });

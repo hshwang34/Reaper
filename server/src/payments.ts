@@ -6,7 +6,7 @@
 // pays the streamer directly — the server only HEARS about a tip and can
 // never subtract anything from it. The payment has to be created by us.
 //
-// Model: DIRECT charges with Stripe "Managed Risk". The viewer pays on the
+// Model: DIRECT charges with Stripe "Managed Risk" on Express accounts. The viewer pays on the
 // streamer's own Stripe account (the streamer is the seller of record and
 // pays Stripe's fee); our application fee is split off automatically. Stripe
 // screens fraud and absorbs unrecoverable losses (stolen-card chargebacks) —
@@ -15,7 +15,7 @@
 //
 // The flow:
 //   1. Streamer onboards (dashboard / setup wizard): an Accounts v2 account
-//      with the full Stripe Dashboard, Stripe as fees + losses collector,
+//      with the Express Dashboard, Stripe as fees + losses collector,
 //      Stripe-hosted onboarding. `payouts_enabled` mirrors the account's
 //      `charges_enabled`; until then the portal can't take payments.
 //   2. Viewer submits an effect (moderated, as before) → gets a code → POST
@@ -56,7 +56,7 @@ export interface StripeLike {
   v2: {
     core: {
       accounts: {
-        create(p: Stripe.V2.Core.AccountCreateParams): Promise<{ id: string }>;
+        create(p: Stripe.V2.Core.AccountCreateParams, opts: { apiVersion: string }): Promise<{ id: string }>;
       };
     };
   };
@@ -124,15 +124,21 @@ function channelRow(channelId: string) {
 
 // ── 1. Streamer onboarding ────────────────────────────────────────────────
 
-/** A Connect account the streamer sells through: Accounts v2, full Stripe
- *  Dashboard (they're a real Stripe merchant), card payments, and Stripe as
- *  both fees and losses collector — "Managed Risk". (Accounts v1 `type:
+/** Express Dashboard + Managed Risk is a Stripe public preview: account
+ *  creation (only) must name the preview API version. Everything else —
+ *  onboarding links, status, checkout, refunds — uses the stable API. */
+const EXPRESS_MANAGED_RISK_API = "2026-09-30.preview";
+
+/** A Connect account the streamer sells through: Accounts v2 with the
+ *  lightweight Express Dashboard (the short Stripe-hosted onboarding — the
+ *  full Dashboard's setup asks for far more), card payments, and Stripe as
+ *  both fees and losses collector ("Managed Risk"). Accounts v1 `type:
  *  express` is refused for new platforms unless the platform assumes loss
- *  liability, which we deliberately don't.) */
+ *  liability, which we deliberately don't. */
 function accountParams(channelId: string, login: string, country: string): Stripe.V2.Core.AccountCreateParams {
   return {
     display_name: `twitch.tv/${login}`,
-    dashboard: "full",
+    dashboard: "express",
     identity: { country: country.toLowerCase() },
     configuration: { merchant: { capabilities: { card_payments: { requested: true } } } },
     defaults: { responsibilities: { fees_collector: "stripe", losses_collector: "stripe" } },
@@ -150,7 +156,11 @@ export async function onboardingLink(channelId: string, country: string, returnT
 
   let accountId = row.stripeAccountId;
   if (!accountId) {
-    accountId = (await s.v2.core.accounts.create(accountParams(channelId, row.login, country))).id;
+    accountId = (
+      await s.v2.core.accounts.create(accountParams(channelId, row.login, country), {
+        apiVersion: EXPRESS_MANAGED_RISK_API,
+      })
+    ).id;
     db.update(channels).set({ stripeAccountId: accountId }).where(eq(channels.id, channelId)).run();
     log("payments", `created Connect account ${accountId} for ${row.login} (${country})`);
   }
