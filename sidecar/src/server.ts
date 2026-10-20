@@ -281,7 +281,10 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     app.use("/api", (req, res, next) => {
       if (!FORWARD.test(req.path) || (req.method !== "GET" && req.method !== "POST")) return next();
       requireAuth(req, res, () => {
-        const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+        // Forward an allowlist of query params only: the local install
+        // token can ride in ?auth=, and it must never leave this machine.
+        const limit = Number(req.query.limit);
+        const qs = Number.isFinite(limit) && limit > 0 ? `?limit=${Math.floor(limit)}` : "";
         cloud
           .request(req.method as "GET" | "POST", req.path.slice(1) + qs, req.body)
           .then(({ status, body }) => res.status(status).json(body))
