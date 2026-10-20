@@ -51,22 +51,36 @@ export function PayoutsPanel({ client, from }: { client: ApiClient; from: "app" 
     return <p className="text-sm text-zinc-500">Payments aren't configured on this server (dev mode).</p>;
   }
 
-  const delivered = info.earnings.find((e) => e.status === "delivered");
-  const refunded = info.earnings.find((e) => e.status === "refunded");
+  const by = (status: string) => info.earnings.find((e) => e.status === status);
+  const delivered = by("delivered");
+  const waiting = by("paid"); // paid, hijack not played yet (queued / router offline)
+  const refunded = by("refunded");
+  const review = by("failed_after_start");
+  const share = (row?: { gross: number; fees: number }) => (row ? row.gross - row.fees : 0);
 
   return (
     <div className="space-y-3 text-sm">
       {info.enabled ? (
         <>
           <p className="text-emerald-400">✓ Viewers can pay for hijacks on your page.</p>
-          <div className="grid grid-cols-3 gap-3">
-            <Stat label="Hijacks paid" value={String(delivered?.n ?? 0)} />
-            <Stat label="Your share" value={usd((delivered?.gross ?? 0) - (delivered?.fees ?? 0))} />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Played" value={String(delivered?.n ?? 0)} />
+            <Stat
+              label="Waiting to play"
+              value={String(waiting?.n ?? 0)}
+              hint={waiting ? `${usd(share(waiting))} — plays when your app is live` : undefined}
+            />
+            <Stat label="Your share (played)" value={usd(share(delivered))} hint="before Stripe's card fee" />
             <Stat label="Refunded" value={String(refunded?.n ?? 0)} />
           </div>
+          {review && (
+            <p className="text-xs text-amber-400">
+              {review.n} paid hijack(s) failed after starting — held for review, not refunded automatically.
+            </p>
+          )}
           <p className="text-xs text-zinc-500">
-            Payouts arrive in your Stripe account on Stripe's schedule. Failed
-            hijacks are refunded to the viewer automatically.
+            Payouts arrive in your Stripe account on Stripe's schedule. A paid
+            hijack that never starts is refunded to the viewer automatically.
           </p>
         </>
       ) : (
@@ -108,11 +122,12 @@ export function PayoutsPanel({ client, from }: { client: ApiClient; from: "app" 
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-lg bg-zinc-900 p-3">
       <p className="text-xs text-zinc-500">{label}</p>
       <p className="text-lg font-bold">{value}</p>
+      {hint && <p className="mt-0.5 text-[11px] text-zinc-500">{hint}</p>}
     </div>
   );
 }
