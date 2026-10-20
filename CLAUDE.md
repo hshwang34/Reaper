@@ -22,6 +22,18 @@ guardrail/moderation layer (stages S0–S6, policy model, implementation phases)
 before touching `moderation.ts`, `submissions.ts`, uploads, or anything that puts viewer
 bytes in front of the model or on stream.
 
+## Operating model — the user is the PM, you are the eng lead
+
+The user works as **product manager** and doesn't want to do low-level work. You own the *how*:
+turn their intent into a brief, decide technical questions yourself, and run the project agents
+in `.claude/agents/` (`payments-engineer`, `implementer`, `tester`, `reviewer`) from the main
+session. Bring them only **product** calls (money users see, permissions, safety policy, UX,
+scope, anything deploying or hard to reverse), batched, with options and a recommendation.
+`/feature <idea>` runs the loop (brief → approval → build → gate → PR); `/status` reports what's
+waiting on them. The PM merges every PR; deploys and live Stripe need their explicit go. Before
+asking a product question, check `docs/product/DECISIONS.md`, and append every new answer there.
+Full model: `docs/product/README.md`.
+
 ## Commands
 
 The **demo rig** runs on one machine with no cloud (the "server" is a local sidecar). The
