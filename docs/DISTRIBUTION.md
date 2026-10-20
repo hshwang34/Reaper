@@ -56,6 +56,15 @@ npm only installs the build machine's own, so the rest are fetched with
 image upload on a streamer's machine. Release builds go through CI instead,
 which builds Windows on Windows.
 
+## The hosted control plane
+
+The app is hosted-first: it is useful to a streamer only once `server/` is
+deployed and its public URL is set as the `RH_CLOUD_URL` repository variable
+(Settings → Secrets and variables → Actions → Variables). Every build after
+that signs in against it; builds before it carry no sign-in. Deploying the
+server (a host, a domain, a Twitch developer application) is its own project
+and is not covered here.
+
 ## Releasing
 
 1. Bump `app/package.json` `version`, commit, then tag `v<version>` and push the
@@ -122,9 +131,14 @@ when the account exists.
 2. **First launch opens the setup wizard** (`/setup`), and keeps doing so
    until it has been finished once (`app-state.json` → `setupDone`). The
    wizard's steps:
-   - account: Twitch sign-in when a hosted control plane is configured
-     (`RH_CLOUD_URL`); otherwise **local mode**, with an optional Decart key
-     paste (no key = passthrough demo)
+   - account: **Sign in with Twitch**. The hosted control plane holds the
+     Decart key, minting and moderation; the streamer configures nothing.
+     Its URL is baked in at build time from `RH_CLOUD_URL` (CI reads the
+     repo *variable* of that name). A build with no URL — every build until
+     `server/` is deployed — says "hosted sign-in isn't available in this
+     build yet" and continues in passthrough demo mode. Pasted-keys local
+     mode exists only as a developer fallback: repo runs, or
+     `RH_LOCAL_MODE=1` on a packaged build.
    - camera
    - OBS: the app finds OBS's websocket settings itself. If the server is
      off, **"Enable it for me and start OBS"** flips it in OBS's config

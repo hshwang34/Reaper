@@ -16,9 +16,12 @@
 export interface DesktopSetupState {
   cloudMode: boolean;
   login: string | null;
-  /** The hosted control plane, or null when none is configured — then the
-   *  wizard offers local mode only (no Twitch sign-in button to fail). */
+  /** The hosted control plane baked into this build, or null when it has
+   *  none — then the wizard says hosted sign-in isn't available yet. */
   cloudUrl: string | null;
+  /** Pasted-keys local mode is a dev fallback (repo runs, RH_LOCAL_MODE=1),
+   *  never something the wizard offers streamers. */
+  localModeAllowed: boolean;
   obs: { discovery: string; connected: boolean; running: boolean };
   /** Which credentials are configured — booleans only, no secret values. */
   keys: Record<string, boolean>;

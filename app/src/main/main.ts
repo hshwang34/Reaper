@@ -64,6 +64,10 @@ import {
 import { signInWithBrowser } from "./signIn.js";
 import { startAutoUpdate } from "./updater.js";
 
+/** The hosted control plane baked in at build time (scripts/build-main.mjs,
+ *  from RH_CLOUD_URL). "" when the build has none. */
+declare const __RH_CLOUD_URL__: string;
+
 // Fixed local port (D2). Fallbacks keep the app alive on collision; the OBS
 // source URL is repaired to whatever port actually bound.
 const PORTS = [17712, 17713, 17714];
@@ -228,17 +232,25 @@ async function boot(): Promise<void> {
   });
 
   // ── Setup-wizard IPC ───────────────────────────────────────────────────
-  // The hosted control plane: RH_CLOUD_URL, or the dev server when running
-  // from the repo. A packaged build with no URL configured has nothing to
-  // sign in to, so it gets null and the wizard offers local mode only —
-  // better than a "Sign in with Twitch" button that fails.
+  // The product is hosted-first: a streamer signs in with Twitch and the
+  // control plane holds the Decart key, minting and moderation. The URL is
+  // baked in at build time (CI's RH_CLOUD_URL variable); the env var
+  // overrides it for dev, and an unpackaged run falls back to the dev
+  // server. A build with no URL has nothing to sign in to — the wizard says
+  // so instead of offering a key field, because "paste your own keys" is a
+  // dev fallback, not a path we show streamers.
   const cloudUrl =
     process.env.RH_CLOUD_URL?.trim() ||
+    __RH_CLOUD_URL__ ||
     (app.isPackaged ? null : "http://127.0.0.1:8790");
+  // Local mode (pasted keys, no control plane) is reachable only on purpose:
+  // running from the repo, or RH_LOCAL_MODE=1 on a packaged build.
+  const localModeAllowed = !app.isPackaged || process.env.RH_LOCAL_MODE === "1";
   ipcMain.handle("rh:setup-state", () => ({
     cloudMode,
     login: cloudCfg?.login ?? null,
     cloudUrl,
+    localModeAllowed,
     obs: {
       discovery: discoverObsWebsocket().status,
       connected: local?.obs.isConnected() ?? false,

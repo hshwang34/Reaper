@@ -81,6 +81,10 @@ jobs:
         shell: bash
         env:
           RH_ARCHS: ${{ matrix.archs }}
+          # The hosted control plane this build signs in to (a repo VARIABLE,
+          # not a secret — it's a public URL). Unset until server/ is
+          # deployed; the wizard then says hosted sign-in isn't available.
+          RH_CLOUD_URL: ${{ vars.RH_CLOUD_URL }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}

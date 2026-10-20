@@ -13,6 +13,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -78,6 +79,29 @@ function stageWithDeps(name, fromDir = repo) {
 
 stageWithDeps("@decartai/sdk");
 stageWithDeps("sharp");
+
+// No symlinks in what ships. A package that isn't hoisted brings its own
+// node_modules/.bin along (CI's npm ci nested semver under sharp), and those
+// are symlinks: electron-builder resolves the link target differently in
+// the x64 and arm64 packaging passes, and @electron/universal then refuses
+// to merge the two apps ("the number of mach-o files is not the same").
+// .bin dirs are useless at runtime, so drop them; any other symlink is
+// replaced by what it points at.
+function desymlink(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.name === ".bin" && entry.isDirectory()) {
+      rmSync(p, { recursive: true, force: true });
+    } else if (entry.isSymbolicLink()) {
+      const real = realpathSync(p);
+      rmSync(p);
+      cpSync(real, p, { recursive: true, dereference: true });
+    } else if (entry.isDirectory()) {
+      desymlink(p);
+    }
+  }
+}
+desymlink(resolve(staging, "node_modules"));
 
 // 3. sharp's prebuilt binaries for EVERY arch being packaged — whichever
 //    of its optional deps match <os>-<arch> (@img/sharp-darwin-arm64 +

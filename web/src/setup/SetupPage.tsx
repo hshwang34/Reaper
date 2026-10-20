@@ -163,29 +163,23 @@ function SignInStep({
       </Card>
     );
   }
-  // No hosted control plane configured (the case for every build until the
-  // server is deployed): the app runs on this machine with keys the streamer
-  // pastes. The Decart key is the only one that changes what the test
-  // hijack does — without it the app passes the camera through unchanged.
-  if (!state.cloudUrl) {
-    const hasKey = state.keys.decartApiKey || saved;
-    return (
-      <Card>
-        <p className="text-zinc-300">
-          Reality Hijack runs on this computer. Paste your <b>Decart API key</b>{" "}
-          to get real AI effects — without one, the app runs in a passthrough
-          demo mode so you can still try the whole flow.
-        </p>
-        {hasKey ? (
-          <p className="text-sm text-emerald-400">✓ Decart key saved — it loads when setup finishes.</p>
+  // Pasted-keys local mode: a dev fallback only (repo runs, RH_LOCAL_MODE=1).
+  // Streamers never see a key field — the hosted control plane holds the
+  // Decart key for them.
+  const localMode = state.localModeAllowed && (
+    <details className="text-sm text-zinc-500">
+      <summary className="cursor-pointer">Developer: run with my own keys instead</summary>
+      <div className="mt-3 space-y-3">
+        {state.keys.decartApiKey || saved ? (
+          <p className="text-emerald-400">✓ Decart key saved — it loads when setup finishes.</p>
         ) : (
           <div className="flex gap-2">
             <input
               type="password"
               value={decartKey}
               onChange={(e) => setDecartKey(e.target.value)}
-              placeholder="sk-…"
-              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"
+              placeholder="Decart API key"
+              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200"
             />
             <button
               disabled={!decartKey.trim()}
@@ -198,11 +192,26 @@ function SignInStep({
             </button>
           </div>
         )}
-        <p className="text-xs text-zinc-500">
-          Tips, moderation keys and OBS details can be added later from the
-          router page's <b>App credentials</b> panel.
+        <Skip next={next} label="Continue in local mode" />
+      </div>
+    </details>
+  );
+
+  // This build has no control plane baked in (nothing deployed yet): say so.
+  // The app still runs end to end in passthrough demo mode, so the rest of
+  // setup — camera, OBS, the safety acknowledgement — is still worth doing.
+  if (!state.cloudUrl) {
+    return (
+      <Card>
+        <p className="text-zinc-300">
+          <b>Hosted sign-in isn't available in this build yet.</b> Reality
+          Hijack signs you in with Twitch and runs tips, moderation and the AI
+          model from our servers — nothing to configure on your side. That
+          service isn't live for this build; you can still set up your camera
+          and OBS and try the flow with a passthrough test effect.
         </p>
-        <Primary onClick={next}>{hasKey ? "Continue" : "Continue in demo mode"}</Primary>
+        <Primary onClick={next}>Continue</Primary>
+        {localMode}
       </Card>
     );
   }
@@ -223,8 +232,8 @@ function SignInStep({
         >
           {waiting ? "Waiting for browser…" : "Sign in with Twitch"}
         </Primary>
-        <Skip next={next} label="Use local demo mode instead" />
       </div>
+      {localMode}
     </Card>
   );
 }
