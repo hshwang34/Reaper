@@ -20,6 +20,7 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import {
   HOSTED_SETTINGS,
   loadSettings,
+  PRESETS_BY_ID,
   type ModerationEvent,
   type Settings,
   type TipEvent,
@@ -39,7 +40,8 @@ import {
   type TriggerAdapter,
 } from "@rh/core";
 import { channels, db, hijacks, moderationEvents, tokenMints } from "./db.js";
-import { env } from "./env.js";
+import { env, isProduction } from "./env.js";
+import { settleJob } from "./payments.js";
 
 /** One classifier suite for every channel — it holds OUR vendor keys and is
  *  stateless; per-channel policy is passed on each call. Dev mode only when
@@ -108,11 +110,32 @@ export interface ChannelRuntime extends Runtime {
   mint(durationSec: number): Promise<string>;
   /** Swap the Streamlabs credential without tearing the runtime down. */
   setStreamlabsToken(token: string): void;
+  /** The one free hijack a channel gets per UTC day (setup wizard + "does it
+   *  still work?"). A fixed preset, never free text: it's the only GPU time
+   *  we fund, so it can't be a free custom-prompt channel. */
+  testHijack(presetId?: string): TestHijackResult;
   /** Tear everything down: triggers, engine timers, sockets. */
   stop(): void;
 }
 
+export type TestHijackResult =
+  | { ok: true; outcome: string }
+  | { ok: false; status: number; error: string };
+
+/** Free test hijacks per channel per UTC day, and their length. 10s of
+ *  lucy-2.5 ≈ $0.20 — a deliberate onboarding cost, the only GPU time not
+ *  paid for by a viewer. */
+export const TEST_HIJACKS_PER_DAY = 1;
+export const TEST_HIJACK_SEC = 10;
+const TEST_PRESET = "80s-anime";
+
 const runtimes = new Map<string, ChannelRuntime>();
+
+function utcDayStart(now = Date.now()): number {
+  const d = new Date(now);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.getTime();
+}
 
 export function channelExists(channelId: string): boolean {
   return Boolean(
@@ -204,6 +227,8 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
           })
           .run();
       },
+      // Money: a viewer-paid job settles exactly once, whatever ended it.
+      onJobEnded: (job, ok, reason) => settleJob(job, ok, reason),
       onJobDone: (jobId, ok, reason) => {
         db.update(hijacks)
           .set({ outcome: ok ? "completed" : "failed", reason: reason ?? null })
@@ -228,7 +253,11 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
     });
     streamlabs = sl;
   };
-  startStreamlabs(row.streamlabsToken ?? "");
+  // Production never listens to Streamlabs (unfunded GPU — see
+  // setStreamlabsToken), even for a token stored before that rule.
+  startStreamlabs(isProduction ? "" : (row.streamlabsToken ?? ""));
+
+  let lastTestAt = 0;
 
   const runtime: ChannelRuntime = {
     ...core,
@@ -250,12 +279,43 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
         ledger,
       ),
     setStreamlabsToken(token: string) {
+      // Hosted: a Streamlabs tip goes straight to the streamer, so nothing
+      // pays for the GPU it would trigger — it would run on our key, free.
+      // Viewers pay through the portal (Stripe) instead.
+      if (isProduction && token) throw new Error("Streamlabs tips can't fund hijacks on the hosted service — viewers pay through your page");
       db.update(channels)
         .set({ streamlabsToken: token })
         .where(eq(channels.id, channelId))
         .run();
       startStreamlabs(token);
       log(tag, token ? "streamlabs trigger (re)connected" : "streamlabs trigger removed");
+    },
+    testHijack(presetId) {
+      const preset = PRESETS_BY_ID[presetId ?? TEST_PRESET] ?? PRESETS_BY_ID[TEST_PRESET];
+      if (!preset) return { ok: false, status: 500, error: "test preset missing" };
+      // The allowance is read from the ledger (hijacks rows with source
+      // "manual" — the console path), so a restart can't refill it.
+      const usedToday =
+        db
+          .select({ n: sql<number>`count(*)` })
+          .from(hijacks)
+          .where(
+            and(
+              eq(hijacks.channelId, channelId),
+              eq(hijacks.source, "manual"),
+              gte(hijacks.createdAt, utcDayStart()),
+            ),
+          )
+          .get()?.n ?? 0;
+      // The row is written at DISPATCH, so a test still queued behind another
+      // job isn't in the ledger yet — the in-memory stamp closes that gap.
+      if (usedToday >= TEST_HIJACKS_PER_DAY || lastTestAt >= utcDayStart()) {
+        return { ok: false, status: 429, error: "today's free test hijack is used — it resets at 00:00 UTC" };
+      }
+      lastTestAt = Date.now();
+      const outcome = core.engine.manual(preset.prompt, TEST_HIJACK_SEC);
+      log(tag, `free test hijack (${preset.id}) → ${outcome}`);
+      return { ok: true, outcome };
     },
     stop() {
       streamlabs?.stop();
@@ -270,4 +330,18 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
   runtimes.set(channelId, runtime);
   log(tag, "runtime created");
   return runtime;
+}
+
+/** Boot: bring back every channel whose runtime holds a live trigger
+ *  connection, so tips keep flowing across deploys and crashes. Channels
+ *  with nothing to listen for stay lazy (created on first request). */
+export function restoreTriggeredRuntimes(): number {
+  const rows = db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(and(eq(channels.suspended, 0), sql`${channels.streamlabsToken} != ''`))
+    .all();
+  for (const r of rows) getRuntime(r.id);
+  if (rows.length) log("server", `restored ${rows.length} channel runtime(s) with live triggers`);
+  return rows.length;
 }

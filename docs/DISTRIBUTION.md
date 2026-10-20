@@ -72,18 +72,24 @@ Deploying it is account work, in this order:
    Application. Category "Application Integration", OAuth redirect URL
    `https://reality-hijack.fly.dev/auth/twitch/callback` (adjust if the app
    name changes). Note the Client ID and generate a Client Secret.
-3. From the **repo root** (the image needs `shared/`, `core/` and `web/`;
-   `.dockerignore` keeps the context small):
+3. From the **repo root** (`fly.toml` + `Dockerfile` live there; the image
+   needs `shared/`, `core/`, `web/` and `server/`). **Already done for
+   `reality-hijack` (2026-10-20)** — this is the from-scratch recipe:
    ```bash
-   fly launch --config server/fly.toml --dockerfile server/Dockerfile --no-deploy --copy-config
-   fly volumes create rh_data --size 1 --region iad --config server/fly.toml
-   fly secrets set --config server/fly.toml \
+   fly apps create reality-hijack --org personal
+   fly volumes create rh_data --size 3 --region iad --app reality-hijack
+   fly secrets set --app reality-hijack \
      DECART_API_KEY=… TWITCH_CLIENT_ID=… TWITCH_CLIENT_SECRET=… \
+     STRIPE_SECRET_KEY=sk_… STRIPE_WEBHOOK_SECRET=whsec_… \
      RH_JWT_SECRET="$(openssl rand -hex 32)" \
      RH_PUBLIC_URL=https://reality-hijack.fly.dev
-   fly deploy --config server/fly.toml --dockerfile server/Dockerfile .
-   curl https://reality-hijack.fly.dev/healthz
+   fly deploy --remote-only
+   curl https://reality-hijack.fly.dev/healthz   # {"mode":"production",…}
    ```
+   The image runs `RH_ENV=production`: it refuses to boot if any of those
+   secrets is missing. The Stripe webhook is a **Connect** endpoint
+   (`/stripe/webhook`, events: checkout.session.completed,
+   checkout.session.async_payment_succeeded, account.updated).
    Content-safety classifier keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
    `SIGHTENGINE_API_USER`, `SIGHTENGINE_API_SECRET`) go in the same way;
    without them hosted custom prompts and photos stay off (presets work).
