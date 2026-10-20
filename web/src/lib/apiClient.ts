@@ -285,7 +285,35 @@ export function createApiClient(opts: ApiClientOptions) {
     ledger: () => request<LedgerRow[]>("/ledger"),
     connectStreamlabs: (token: string) =>
       request<{ ok: boolean; connected: boolean }>("/trigger/streamlabs", json("POST", { token })),
+    /** Can viewers pay this channel through us (Stripe), and from what amount? */
+    paymentsInfo: () => request<PaymentsInfo>("/payments"),
+    /** Viewer: Stripe Checkout URL for an already-submitted effect. */
+    checkout: (code: string, amountUsd: number, viewerName: string) =>
+      request<{ url: string }>("/checkout", json("POST", { code, amountUsd, viewerName })),
+    payouts: () => request<PayoutsInfo>("/payouts"),
+    /** Streamer: Stripe-hosted onboarding URL for receiving viewer payments. */
+    startPayouts: (country: string, from: "app" | "dashboard") =>
+      request<{ url: string }>("/payouts/onboard", json("POST", { country, from })),
+    /** The free daily test hijack (fixed preset, server-chosen length). */
+    testHijack: () => request<{ ok: boolean; outcome: string }>("/test-hijack", { method: "POST" }),
   };
 }
 
 export type ApiClient = ReturnType<typeof createApiClient>;
+
+export interface PaymentsInfo {
+  enabled: boolean;
+  minUsd: number;
+  /** The streamer's app is connected; payments are refused otherwise. */
+  live: boolean;
+}
+
+export interface PayoutsInfo {
+  /** Stripe is configured on this server. */
+  configured: boolean;
+  /** The streamer has a Connect account (onboarding started). */
+  started: boolean;
+  /** Stripe verified them — viewers can pay. */
+  enabled: boolean;
+  earnings: { status: string; n: number; gross: number; fees: number }[];
+}

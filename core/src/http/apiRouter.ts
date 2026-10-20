@@ -64,6 +64,11 @@ export interface ApiRouterOptions {
   requireAuth: RequestHandler;
   /** `multer(...).single("image")` for this host's storage. */
   upload: RequestHandler;
+  /** Mount the streamer console triggers (/dev/hijack, /dev/fake-tip)? They
+   *  run a job with no payment behind it: right for the local rig, where the
+   *  streamer pays their own Decart bill, and wrong for a public host
+   *  spending its key. Default true. */
+  devRoutes?: boolean;
 }
 
 type ReqWithFile = Request & { file?: UploadedFile };
@@ -408,6 +413,8 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
       }
     }),
   );
+
+  if (opts.devRoutes === false) return r;
 
   /** Streamer console trigger — the identical job pipeline minus payment. */
   r.post(

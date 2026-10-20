@@ -132,3 +132,24 @@ test("cancelActive cancels the in-flight job without pausing; no-op when idle", 
   assert.equal(engine.snapshot().paused, false);
   engine.dispose();
 });
+
+test("dropQueued ends matching queued jobs (never the active one) and they never dispatch", () => {
+  const { engine, r } = build();
+  const ended: [string, boolean, string][] = [];
+  r.emit.jobEnded = (job, ok, reason) => ended.push([job.tip.username, ok, reason]);
+  engine.onTip(tip({ username: "keep" }));
+  engine.onTip(tip({ username: "paid" }));
+  engine.onTip(tip({ username: "paid" }));
+  // Router offline: all three queued. Drop the "paid" ones.
+  assert.equal(engine.dropQueued((j) => j.tip.username === "paid", "app went offline"), 2);
+  assert.deepEqual(ended, [
+    ["paid", false, "app went offline"],
+    ["paid", false, "app went offline"],
+  ]);
+  assert.equal(engine.snapshot().queueLength, 1);
+  engine.setRouterState("IDLE"); // only the kept job ever runs
+  assert.equal(r.dispatched.length, 1);
+  // The active job is out of reach.
+  assert.equal(engine.dropQueued(() => true, "x"), 0);
+  engine.dispose();
+});

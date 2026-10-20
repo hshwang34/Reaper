@@ -14,6 +14,8 @@ export {
   type ApiClient,
   type LedgerRow,
   type ModerationLog,
+  type PaymentsInfo,
+  type PayoutsInfo,
   type PublicConfig,
   type RouterConfig,
   type SessionTokens,

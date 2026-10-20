@@ -35,6 +35,21 @@ export class ObsController {
     return () => this.connectListeners.delete(fn);
   }
 
+  /** Point at a different server (the wizard just switched obs-websocket on,
+   *  and its password is only known now). Drops any live connection so the
+   *  next ensureConnected uses the new credentials. */
+  reconfigure(url: string, password: string): void {
+    if (url === this.url && password === this.password) return;
+    this.url = url;
+    this.password = password;
+    this.itemCache.clear();
+    if (this.connected) {
+      this.connected = false;
+      void this.obs.disconnect().catch(() => {});
+    }
+    log("obs", `reconfigured → ${url}`);
+  }
+
   async ensureConnected(): Promise<void> {
     if (this.connected) return;
     if (this.connecting) return this.connecting;

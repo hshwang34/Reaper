@@ -1,9 +1,13 @@
 // The viewer-facing page. A viewer composes a hijack — preset or custom prompt,
 // optional reference image, and Decart's "enhance prompt" switch (together,
 // the full per-session surface lucy-2.5 exposes over the realtime API) —
-// submits it, and receives a short CLAIM CODE to put in their tip message. The
-// tip itself happens off-page (Streamlabs); for the demo, a dev "Simulate tip"
-// control fires the same path via /api/dev/fake-tip.
+// submits it, and then pays for it one of two ways:
+//   · hosted (/c/<channel>, Stripe configured, streamer verified): straight
+//     to Stripe Checkout and back to live status. The payment IS the trigger
+//     — no code to copy, and the money funds the GPU (server/src/payments.ts).
+//   · local rig: a short CLAIM CODE to put in a Streamlabs tip message; for
+//     the demo, a "Simulate tip" control fires the same path via
+//     /api/dev/fake-tip.
 //
 // Product-design note: prompt text is resolved server-side from a preset id, or
 // moderated when custom — the viewer never controls raw prompt bytes that reach
@@ -25,7 +29,7 @@ import {
   type SafetyFinding,
   type SubmissionStatus,
 } from "@rh/shared";
-import { api, type PublicConfig } from "../lib/api.js";
+import { api, type PaymentsInfo, type PublicConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
 import { channelSlug } from "../lib/channel.js";
 import { downscaleImage } from "../lib/image.js";
@@ -87,9 +91,30 @@ export default function PortalPage() {
   const [now, setNow] = useState(Date.now());
 
   const fileRef = useRef<HTMLInputElement>(null);
+  /** Hosted payments for this channel (null = claim-code flow). */
+  const [pay, setPay] = useState<PaymentsInfo | null>(null);
+  const paid = pay?.enabled === true;
 
   useEffect(() => {
     api.getConfig().then(setCfg).catch((e) => setError(e.message));
+    if (channelSlug()) {
+      api
+        .paymentsInfo()
+        .then((p) => {
+          setPay(p);
+          if (p.enabled) setTipAmount((a) => Math.max(a, p.minUsd));
+        })
+        .catch(() => setPay(null));
+    }
+    // Back from Stripe Checkout (?paid=<code>): resume that submission's live
+    // status. The webhook — not this redirect — is what actually starts the
+    // hijack, so the page only listens.
+    const back = new URLSearchParams(location.search).get("paid");
+    if (back) {
+      setCode(back);
+      setStatus({ code: back, state: "pending", message: "Payment received — your effect is next in line." });
+      history.replaceState(null, "", location.pathname);
+    }
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -201,6 +226,13 @@ export default function PortalPage() {
       if (res.checks.length) setChecks(res.checks);
       if (res.ok) {
         setPassedChecks(res.checks.length);
+        if (paid) {
+          // Every check passed and the code exists — now the money. Stripe
+          // holds the effect for the 30 minutes its checkout page lives.
+          const { url } = await api.checkout(res.code, tipAmount, tipperName.trim());
+          location.href = url;
+          return;
+        }
         setCode(res.code);
         setExpiresAt(res.expiresAt);
         setStatus({
@@ -265,8 +297,8 @@ export default function PortalPage() {
   return (
     <div className="mx-auto max-w-xl p-6">
       <header className="mb-6 text-center">
-        <h1 className="bg-gradient-to-r from-fuchsia-400 to-cyan-400 bg-clip-text text-3xl font-black text-transparent">
-          Reality Hijack
+        <h1 className="text-3xl font-black text-zinc-100">
+          Your turn to hijack the stream.
         </h1>
         <p className="mt-1 text-sm text-zinc-400">
           Transform the streamer's room in real time. $
@@ -302,7 +334,7 @@ export default function PortalPage() {
                   onClick={() => pickPreset(p.id)}
                   className={`relative rounded-xl border p-3 text-left transition ${
                     presetId === p.id
-                      ? "border-fuchsia-500 bg-fuchsia-500/10"
+                      ? "border-brand-500 bg-brand-500/10"
                       : "border-zinc-800 bg-zinc-900 hover:border-zinc-600"
                   }`}
                 >
@@ -352,7 +384,7 @@ export default function PortalPage() {
                 }}
                 placeholder="e.g. turn the room into a snow globe"
                 rows={2}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-sm outline-none focus:border-cyan-500"
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-sm outline-none focus:border-brand-500"
               />
               <p className="mt-1 text-xs text-zinc-600">
                 Checked by an AI moderator against the streamer's rules before
@@ -437,7 +469,7 @@ export default function PortalPage() {
                 type="checkbox"
                 checked={enhance}
                 onChange={(e) => setEnhance(e.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-fuchsia-500"
+                className="mt-0.5 h-4 w-4 accent-brand-500"
               />
               <span className="text-sm">
                 <span className="font-semibold text-zinc-200">Enhance prompt</span>
@@ -454,7 +486,7 @@ export default function PortalPage() {
           {/* Identity + amount */}
           <section className="grid grid-cols-2 gap-3">
             <label className="space-y-1 text-sm">
-              <span className="text-zinc-400">Name you'll tip as</span>
+              <span className="text-zinc-400">{paid ? "Your name (shown on stream)" : "Name you'll tip as"}</span>
               <input
                 value={tipperName}
                 onChange={(e) => setTipperName(e.target.value)}
@@ -464,11 +496,11 @@ export default function PortalPage() {
             </label>
             <label className="space-y-1 text-sm">
               <span className="text-zinc-400">
-                Tip amount → {durationPreview}s
+                {paid ? "Amount ($)" : "Tip amount"} → {durationPreview}s
               </span>
               <input
                 type="number"
-                min={1}
+                min={paid ? pay!.minUsd : 1}
                 value={tipAmount}
                 onChange={(e) => setTipAmount(Number(e.target.value))}
                 className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
@@ -477,6 +509,12 @@ export default function PortalPage() {
           </section>
 
           </fieldset>
+          {paid && !pay!.live && (
+            <p className="rounded-lg bg-amber-900/30 px-3 py-2 text-sm text-amber-300">
+              Hijacks are paused right now — the streamer's Reality Hijack
+              app isn't live. Check back when they're streaming.
+            </p>
+          )}
 
           {(submitting || checks.length > 0) && (
             <SafetyChecklist checks={checks} preparing={preparing} running={submitting} stale={failureStale} />
@@ -499,8 +537,8 @@ export default function PortalPage() {
               and cost the viewer a strike — so it waits for an edit. */}
           <button
             type="submit"
-            disabled={submitting || unchangedFailure}
-            className={`w-full rounded-xl bg-gradient-to-r from-fuchsia-600 to-cyan-600 px-4 py-3 font-bold hover:opacity-90 disabled:opacity-60 ${
+            disabled={submitting || unchangedFailure || (paid && !pay!.live)}
+            className={`w-full rounded-xl bg-brand-600 px-4 py-3 font-bold hover:opacity-90 disabled:opacity-50 ${
               submitting ? "disabled:cursor-wait" : "disabled:cursor-not-allowed"
             }`}
           >
@@ -508,15 +546,27 @@ export default function PortalPage() {
               ? (preparing ?? (checks.length ? `Running safety checks… ${checksDone}/${checks.length}` : "Checking…"))
               : unchangedFailure
                 ? "Edit your request to check again"
+                : paid
+                  ? `Pay $${tipAmount} — ${durationPreview}s hijack`
                 : "Get my claim code"}
           </button>
           <p className="text-center text-xs text-zinc-600">
-            Minimum tip ${cfg.minTipUSD}. Effect runs for{" "}
-            {durationPreview}s once your tip lands.
+            {paid ? (
+              <>
+                Minimum ${pay!.minUsd}. Secure payment by Stripe. If the hijack
+                never starts, you're refunded automatically.
+              </>
+            ) : (
+              <>
+                Minimum tip ${cfg.minTipUSD}. Effect runs for {durationPreview}s
+                once your tip lands.
+              </>
+            )}
           </p>
         </form>
       ) : (
         <ClaimView
+          paid={paid || status?.message?.startsWith("Payment received") === true}
           code={code}
           secsLeft={secsLeft}
           status={status}
@@ -623,6 +673,8 @@ function SafetyFooter({ code }: { code: string | null }) {
 }
 
 function ClaimView(props: {
+  /** Paid through Stripe: there's no code to copy, just the live status. */
+  paid: boolean;
   code: string;
   secsLeft: number | null;
   status: SubmissionStatus | null;
@@ -642,13 +694,30 @@ function ClaimView(props: {
   const expired = status?.state === "expired" || (stillWaiting && secsLeft === 0);
   const terminal = expired || status?.state === "done" || status?.state === "failed";
 
+  if (props.paid) {
+    return (
+      <div className="space-y-6 text-center">
+        <StatusTimeline status={status} expired={false} paid />
+        {status?.state === "failed" && (
+          <p className="text-sm text-zinc-400">
+            If it never started, you're refunded automatically — it can take a
+            few days to show on your statement.
+          </p>
+        )}
+        <button onClick={props.onReset} className="text-sm text-zinc-500 underline hover:text-zinc-300">
+          Hijack again
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 text-center">
-      <div className="rounded-2xl border border-fuchsia-500/40 bg-fuchsia-500/5 p-6">
+      <div className="rounded-2xl border border-brand-500/40 bg-brand-500/5 p-6">
         <p className="text-sm text-zinc-400">
           Include this code in your tip message:
         </p>
-        <p className="my-2 font-mono text-5xl font-black tracking-[0.3em] text-fuchsia-300">
+        <p className="my-2 font-mono text-5xl font-black tracking-[0.3em] text-brand-300">
           {code}
         </p>
         {stillWaiting && secsLeft != null && !expired && (
@@ -698,13 +767,15 @@ function ClaimView(props: {
 function StatusTimeline({
   status,
   expired,
+  paid = false,
 }: {
   status: SubmissionStatus | null;
   expired: boolean;
+  paid?: boolean;
 }) {
   const state = expired ? "expired" : (status?.state ?? "pending");
   const label: Record<string, string> = {
-    pending: "Waiting for your tip…",
+    pending: paid ? "Payment received — starting soon…" : "Waiting for your tip…",
     review: "Tip received — waiting for the streamer to approve…",
     matched: "Tip received — queued!",
     queued: `In queue${status?.queuePosition ? ` · position ${status.queuePosition}` : ""}`,
@@ -715,7 +786,7 @@ function StatusTimeline({
   };
   const tone =
     state === "live"
-      ? "text-fuchsia-300"
+      ? "text-brand-300"
       : state === "done"
         ? "text-emerald-400"
         : state === "expired" || state === "failed"

@@ -233,11 +233,10 @@ export class CloudLink {
 
   /** Streamer-fired test hijack through the CLOUD engine (the wizard's
    *  "send yourself a test hijack" in cloud mode). */
-  async devHijack(prompt: string, durationSec: number): Promise<string> {
-    const body = await this.authedPost<{ outcome?: string }>("dev/hijack", {
-      prompt,
-      durationSec,
-    });
+  /** The channel's free daily test hijack. The server picks the preset and
+   *  length — the hosted key never runs free text without a payment. */
+  async testHijack(): Promise<string> {
+    const body = await this.authedPost<{ outcome?: string }>("test-hijack", {});
     return body.outcome ?? "queued";
   }
 

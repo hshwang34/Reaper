@@ -19,9 +19,9 @@ import multer from "multer";
 import { WebSocketServer } from "ws";
 import { eq } from "drizzle-orm";
 import type { HelloMsg } from "@rh/shared";
-import { buildApiRouter, log, sweepUploadDir, warn } from "@rh/core";
-import { channels, db, hijacks, submissionsLog } from "./db.js";
-import { devAuthEnabled, env, repoRoot } from "./env.js";
+import { buildApiRouter, ipHash, log, RateLimiter, sweepUploadDir, warn } from "@rh/core";
+import { backupDatabase, channels, db, hijacks, submissionsLog } from "./db.js";
+import { devAuthEnabled, devRoutesEnabled, env, isProduction, repoRoot } from "./env.js";
 import {
   APP_LOOPBACK_REDIRECT,
   exchangeTwitchCode,
@@ -38,11 +38,26 @@ import {
   upsertChannel,
   verifyAccess,
 } from "./auth.js";
-import { getRuntime } from "./channels.js";
+import { getRuntime, restoreTriggeredRuntimes } from "./channels.js";
+import {
+  createCheckout,
+  earnings,
+  handleWebhook,
+  minPaymentUsd,
+  onboardingLink,
+  PaymentError,
+  paymentsEnabled,
+  payoutStatus,
+  reconcileOnBoot,
+  refreshPayouts,
+  sweepStalePaid,
+} from "./payments.js";
 
 const app = express();
 // Real client IPs behind the edge proxy (see env.trustProxy): strikes and the
-// public report/takedown limits are per viewer, not per proxy.
+// per-IP limits below are per viewer, not per proxy — otherwise one abuser
+// would lock out everyone. Configurable so a directly-exposed server can't be
+// spoofed with a forged X-Forwarded-For.
 app.set("trust proxy", env.trustProxy);
 if (env.trustProxy === false && env.publicUrl.startsWith("https://")) {
   warn(
@@ -50,11 +65,55 @@ if (env.trustProxy === false && env.publicUrl.startsWith("https://")) {
     "RH_TRUST_PROXY unset on a public deployment — if a proxy fronts this server, every viewer will share one strike/rate-limit identity",
   );
 }
-app.use(express.json());
+app.disable("x-powered-by");
+
+// Stripe webhook: signature verification needs the RAW body, so this route
+// is registered before express.json() can consume it.
+app.post("/stripe/webhook", express.raw({ type: "application/json", limit: "1mb" }), (req, res) => {
+  void handleWebhook(req.body as Buffer, String(req.headers["stripe-signature"] ?? ""))
+    .then((status) => res.status(status).end())
+    .catch((e) => {
+      warn("payments", `webhook error: ${(e as Error).message}`);
+      res.status(500).end(); // Stripe retries
+    });
+});
+
+app.use(express.json({ limit: "64kb" }));
+
+const httpsOrigin = env.publicUrl.startsWith("https://");
+
+// Security headers (no helmet dependency for five lines). The portal is
+// never meant to be framed; uploads are images served with fixed extensions.
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (httpsOrigin) res.setHeader("Strict-Transport-Security", "max-age=31536000");
+  next();
+});
+
+/** Per-IP rate limit for public endpoints that cost us something (OAuth
+ *  round trips, classifier calls, disk writes). */
+function perIp(max: number, windowMs: number): express.RequestHandler {
+  const limiter = new RateLimiter(max, windowMs);
+  return (req, res, next) => {
+    if (limiter.allow(ipHash(req.ip))) return next();
+    res.status(429).json({ error: "too many requests — slow down" });
+  };
+}
+app.use("/auth", perIp(30, 60_000));
+app.post("/api/c/:channel/checkout", perIp(10, 60_000));
+// Registered before the channel API mount, so it runs first for this path.
+app.post("/api/c/:channel/submissions", perIp(20, 60_000));
 
 // ── Health ────────────────────────────────────────────────────────────────
 app.get("/healthz", (_req, res) => {
-  res.json({ ok: true, devAuth: devAuthEnabled, decart: Boolean(env.decartApiKey) });
+  res.json({
+    ok: true,
+    mode: isProduction ? "production" : "dev",
+    devAuth: devAuthEnabled,
+    decart: Boolean(env.decartApiKey),
+  });
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────
@@ -79,6 +138,7 @@ async function startOauth(
     .cookie("rh_oauth_nonce", nonce, {
       httpOnly: true,
       sameSite: "lax",
+      secure: httpsOrigin,
       maxAge: 10 * 60 * 1000,
     })
     .redirect(twitchAuthorizeUrl(await signState({ ...payload, nonce })));
@@ -232,6 +292,7 @@ app.use(
     },
     requireAuth: requireChannel,
     upload: upload.single("image"),
+    devRoutes: devRoutesEnabled,
   }),
 );
 
@@ -244,8 +305,107 @@ app.post("/api/c/:channel/trigger/streamlabs", requireChannel, (req, res) => {
   const rt = getRuntime(String(res.locals.channelId));
   if (!rt) return res.status(404).json({ error: "unknown channel" });
   const token = String(req.body?.token ?? "").trim();
-  rt.setStreamlabsToken(token);
+  try {
+    rt.setStreamlabsToken(token);
+  } catch (e) {
+    return res.status(403).json({ error: (e as Error).message });
+  }
   res.json({ ok: true, connected: Boolean(token) });
+});
+
+// ── Payments (Stripe Connect — server/src/payments.ts) ───────────────────
+
+const paymentRoute =
+  (h: (req: express.Request, res: express.Response) => Promise<void>): express.RequestHandler =>
+  (req, res) => {
+    h(req, res).catch((e) => {
+      if (e instanceof PaymentError) res.status(e.status).json({ error: e.message });
+      else {
+        warn("payments", `${req.path}: ${(e as Error).message}`);
+        res.status(502).json({ error: "payment provider error — try again" });
+      }
+    });
+  };
+
+/** Public: can this channel take payments, and from what amount? */
+app.get("/api/c/:channel/payments", (req, res) => {
+  const id = resolveChannelId(String(req.params.channel));
+  if (!id || !getRuntime(id)) return res.status(404).json({ error: "unknown channel" });
+  res.json({
+    enabled: paymentsEnabled() && payoutStatus(id).enabled,
+    minUsd: minPaymentUsd(id),
+    // The streamer's app is connected and not panic-paused — a payment now
+    // can actually play (checkout enforces the same rule).
+    live: (() => {
+      const snap = getRuntime(id)!.engine.snapshot();
+      return snap.routerState !== "OFFLINE" && !snap.paused;
+    })(),
+  });
+});
+
+/** Viewer: pay for a submitted (already moderated) effect. */
+app.post(
+  "/api/c/:channel/checkout",
+  paymentRoute(async (req, res) => {
+    const id = resolveChannelId(String(req.params.channel));
+    if (!id) throw new PaymentError(404, "unknown channel");
+    const login = String(req.params.channel);
+    const url = await createCheckout(id, {
+      code: String(req.body?.code ?? ""),
+      amountUsd: Number(req.body?.amountUsd),
+      viewerName: String(req.body?.viewerName ?? ""),
+      // Always our own portal — never a client-supplied URL (open redirect).
+      returnUrl: `${env.publicUrl}/c/${encodeURIComponent(login)}`,
+    });
+    res.json({ url });
+  }),
+);
+
+/** Streamer: payout status + earnings summary. */
+app.get("/api/c/:channel/payouts", requireChannel, (_req, res) => {
+  const id = String(res.locals.channelId);
+  // Onboarding started but not verified yet: ask Stripe now rather than rely
+  // only on webhooks (cheap — one call, and only until it flips to enabled).
+  const before = payoutStatus(id);
+  const fresh = before.started && !before.enabled ? refreshPayouts(id).catch(() => false) : Promise.resolve(false);
+  void fresh.then(() => res.json({ ...payoutStatus(id), earnings: earnings(id) }));
+});
+
+/** Streamer: start/resume Stripe onboarding → Stripe-hosted URL. */
+app.post(
+  "/api/c/:channel/payouts/onboard",
+  requireChannel,
+  paymentRoute(async (req, res) => {
+    const id = String(res.locals.channelId);
+    const country = String(req.body?.country ?? "US").toUpperCase();
+    const returnTo = req.body?.from === "app" ? "/payouts-done" : "/dashboard";
+    res.json({ url: await onboardingLink(id, country, returnTo) });
+  }),
+);
+
+/** Stripe sends the streamer's browser back here after onboarding. Public
+ *  (it's a browser redirect, no bearer token), and harmless: it only
+ *  re-reads the account's status from Stripe. */
+app.get(
+  "/api/c/:channel/payouts/return",
+  paymentRoute(async (req, res) => {
+    const id = resolveChannelId(String(req.params.channel));
+    if (id) await refreshPayouts(id).catch(() => false);
+    // Only our own two landing paths — never an arbitrary redirect target.
+    res.redirect(req.query.to === "/payouts-done" ? "/payouts-done" : "/dashboard");
+  }),
+);
+
+/** The free daily test hijack (setup wizard, "does it still work?"). Exists
+ *  in production — unlike /dev/hijack — because it is allowance-capped and
+ *  runs a fixed preset, never free text. */
+app.post("/api/c/:channel/test-hijack", requireChannel, (req, res) => {
+  const rt = getRuntime(String(res.locals.channelId));
+  if (!rt) return res.status(404).json({ error: "unknown channel" });
+  const presetId = typeof req.body?.presetId === "string" ? req.body.presetId : undefined;
+  const r = rt.testHijack(presetId);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  res.json({ ok: true, outcome: r.outcome });
 });
 
 /** Ledger view for the dashboard. */
@@ -285,7 +445,8 @@ if (existsSync(webDist)) {
     if (
       req.path.startsWith("/api") ||
       req.path.startsWith("/auth") ||
-      req.path.startsWith("/uploads")
+      req.path.startsWith("/uploads") ||
+      req.path.startsWith("/stripe")
     ) {
       return next();
     }
@@ -303,9 +464,32 @@ if (existsSync(webDist)) {
 // local-plane and never talks to the cloud.
 
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
+// Every protocol message is small JSON; 64 KB is generous and stops a client
+// from parking 100 MB (the ws default) in our memory.
+const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 64 * 1024 });
+
+// Heartbeat: a socket that hasn't answered a ping by the next sweep is a dead
+// TCP connection (laptop slept, NAT dropped it) — terminate it so the hub
+// sees the router go away instead of holding a ghost forever.
+const alive = new WeakMap<object, boolean>();
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (alive.get(ws) === false) {
+      ws.terminate();
+      continue;
+    }
+    alive.set(ws, false);
+    ws.ping();
+  }
+}, 30_000).unref();
+
 wss.on("connection", (ws) => {
+  alive.set(ws, true);
+  ws.on("pong", () => alive.set(ws, true));
+  // A socket that never says hello holds a connection slot for nothing.
+  const helloTimer = setTimeout(() => ws.close(4408, "hello timeout"), 10_000);
   ws.once("message", (raw) => {
+    clearTimeout(helloTimer);
     void (async () => {
       let hello: HelloMsg;
       try {
@@ -346,6 +530,18 @@ wss.on("connection", (ws) => {
 // must never take all of them down. Log and carry on.
 process.on("uncaughtException", (e) => warn("process", `uncaught: ${(e as Error).stack ?? e}`));
 process.on("unhandledRejection", (e) => warn("process", `unhandled rejection: ${String(e)}`));
+
+// Channels with a live trigger (Streamlabs) must reconnect it after a deploy
+// or crash — before, a runtime only came back when a request touched it, so
+// tips sent in the meantime were silently missed.
+restoreTriggeredRuntimes();
+// Payments accepted by an engine this restart destroyed will never run.
+void reconcileOnBoot();
+// Backstop: paid hijacks that never started (paused, stuck) get refunded.
+setInterval(() => void sweepStalePaid(), 60_000).unref();
+
+// Nightly SQLite snapshot (kept 7 days) — the ledger is the money record.
+setInterval(() => void backupDatabase(), 24 * 3600_000).unref();
 
 server.listen(env.port, () => {
   log("server", `control plane on ${env.publicUrl} (port ${env.port})`);
