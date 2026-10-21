@@ -31,15 +31,13 @@ deleted — they shadow every record below.
 1. workspace.google.com → sign up with a personal Google account → "use a domain
    I already own" → `streamhijack.com`.
 2. Verify ownership with the TXT record Google shows.
-3. Create the one user: **`jacob@streamhijack.com`** (the outreach identity — a
-   person's name beats a role address for cold email replies).
-4. Add free aliases to that user (Admin → Users → *Alternate emails*):
-   - `hello@` — public Contact Us (site footer)
-   - `creators@` — streamer partnerships (site footer)
-   - `support@` — app/install help
-   - `dmarc@` — receives DMARC reports
-5. In Gmail → Settings → Accounts → *Send mail as*, add `hello@` and `creators@`
+3. **Done 2026-10-20:** the one user is **`hello@streamhijack.com`** (Business
+   Starter). Aliases on it: `support@` (app/install help) and `info@` (press &
+   business). DMARC reports go to `hello@`. All three are linked from the site.
+4. In Gmail → Settings → Accounts → *Send mail as*, add `support@` and `info@`
    so replies go out from the address they came in on.
+5. A brand-new domain has no sender reputation: the first test mail landed in
+   Gmail spam ("similar to messages identified as spam"). Warm up per §5 before outreach.
 
 ## 3. DNS records
 
@@ -48,7 +46,7 @@ deleted — they shadow every record below.
 | Workspace mail | MX | `@` | `smtp.google.com` (priority 1) |
 | SPF | TXT | `@` | `v=spf1 include:_spf.google.com ~all` |
 | DKIM | TXT | `google._domainkey` | generated in Admin → Gmail → *Authenticate email* (2048-bit), then click **Start authentication** |
-| DMARC | TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:dmarc@streamhijack.com` — tighten to `p=quarantine` after ~2 clean weeks |
+| DMARC | TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:hello@streamhijack.com` — tighten to `p=quarantine` after ~2 clean weeks |
 | Marketing site ✅ | A | `@` | `216.198.79.1` and `64.29.17.1` (Vercel's current recommendation) |
 | Marketing site ✅ | CNAME | `www` | `61c8695760e14eef.vercel-dns-017.com` (project-specific, from `vercel domains verify`) |
 | Control plane ✅ | A / AAAA | `app` | `66.241.124.68` / `2a09:8280:1::1c0:fd56:0` (from `fly certs add`; cert issued) |
