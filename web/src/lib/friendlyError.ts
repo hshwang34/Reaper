@@ -56,6 +56,9 @@ export function friendlyError(err: unknown): string {
   const status = typeof (err as { status?: unknown } | null)?.status === "number" ? (err as { status: number }).status : null;
   const raw = typeof err === "string" ? err : err instanceof Error ? err.message : "";
   const msg = raw.trim().toLowerCase();
+  // An output-guard stop (`job:done` reason "safety:…") is the streamer's rules
+  // at work, not a fault on our side: say so calmly, without blame.
+  if (msg.startsWith("safety:")) return "It was stopped by the streamer's safety checks.";
   if (err instanceof TypeError || NETWORK.test(msg)) {
     return "We couldn't reach the server. Check your connection and try again.";
   }

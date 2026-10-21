@@ -5,6 +5,7 @@
 import type { SubmissionStatus } from "@rh/shared";
 import { channelSlug } from "../lib/channel.js";
 import { friendlyError } from "../lib/friendlyError.js";
+import { formatUsd, showReceipt } from "./format.js";
 
 /** What the viewer paid (hosted), when we know it. */
 export interface Receipt {
@@ -51,9 +52,9 @@ export function ClaimView(props: {
               : undefined
           }
         />
-        {props.receipt && (
+        {props.receipt && showReceipt(status?.state) && (
           <p className="text-sm tabular-nums text-zinc-300">
-            You paid ${props.receipt.amount} for {props.receipt.seconds}s of {props.receipt.effect}.
+            You paid {formatUsd(props.receipt.amount)} for {props.receipt.seconds}s of {props.receipt.effect}.
           </p>
         )}
         {/* Only once it's over: while a hijack is waiting or running, a second

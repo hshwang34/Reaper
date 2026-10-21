@@ -41,6 +41,7 @@ import { channelSlug } from "../lib/channel.js";
 import { downscaleImage } from "../lib/image.js";
 import { EffectArt, PreviewPlayButton, useHasPreview } from "../features/EffectArt.js";
 import { FALLBACK, friendlyError } from "../lib/friendlyError.js";
+import { clampToBounds, payLabel } from "./format.js";
 import { SafetyChecklist, SafetyFindings } from "./SafetyChecks.js";
 import { EffectPicker } from "./EffectPicker.js";
 import { ClaimView } from "./StatusView.js";
@@ -242,8 +243,21 @@ export default function PortalPage() {
   const clampAmount = (n: number) => {
     if (!cfg || !Number.isFinite(n)) return tipAmount;
     const { min, max } = amountBounds(cfg, pay);
-    return Math.min(max, Math.max(min, Math.round(n * 100) / 100));
+    return clampToBounds(n, min, max);
   };
+
+  // Once the streamer's limits are known, hold tipAmount itself inside them so
+  // the button label, the seconds preview and the charge (submit) all read the
+  // same number. (The default $10 can exceed a low streamer maximum.)
+  useEffect(() => {
+    if (!cfg) return;
+    const { min, max } = amountBounds(cfg, pay);
+    setTipAmount((a) => {
+      const c = clampToBounds(a, min, max);
+      setAmountDraft(String(c));
+      return c;
+    });
+  }, [cfg, pay]);
 
   // Same formula the engine bills with (shared/settings.ts) — the preview a
   // viewer sees is exactly the duration they will get.
@@ -974,7 +988,7 @@ export default function PortalPage() {
                           : unchangedFailure
                             ? "Check again"
                             : paid
-                              ? `Pay $${tipAmount} · ${durationPreview}s of ${effectName}`
+                              ? payLabel(tipAmount, durationPreview, effectName)
                               : "Get my claim code"}
                       </button>
                       {submitting && !redirecting && (
