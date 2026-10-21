@@ -254,7 +254,7 @@ export default function RouterPage() {
   const busy = state !== "IDLE" && state !== "OFFLINE";
   const chip = statusOf(state, armed, paused, remaining);
   const canTry = armed && !busy && !paused;
-  const tryNote = !armed ? "Turn on Reality Hijack first" : paused ? "Resume hijacks first" : "Wait for the current effect";
+  const tryNote = !armed ? "Turn on Stream Hijack first" : paused ? "Resume hijacks first" : "Wait for the current effect";
   const jobPreset = job?.presetId ? PRESETS_BY_ID[job.presetId] : undefined;
   const pending = status?.reviewPending ?? 0;
 
@@ -343,11 +343,11 @@ export default function RouterPage() {
               <div className="max-w-md">
                 <h1 className="text-3xl font-bold tracking-tight text-zinc-50">Ready when you are</h1>
                 <p className="mt-2 text-zinc-300">
-                  Turn it on when you go live. Reality Hijack watches your OBS Virtual Camera so viewer effects can
+                  Turn it on when you go live. Stream Hijack watches your OBS Virtual Camera so viewer effects can
                   play over your webcam.
                 </p>
                 <button onClick={() => void arm()} className={btn.primary + " mt-6 px-7 py-3 text-lg"}>
-                  Turn on Reality Hijack
+                  Turn on Stream Hijack
                 </button>
                 {armError && (
                   <p className="mt-4 text-sm text-red-300">
@@ -387,7 +387,7 @@ export default function RouterPage() {
           <Readiness
             label="Camera"
             ok={armed}
-            detail={armed ? (camLabel ?? "On") : "Off — turn on Reality Hijack above"}
+            detail={armed ? (camLabel ?? "On") : "Off — turn on Stream Hijack above"}
           >
             {armed && cams.length > 0 && !busy && (
               <select

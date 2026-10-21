@@ -403,10 +403,10 @@ async function main() {
   // First launch shows the "how it works" tour; a streamer can skip it.
   const skipTour = win.getByRole("button", { name: /^skip$/i });
   if (await skipTour.waitFor({ timeout: 5000 }).then(() => true, () => false)) await skipTour.click();
-  await win.getByRole("button", { name: /turn on reality hijack/i }).click();
+  await win.getByRole("button", { name: /turn on stream hijack/i }).click();
   check(
     "router arms the (fake) camera",
-    await waitFor(async () => !(await win.getByRole("button", { name: /turn on reality hijack/i }).isVisible()), 15_000),
+    await waitFor(async () => !(await win.getByRole("button", { name: /turn on stream hijack/i }).isVisible()), 15_000),
   );
   check(
     "portal goes live once the app is connected",

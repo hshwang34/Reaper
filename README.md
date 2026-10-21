@@ -1,4 +1,9 @@
-# Reality Hijack
+# Stream Hijack
+
+*Formerly **Reality Hijack** (renamed 2026-10). The GitHub repo is still `Reaper`, and the
+live infrastructure keeps its old slugs (`reality-hijack.fly.dev`, the Vercel project
+`reality-hijack`) until the `streamhijack.com` domain is pointed at them —
+see [docs/DOMAIN-AND-EMAIL.md](docs/DOMAIN-AND-EMAIL.md).*
 
 **Viewers pay to remix a streamer's reality in real time.** A viewer tips, writes
 their own prompt (or picks a preset), optionally drops in a reference photo and
@@ -19,7 +24,7 @@ shaped every choice below.
 
 ---
 
-## Why this exists — the economic case for *paid* reality hijacks
+## Why this exists — the economic case for *paid* stream hijacks
 
 Real-time generative video is finally cheap enough to be *interactive* — but not
 cheap enough to leave *running*. Decart's `lucy-2.5` realtime model bills
@@ -28,7 +33,7 @@ cheap enough to leave *running*. Decart's `lucy-2.5` realtime model bills
 No streamer is going to pay $72/hr out of pocket to keep an AI filter on their
 scene as decoration; as an always-on cosmetic, the unit economics are underwater.
 
-**The fix isn't a cheaper model — it's changing who pays, and when.** Reality
+**The fix isn't a cheaper model — it's changing who pays, and when.** Stream
 Hijack never runs the model on the streamer's dime or on a timer. Every hijack is
 *triggered and funded by a viewer*, billed by the second, and lasts only as long
 as the payment bought (**$1 = 1 second** in this MVP). GPU cost scales with
@@ -45,7 +50,7 @@ Control**: 70,000+ creators whose viewers spend Bits/Coins to mess with the
 streamer's *game*
 ([Twitch blog](https://blog.twitch.tv/en/2019/02/15/the-evolution-of-speedrunning-crowd-control-caf6e259e848/),
 [TechCrunch](https://techcrunch.com/2023/05/01/crowd-control-interactive-stream/)).
-Reality Hijack points that same proven loop at a surface the game-only tools
+Stream Hijack points that same proven loop at a surface the game-only tools
 can't reach — the streamer's **camera and scene** — and opens two wedges:
 
 - **Comedy / chaos.** Reaction content is the native currency of live streaming;
@@ -114,7 +119,7 @@ stream, from real footage:
 - The willingness-to-pay is already visible at the top of the market: Logan Paul
   tells Adin Ross that streamers should be charging **more** for paid TTS —
   viewers injecting content into a live stream is a proven, *underpriced* behavior,
-  which is exactly the demand Reality Hijack points a richer surface at.
+  which is exactly the demand Stream Hijack points a richer surface at.
 
   [![Logan Paul tells Adin Ross streamers should get paid more for TTS](https://img.youtube.com/vi/3YsTQeaF6rE/hqdefault.jpg)](https://youtu.be/3YsTQeaF6rE)
 

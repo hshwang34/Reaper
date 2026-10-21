@@ -49,7 +49,7 @@ export default function SetupPage() {
   if (!d) {
     return (
       <div className="grid h-screen place-items-center text-zinc-500">
-        The setup wizard runs inside the Reality Hijack app.
+        The setup wizard runs inside the Stream Hijack app.
       </div>
     );
   }
@@ -66,7 +66,7 @@ export default function SetupPage() {
   return (
     <div className="mx-auto max-w-2xl p-8">
       <header className="mb-8">
-        <h1 className="text-2xl font-bold">Set up Reality Hijack</h1>
+        <h1 className="text-2xl font-bold">Set up Stream Hijack</h1>
         <ol className="mt-4 flex gap-2 text-xs">
           {STEPS.map((label, i) => (
             <li
@@ -158,7 +158,7 @@ function SignInStep({
       <Card>
         <p>
           Signed in as <b className="text-brand-400">{state.login}</b>. Your
-          viewer portal and tips run through the Reality Hijack cloud — no API
+          viewer portal and tips run through the Stream Hijack cloud — no API
           keys on this machine.
         </p>
         <Primary onClick={next}>Continue</Primary>
@@ -206,7 +206,7 @@ function SignInStep({
     return (
       <Card>
         <p className="text-zinc-300">
-          <b>Hosted sign-in isn't available in this build yet.</b> Reality
+          <b>Hosted sign-in isn't available in this build yet.</b> Stream
           Hijack signs you in with Twitch and runs tips, moderation and the AI
           model from our servers — nothing to configure on your side. That
           service isn't live for this build; you can still set up your camera
@@ -269,7 +269,7 @@ function CameraStep({ next }: { next: () => void }) {
   return (
     <Card>
       <p className="text-zinc-300">
-        Reality Hijack restyles your <b>OBS Virtual Camera</b>. Start it in
+        Stream Hijack restyles your <b>OBS Virtual Camera</b>. Start it in
         OBS (set its output type to <b>Source</b>, not Program — otherwise the
         AI feeds back into itself) and allow camera access.
       </p>
@@ -558,7 +558,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
             void d.setAutoLaunch(e.target.checked);
           }}
         />
-        Start Reality Hijack when I log in
+        Start Stream Hijack when I log in
       </label>
       {/* Marks setup done and relaunches: from now on the app opens straight
           into the router, and any key pasted in step 1 is loaded. */}
@@ -569,7 +569,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
           void d.setupComplete();
         }}
       >
-        {finishing ? "Restarting…" : "Open Reality Hijack →"}
+        {finishing ? "Restarting…" : "Open Stream Hijack →"}
       </Primary>
     </Card>
   );

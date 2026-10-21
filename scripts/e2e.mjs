@@ -135,10 +135,10 @@ async function main() {
   // First launch shows the "how it works" tour; a streamer can skip it.
   const skipTour = router.getByRole("button", { name: /^skip$/i });
   if (await skipTour.waitFor({ timeout: 5000 }).then(() => true, () => false)) await skipTour.click();
-  await router.getByRole("button", { name: /turn on reality hijack/i }).click();
+  await router.getByRole("button", { name: /turn on stream hijack/i }).click();
   check(
     "router arms the camera",
-    await waitFor(async () => !(await router.getByRole("button", { name: /turn on reality hijack/i }).isVisible()), 10_000),
+    await waitFor(async () => !(await router.getByRole("button", { name: /turn on stream hijack/i }).isVisible()), 10_000),
   );
   check(
     "router OBS tile shows connected",

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Marketing site for Reality Hijack. A standalone static build deployed to Vercel from this directory; deliberately NOT an npm workspace of the monorepo so hosting installs only Vite, never Electron or native modules. No runtime dependencies: the page is HTML, CSS, a little TypeScript, and pre-recorded clips of the real effect.",
+  "description": "Marketing site for Stream Hijack. A standalone static build deployed to Vercel from this directory; deliberately NOT an npm workspace of the monorepo so hosting installs only Vite, never Electron or native modules. No runtime dependencies: the page is HTML, CSS, a little TypeScript, and pre-recorded clips of the real effect.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -31,7 +31,7 @@ export function EarningsTab({ cloud }: { cloud: { login: string; portalUrl: stri
     return (
       <Card title="Earnings">
         <p className="text-sm text-zinc-400">
-          This copy of Reality Hijack runs as an offline demo, so there are no viewer payments. Sign in with Twitch
+          This copy of Stream Hijack runs as an offline demo, so there are no viewer payments. Sign in with Twitch
           (tray menu → Run setup again) to take paid hijacks.
         </p>
       </Card>
