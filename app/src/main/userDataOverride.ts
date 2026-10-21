@@ -6,7 +6,42 @@
 // (scripts/e2e-hosted.mjs) runs the real app next to a streamer's installed
 // copy without touching its sign-in, keys or setup state. The single-instance
 // lock is per profile too, so the two don't collide.
+//
+// Rename migration: userData follows productName, so the Reality Hijack →
+// Stream Hijack rename moved it (~/Library/Application Support/Reality
+// Hijack → …/Stream Hijack). Without this, an upgrade would sign the
+// streamer out, re-run setup, and mint a new install token (= a new OBS
+// overlay URL). On the first launch under the new name, copy the old
+// profile across once. "First launch" is judged by content, not by the
+// folder existing: Electron creates userData before this module runs. keys.json stays behind: it's encrypted with the OS
+// keychain under the OLD app name and can't be read by the new one (in
+// cloud mode it only held OBS details, which are re-discovered anyway).
 import { app } from "electron";
+import { cpSync, existsSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+
+const LEGACY_NAMES = ["Reality Hijack"];
 
 const dir = process.env.RH_USER_DATA?.trim();
-if (dir) app.setPath("userData", dir);
+if (dir) {
+  app.setPath("userData", dir);
+} else {
+  const now = app.getPath("userData");
+  const has = (d: string, f: string) => existsSync(join(d, f));
+  // A profile worth carrying: signed in or set up. The new one isn't yet.
+  const used = (d: string) => has(d, "cloud.json") || has(d, "app-state.json");
+  const old = LEGACY_NAMES.map((n) => join(dirname(now), n)).find((p) => p !== now && used(p));
+  if (old && !used(now) && !has(now, ".migrated-from")) {
+    try {
+      cpSync(old, now, {
+        recursive: true,
+        // Chromium's own caches and locks are rebuilt; our files are what matter.
+        filter: (src) => !/(Singleton|Cache|GPUCache|Code Cache|DawnCache|keys\.json$)/.test(basename(src)),
+      });
+      writeFileSync(join(now, ".migrated-from"), old);
+      console.log(`[app] migrated profile from ${old}`);
+    } catch (e) {
+      console.warn(`[app] profile migration from ${old} failed: ${(e as Error).message}`);
+    }
+  }
+}
