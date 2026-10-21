@@ -41,6 +41,11 @@ viewer who replays requests:
 
 ## Report
 
+Report only findings that affect **correctness, security, or the brief's stated
+requirements**. Don't pad: a reviewer asked to find gaps will always find some, and chasing
+speculative ones (extra abstraction, defensive code, tests for impossible cases) makes the
+product worse. If the diff is sound, say so — "no blocking findings" is a valid review.
+
 Findings ranked by severity, each with: file:line, the concrete failure scenario (inputs →
-wrong outcome), and a suggested fix. Then a one-line verdict: **ship**, **ship after fixes**, or
-**block**. No style nits unless they hide a bug.
+wrong outcome), and a suggested fix. Optional improvements, if any, go in a separate short
+list marked optional. Then a one-line verdict: **ship**, **ship after fixes**, or **block**.
