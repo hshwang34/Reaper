@@ -70,3 +70,16 @@ the Effects gallery), re-openable from the studio. PR #20.
 
 **#16 · 2026-10-20 · The marketing site deploys itself:** Vercel is connected to `main` with
 root `site/`; any merge touching `site/` ships streamhijack.com, PRs get preview links.
+
+**#17 · 2026-10-20 · Effect previews are generated from the PM's own webcam clip**, recorded
+once at the rig and run through the real model for every effect — not CSS art, not stock, not a
+generated actor. Static files; nothing user-facing calls the model for previews. Brief 002.
+
+**#18 · 2026-10-20 · Voice: playful and streamer-native, except money and safety**, which stay
+plain and calm (refunds, errors, safety screens). `docs/product/BRAND.md`. Brief 002.
+
+**#19 · 2026-10-20 · Vocabulary: a viewer buys an "effect"; what happens on stream is a
+"hijack".** "Preset" is code-only; "look" is not used. `docs/product/BRAND.md`. Brief 002.
+
+**#20 · 2026-10-20 · Brief 002 ships as three PRs, viewer portal first** (brand guide + preview
+pipeline + portal → studio + wizard → website), because the portal is where money changes hands.

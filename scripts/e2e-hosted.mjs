@@ -419,15 +419,18 @@ async function main() {
   await portal.goto(`${serverBase}/c/${LOGIN}`);
   await portal.getByRole("button", { name: /80s Anime/i }).first().click();
   await portal.getByPlaceholder("optional").first().fill("e2e viewer");
+  // The free amount field sits behind "Other amount"; $4 isn't a quick chip.
+  await portal.getByRole("button", { name: /other amount/i }).click();
   await portal.locator('input[type="number"]').fill("4");
   obsCalls.splice(0);
   const t0 = Date.now();
   await portal.getByRole("button", { name: /^Pay \$4/ }).click();
   // The portal consumes ?paid= and cleans the URL, so assert on what the
-  // viewer sees: the paid status view (its "Hijack again" button).
+  // viewer sees: the paid status view. "Hijack again" only shows once the
+  // hijack is over, so look for the "Payment received" status instead.
   check(
     "Pay → Checkout → back on the portal, showing the paid status",
-    await waitFor(async () => portal.getByRole("button", { name: /hijack again/i }).isVisible(), 20_000),
+    await waitFor(async () => /payment received|in the queue|live on stream|hijack complete/i.test(await portal.locator("body").innerText()), 20_000),
     portal.url().replace(serverBase, ""),
   );
   check("signed webhook accepted (200)", stripeState.webhooks.at(-1)?.status === 200, JSON.stringify(stripeState.webhooks.at(-1)));

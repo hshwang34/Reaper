@@ -44,6 +44,10 @@ export interface ApiContext {
   decartEnabled: boolean;
   /** Policy-gated mint (see mintPolicy.ts). Throws MintError on refusal. */
   mint(durationSec: number, origin: string): Promise<string>;
+  /** Ungated mint for the dev-only batch recorder (POST /dev/token). Only a
+   *  host that spends its own key (the local rig) provides it; the route is
+   *  mounted only when `devRoutes` is on, and answers 501 without this. */
+  devMint?(durationSec: number, origin: string): Promise<string>;
   /** Panic toggle against whichever engine owns the money path. */
   togglePause(): Promise<boolean>;
   /** Public same-origin URL for a stored upload. */
@@ -70,6 +74,9 @@ export interface ApiRouterOptions {
    *  spending its key. Default true. */
   devRoutes?: boolean;
 }
+
+/** Longest session a dev (ungated) token may be minted for. */
+export const MAX_DEV_TOKEN_SEC = 60;
 
 type ReqWithFile = Request & { file?: UploadedFile };
 
@@ -415,6 +422,32 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
   );
 
   if (opts.devRoutes === false) return r;
+
+  /** Ungated token for the offline preview recorder (/decart-test "Record all
+   *  effects"): there is no job to gate on while recording. Dev routes only
+   *  (absent when devRoutes is false, i.e. in production), authed, and capped
+   *  so even a dev token can't open an unbounded session. */
+  r.post(
+    "/dev/token",
+    opts.requireAuth,
+    withCtx(async (ctx, req, res) => {
+      const body = (req.body ?? {}) as { durationSec?: unknown; origin?: unknown };
+      const durationSec = Number(body.durationSec);
+      if (!Number.isFinite(durationSec) || durationSec <= 0) {
+        return res.status(400).json({ error: "durationSec must be positive" });
+      }
+      if (durationSec > MAX_DEV_TOKEN_SEC) {
+        return res.status(400).json({ error: `durationSec is capped at ${MAX_DEV_TOKEN_SEC}` });
+      }
+      if (!ctx.devMint) return res.status(501).json({ error: "this host doesn't mint dev tokens" });
+      try {
+        const origin = typeof body.origin === "string" ? body.origin : "";
+        res.json({ token: await ctx.devMint(durationSec, origin) });
+      } catch (e) {
+        res.status(502).json({ error: (e as Error).message });
+      }
+    }),
+  );
 
   /** Streamer console trigger — the identical job pipeline minus payment. */
   r.post(

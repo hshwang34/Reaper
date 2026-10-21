@@ -54,3 +54,12 @@ vercel             # preview URL; `vercel --prod` to publish
 
 Commit the encoded `.mp4`/`.jpg` files and the manifest. Keep the raw `.webm`
 recordings out of the repo.
+
+## App effect previews (all effects, one sitting)
+
+The viewer page and studio show `web/public/previews/<id>.{jpg,webm}` when present (CSS art otherwise).
+
+1. `npm run dev`, open `/decart-test`, pick a sample photo (for Photo swap), press **Record all effects**.
+   One camera grant, ~10 s per effect, 2 files each into Downloads. **Stop** ends it early.
+2. `site/tools/encode-clips.sh --app ~/Downloads/*-before.webm ~/Downloads/*-after.webm`
+   writes the still, a <=6 s loop (<=500 KB) and `manifest.json`. Commit `web/public/previews/`.

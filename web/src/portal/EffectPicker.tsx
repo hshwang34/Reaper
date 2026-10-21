@@ -1,12 +1,12 @@
 // Step 1 of the portal: pick an effect. Filter chips over a grid of effect
-// cards (EffectArt thumbnails), plus a "Write your own" tile when the channel
+// cards (EffectArt thumbnails), plus a "Your own idea" tile when the channel
 // takes custom prompts. Cards are real toggle buttons (aria-pressed) so the
 // grid is keyboard- and screen-reader-navigable; selection is shown by a ring
 // AND a check badge, never by color alone.
 
 import { useMemo, useState } from "react";
 import type { Preset } from "@rh/shared";
-import { CATEGORY_LABEL, EffectArt, Intensity } from "../features/EffectArt.js";
+import { CATEGORY_LABEL, EffectArt, Intensity, PreviewPlayButton, previewHandlers } from "../features/EffectArt.js";
 
 type Filter = "all" | Preset["category"] | "photo";
 
@@ -23,16 +23,19 @@ export function EffectPicker({
   writing,
   allowCustom,
   hasPhoto,
+  emptyText,
   onPick,
   onWrite,
 }: {
   presets: Preset[];
   selectedId: string | null;
-  /** "Write your own" is the current choice. */
+  /** "Your own idea" is the current choice. */
   writing: boolean;
   allowCustom: boolean;
   /** A photo is attached — photo-only cards say so. */
   hasPhoto: boolean;
+  /** Shown when this channel has no effects at all. */
+  emptyText: string;
   onPick: (id: string) => void;
   onWrite: () => void;
 }) {
@@ -65,7 +68,7 @@ export function EffectPicker({
               onClick={() => setFilter(f)}
               className={`h-11 shrink-0 rounded-full border px-4 text-sm font-medium whitespace-nowrap ${
                 filter === f
-                  ? "border-brand-400 bg-brand-400 text-zinc-950"
+                  ? "border-brand-400 bg-brand-400/10 text-brand-200"
                   : "border-zinc-700/80 bg-zinc-900 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
               }`}
             >
@@ -95,7 +98,7 @@ export function EffectPicker({
               {writing && <Check />}
             </div>
             <div className="flex flex-1 flex-col gap-1 bg-zinc-900/80 p-3">
-              <span className="font-semibold leading-tight text-zinc-50">Write your own</span>
+              <span className="font-semibold leading-tight text-zinc-50">Your own idea</span>
               <span className="text-xs leading-snug text-zinc-400">Describe any change you can imagine</span>
             </div>
           </button>
@@ -104,12 +107,14 @@ export function EffectPicker({
         {shown.map((p) => {
           const selected = selectedId === p.id;
           return (
+            // The wrapper carries hover/focus playback and hosts the touch play
+            // control as a SIBLING of the card button (no button in a button).
+            <div key={p.id} className="relative flex" {...previewHandlers(p.id)}>
             <button
-              key={p.id}
               type="button"
               aria-pressed={selected}
               onClick={() => onPick(p.id)}
-              className={`group relative flex flex-col overflow-hidden rounded-2xl border text-left ${
+              className={`group relative flex w-full flex-col overflow-hidden rounded-2xl border text-left ${
                 selected
                   ? "border-brand-400 ring-2 ring-brand-400"
                   : "border-zinc-800 hover:border-zinc-500"
@@ -136,9 +141,20 @@ export function EffectPicker({
                 </span>
               </div>
             </button>
+            <div className="pointer-events-none absolute inset-x-0 top-0 aspect-video">
+              <div className="absolute inset-0">
+                <PreviewPlayButton id={p.id} label={p.label} />
+              </div>
+            </div>
+            </div>
           );
         })}
       </div>
+      {shown.length === 0 && !allowCustom && (
+        <p className="rounded-2xl border border-dashed border-zinc-700 p-6 text-center text-zinc-300">
+          {emptyText}
+        </p>
+      )}
     </div>
   );
 }

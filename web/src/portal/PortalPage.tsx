@@ -39,7 +39,9 @@ import { api, type PaymentsInfo, type PublicConfig } from "../lib/api.js";
 import { HubSocket } from "../lib/ws.js";
 import { channelSlug } from "../lib/channel.js";
 import { downscaleImage } from "../lib/image.js";
-import { EffectArt } from "../features/EffectArt.js";
+import { EffectArt, PreviewPlayButton, useHasPreview } from "../features/EffectArt.js";
+import { FALLBACK, friendlyError } from "../lib/friendlyError.js";
+import { clampToBounds, payLabel } from "./format.js";
 import { SafetyChecklist, SafetyFindings } from "./SafetyChecks.js";
 import { EffectPicker } from "./EffectPicker.js";
 import { ClaimView } from "./StatusView.js";
@@ -76,10 +78,39 @@ interface Failure {
   image: File | null;
 }
 
-/** Server messages are lower-case fragments; sentence-case them for display. */
-const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** What the viewer paid, remembered across the Stripe round trip so the
+ *  status page can show a receipt line (sessionStorage; best effort). */
+interface Receipt {
+  amount: number;
+  seconds: number;
+  effect: string;
+}
+const receiptKey = (code: string) => `rh:paid:${code}`;
+function saveReceipt(code: string, r: Receipt) {
+  try {
+    sessionStorage.setItem(receiptKey(code), JSON.stringify(r));
+  } catch {
+    /* private mode — the receipt line just won't show */
+  }
+}
+function loadReceipt(code: string): Receipt | null {
+  try {
+    const r = JSON.parse(sessionStorage.getItem(receiptKey(code)) ?? "null") as Receipt | null;
+    return r && typeof r.amount === "number" && typeof r.seconds === "number" && typeof r.effect === "string" ? r : null;
+  } catch {
+    return null;
+  }
+}
 /** The single-column (phone/tablet) layout, where steps stack. */
 const stacked = () => window.matchMedia("(max-width: 1023px)").matches;
+
+/** The amount a viewer may pay: the streamer's minimum up to what fills the
+ *  maximum duration (the same ceiling the "capped" line used to describe). */
+function amountBounds(cfg: PublicConfig, pay: PaymentsInfo | null) {
+  const min = pay?.enabled ? pay.minUsd : cfg.minTipUSD;
+  const max = Math.max(min, Math.ceil(cfg.maxDurationSec / cfg.secondsPerUSD));
+  return { min, max };
+}
 
 export default function PortalPage() {
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
@@ -106,6 +137,9 @@ export default function PortalPage() {
   const [enhance, setEnhance] = useState(true);
   const [consent, setConsent] = useState(false);
   const [tipAmount, setTipAmount] = useState(10);
+  /** The free-typing amount field is tucked behind "Other amount". */
+  const [otherAmount, setOtherAmount] = useState(false);
+  const [amountDraft, setAmountDraft] = useState("10");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,9 +151,32 @@ export default function PortalPage() {
   const [passedChecks, setPassedChecks] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+  /** Checks passed and we're handing the viewer to Stripe (no cancelling now). */
+  const [redirecting, setRedirecting] = useState(false);
+  /** Same flag for the `finally` in submit() (state is stale inside that closure). */
+  const redirectingRef = useRef(false);
+  // Back button from Stripe restores this page from the bfcache mid-redirect.
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      redirectingRef.current = false;
+      setRedirecting(false);
+      setSubmitting(false);
+      setPreparing(null);
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
   const [code, setCode] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [status, setStatus] = useState<SubmissionStatus | null>(null);
+  /** Came back from Stripe Checkout (?paid=<code>) — read from the redirect, not from copy. */
+  const [fromCheckout, setFromCheckout] = useState(false);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  /** A photo-only effect was submitted without its photo: highlight the drop zone. */
+  const [photoMissing, setPhotoMissing] = useState(false);
+  const dropRef = useRef<HTMLLabelElement>(null);
   /** The channel's public status broadcast — drives the "Live now" chip. */
   const [snapshot, setSnapshot] = useState<StatusSnapshot | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -135,8 +192,13 @@ export default function PortalPage() {
   const [pay, setPay] = useState<PaymentsInfo | null>(null);
   const paid = pay?.enabled === true;
 
+  function loadConfig() {
+    setLoadFailed(false);
+    api.getConfig().then(setCfg).catch(() => setLoadFailed(true));
+  }
+
   useEffect(() => {
-    api.getConfig().then(setCfg).catch((e) => setError(e.message));
+    loadConfig();
     if (channelSlug()) {
       api
         .paymentsInfo()
@@ -152,7 +214,9 @@ export default function PortalPage() {
     const back = new URLSearchParams(location.search).get("paid");
     if (back) {
       setCode(back);
-      setStatus({ code: back, state: "pending", message: "Payment received — your effect is next in line." });
+      setFromCheckout(true);
+      setReceipt(loadReceipt(back));
+      setStatus({ code: back, state: "pending", message: "Payment received. Your effect is next in line." });
       history.replaceState(null, "", location.pathname);
     }
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -176,6 +240,25 @@ export default function PortalPage() {
     };
   }, [code]);
 
+  const clampAmount = (n: number) => {
+    if (!cfg || !Number.isFinite(n)) return tipAmount;
+    const { min, max } = amountBounds(cfg, pay);
+    return clampToBounds(n, min, max);
+  };
+
+  // Once the streamer's limits are known, hold tipAmount itself inside them so
+  // the button label, the seconds preview and the charge (submit) all read the
+  // same number. (The default $10 can exceed a low streamer maximum.)
+  useEffect(() => {
+    if (!cfg) return;
+    const { min, max } = amountBounds(cfg, pay);
+    setTipAmount((a) => {
+      const c = clampToBounds(a, min, max);
+      setAmountDraft(String(c));
+      return c;
+    });
+  }, [cfg, pay]);
+
   // Same formula the engine bills with (shared/settings.ts) — the preview a
   // viewer sees is exactly the duration they will get.
   const durationPreview = useMemo(
@@ -187,6 +270,7 @@ export default function PortalPage() {
     expiresAt != null ? Math.max(0, Math.round((expiresAt - now) / 1000)) : null;
 
   const selectedPreset = cfg?.presets.find((p) => p.id === presetId) ?? null;
+  const hasSelectedPreview = useHasPreview(selectedPreset?.id ?? "");
   const chosen = selectedPreset != null || writing;
 
   // Phones: a tap on a card brings step 2 into view.
@@ -210,21 +294,27 @@ export default function PortalPage() {
     scrollToCustomize.current = true;
   }
 
+  function pickAmount(a: number) {
+    setTipAmount(a);
+    setAmountDraft(String(a));
+  }
+
   function backToPicker() {
     pickRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function takeImage(file: File | null) {
     setError(null);
+    setPhotoMissing(false);
     if (file && !IMAGE_TYPES.includes(file.type)) {
-      setError("That file isn't a JPEG, PNG or WebP image.");
+      setError("That file isn't a JPEG, PNG or WebP image. Pick a different photo.");
       if (fileRef.current) fileRef.current.value = "";
       return;
     }
     if (file && file.size > MAX_UPLOAD_BYTES) {
       // Decart's own ceiling is 10 MB; we downscale to 720p before upload so
       // anything under this cap is fine. Bigger files just stall the submit.
-      setError("That image is over 25 MB — please pick a smaller one.");
+      setError("That photo is over 25 MB. Pick a smaller one.");
       if (fileRef.current) fileRef.current.value = "";
       return;
     }
@@ -260,18 +350,22 @@ export default function PortalPage() {
     setError(null);
     setFailure(null);
     setChecks([]);
+    setPhotoMissing(false);
     if (!presetId && !customPrompt.trim()) {
-      setError(writing ? "Describe your effect first." : "Pick an effect or write your own.");
+      setError(writing ? "Describe your effect first." : "Pick an effect or describe your own.");
       return;
     }
     if (selectedPreset?.needsImage && !imageFile) {
-      setError(`"${selectedPreset.label}" needs a photo — add one above.`);
+      setError(`${selectedPreset.label} needs a photo. Add one above.`);
+      setPhotoMissing(true);
+      dropRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (selectedPreset?.needsImage && !consent) {
-      setError("Tick the consent box — you need permission to put someone's face on stream.");
+      setError("Check the consent box. You need permission to put someone's face on stream.");
       return;
     }
+    const amount = clampAmount(tipAmount);
     setSubmitting(true);
     const checkedPrompt = presetId ? null : customPrompt.trim();
     const checkedImage = imageFile;
@@ -311,9 +405,28 @@ export default function PortalPage() {
         if (paid) {
           // Every check passed and the code exists — now the money. Stripe
           // holds the effect for the 30 minutes its checkout page lives.
-          const { url } = await api.checkout(res.code, tipAmount, tipperName.trim());
+          redirectingRef.current = true;
+          setRedirecting(true);
+          setPreparing("Taking you to checkout…");
+          let url: string;
+          try {
+            ({ url } = await api.checkout(res.code, amount, tipperName.trim()));
+          } catch (e) {
+            // Specific words for the cases a viewer can act on (streamer went
+            // offline, request expired); otherwise the plain checkout line.
+            const friendly = friendlyError(e);
+            setError(friendly === FALLBACK ? "We couldn't start checkout. Try again." : friendly);
+            redirectingRef.current = false;
+            setRedirecting(false);
+            return;
+          }
+          saveReceipt(res.code, {
+            amount,
+            seconds: computeDurationSec(amount, cfg),
+            effect: selectedPreset?.label ?? "your own idea",
+          });
           location.href = url;
-          return;
+          return; // stay "busy" until the browser leaves the page
         }
         setCode(res.code);
         setExpiresAt(res.expiresAt);
@@ -328,14 +441,19 @@ export default function PortalPage() {
       } else if (res.findings.length) {
         setFailure({ findings: res.findings, checks: res.checks, prompt: checkedPrompt, image: checkedImage });
       } else {
-        setError(sentence(res.error));
+        setError(friendlyError(res.error));
       }
     } catch (e) {
-      if (ac.signal.aborted) return;
-      setError((e as Error).message);
+      if (ac.signal.aborted) {
+        setChecks([]);
+        return;
+      }
+      setError(friendlyError(e));
     } finally {
-      setPreparing(null);
-      setSubmitting(false);
+      if (!redirectingRef.current) {
+        setPreparing(null);
+        setSubmitting(false);
+      }
     }
   }
 
@@ -371,16 +489,47 @@ export default function PortalPage() {
   }
 
   if (!cfg) {
+    if (loadFailed) {
+      return (
+        <div className="mx-auto grid min-h-[60vh] max-w-md place-items-center px-4 text-center">
+          <div>
+            <p role="alert" className="text-base text-red-300">
+              We couldn't load this page. Check your connection and try again.
+            </p>
+            <button
+              type="button"
+              onClick={loadConfig}
+              className="mt-4 min-h-12 rounded-2xl bg-brand-600 px-6 font-bold text-white hover:bg-brand-700"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      );
+    }
+    // Loading: say so, and hold the shape of the page with a skeleton grid.
     return (
-      <div className="grid min-h-[60vh] place-items-center text-zinc-400">
-        {error ?? "Loading…"}
+      <div className="mx-auto max-w-6xl px-4 pt-2 sm:px-6" aria-busy="true">
+        <p role="status" className="mb-6 text-lg text-zinc-300">
+          Loading the hijack page…
+        </p>
+        <div aria-hidden className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:max-w-3xl">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className="overflow-hidden rounded-2xl border border-zinc-800">
+              <div className="aspect-video bg-zinc-900 motion-safe:animate-pulse" />
+              <div className="space-y-2 bg-zinc-900/80 p-3">
+                <div className="h-4 w-2/3 rounded bg-zinc-800 motion-safe:animate-pulse" />
+                <div className="h-3 w-full rounded bg-zinc-800/70 motion-safe:animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   const channel = channelSlug();
-  const minAmount = paid ? pay!.minUsd : cfg.minTipUSD;
-  const maxAmount = Math.max(minAmount, Math.ceil(cfg.maxDurationSec / cfg.secondsPerUSD));
+  const { min: minAmount, max: maxAmount } = amountBounds(cfg, pay);
   const quickAmounts = [...new Set([minAmount, 5, 10, 20, 30])]
     .filter((a) => a >= minAmount && a <= maxAmount)
     .sort((a, b) => a - b);
@@ -388,12 +537,21 @@ export default function PortalPage() {
   const offline = paid ? !pay!.live : snapshot?.routerState === "OFFLINE";
   const busy = snapshot && (snapshot.activeJob != null || snapshot.queueLength > 0);
   const photoTier = cfg.referenceImages;
+  const streamerName = channel ?? "The streamer";
 
   return (
     <div className={`mx-auto max-w-6xl px-4 pt-2 sm:px-6 ${code || !chosen ? "pb-10" : "pb-48 lg:pb-10"}`}>
+      {offline && (
+        <div
+          role="status"
+          className="mb-6 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200"
+        >
+          You can still browse effects while you wait. Payments open when {streamerName} is streaming.
+        </div>
+      )}
       <header className="mb-8 max-w-2xl">
         <h1 className="text-[2rem] leading-[1.1] font-bold text-zinc-50 sm:text-5xl">
-          Transform {channel ? `${channel}'s` : "the"} stream
+          Hijack {channel ? `${channel}'s` : "the"} stream
         </h1>
         <p className="mt-3 text-base text-zinc-300 sm:text-lg">
           Pick an effect, pay, and watch it happen live.{" "}
@@ -419,15 +577,15 @@ export default function PortalPage() {
                 }`}
               />
               {offline
-                ? `${channel ?? "The streamer"} is offline — check back when they're live`
+                ? `${streamerName} isn't live right now. Check back when they're streaming.`
                 : busy
-                  ? `Effect running · in line: ${snapshot!.queueLength}`
+                  ? `An effect is on stream · ${snapshot!.queueLength} in line`
                   : "Live now"}
             </span>
           )}
           {!cfg.decartEnabled && (
             <span className="inline-flex min-h-8 items-center rounded-full border border-amber-500/30 px-3 text-xs text-amber-300">
-              Demo mode — camera passthrough
+              Demo mode: effects are simulated
             </span>
           )}
         </div>
@@ -441,18 +599,18 @@ export default function PortalPage() {
           }}
         >
           <fieldset
-            disabled={submitting}
             className="m-0 min-w-0 border-0 p-0 lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start lg:gap-10"
           >
             {/* ── Step 1: pick ── */}
-            <section ref={pickRef} aria-labelledby="step-pick" className="scroll-mt-4">
-              <StepHeading n={1} id="step-pick">Pick an effect</StepHeading>
+            <section ref={pickRef} aria-labelledby="step-pick" className="scroll-mt-4" inert={submitting}>
+              <StepHeading n={1} id="step-pick">Pick an effect or describe your own</StepHeading>
               <EffectPicker
                 presets={cfg.presets}
                 selectedId={presetId}
                 writing={writing}
                 allowCustom={cfg.allowCustomPrompts}
                 hasPhoto={imageFile != null}
+                emptyText={`${streamerName} hasn't turned any effects on yet.`}
                 onPick={pickPreset}
                 onWrite={pickWriting}
               />
@@ -465,26 +623,41 @@ export default function PortalPage() {
                   <p className="text-4xl" aria-hidden>👈</p>
                   <p className="mt-3 text-lg font-semibold text-zinc-100">Pick an effect to start</p>
                   <ol className="mx-auto mt-4 max-w-56 space-y-2 text-left text-sm text-zinc-400">
-                    <li>1 · Pick an effect or write your own</li>
-                    <li>2 · Add a photo or tweak it</li>
-                    <li>3 · Pay — it plays on stream right away</li>
+                    <li>1 · Pick an effect or describe your own</li>
+                    <li>2 · Add a photo or tweak the details</li>
+                    <li>3 · Pay. It plays on stream right away.</li>
                   </ol>
                 </div>
               ) : (
                 <section aria-labelledby="step-customize" className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-4 sm:p-5 lg:pb-0 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
-                  <StepHeading n={2} id="step-customize">Customize</StepHeading>
+                  <StepHeading n={2} id="step-customize">Add a photo or tweak the details</StepHeading>
 
-                  {/* Selected effect */}
+                  {/* Selected effect. With a recorded preview it gets a large 16:9
+                      example; without one, today's small thumbnail. */}
+                  {selectedPreset && hasSelectedPreview && (
+                    <figure className="relative mb-4 max-w-[380px]">
+                      <EffectArt preset={selectedPreset} size="lg" autoPlay className="w-full rounded-2xl" />
+                      <div className="pointer-events-none absolute inset-x-0 top-0 aspect-video">
+                        <div className="absolute inset-0">
+                          <PreviewPlayButton id={selectedPreset.id} label={selectedPreset.label} reducedMotionOnly />
+                        </div>
+                      </div>
+                      <figcaption className="mt-2 text-sm text-zinc-400">
+                        {selectedPreset.id === "photo-swap" ? "Example photo. " : "Example. "}
+                        Your streamer's results will look different.
+                      </figcaption>
+                    </figure>
+                  )}
                   <div className="flex items-center gap-3">
                     {selectedPreset ? (
-                      <EffectArt preset={selectedPreset} size="sm" className="w-24 shrink-0 rounded-xl" />
+                      !hasSelectedPreview && <EffectArt preset={selectedPreset} size="sm" className="w-24 shrink-0 rounded-xl" />
                     ) : (
                       <div aria-hidden className="grid aspect-video w-24 shrink-0 place-items-center rounded-xl bg-[linear-gradient(135deg,#1c1617,#3a2722)] text-2xl text-brand-300">
                         ✎
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold leading-tight text-zinc-50">{selectedPreset?.label ?? "Your own effect"}</p>
+                      <p className="font-semibold leading-tight text-zinc-50">{selectedPreset?.label ?? "Your own idea"}</p>
                       <p className="mt-0.5 line-clamp-2 text-sm leading-snug text-zinc-400">
                         {selectedPreset?.pitch ?? "Describe it below"}
                       </p>
@@ -494,11 +667,11 @@ export default function PortalPage() {
                       onClick={backToPicker}
                       className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-brand-300 hover:bg-zinc-800 lg:hidden"
                     >
-                      Change
+                      Change effect
                     </button>
                   </div>
 
-                  <div className="mt-6 space-y-6">
+                  <div className="mt-6 space-y-6" inert={submitting}>
                     {/* Custom prompt */}
                     {writing && (
                       <div>
@@ -530,8 +703,8 @@ export default function PortalPage() {
                           className="w-full resize-none rounded-2xl border border-zinc-700 bg-zinc-950 p-3.5 text-base text-zinc-50 placeholder:text-zinc-500 focus:border-brand-400 focus:outline-none"
                         />
                         <p id="rh-prompt-hint" className="mt-2 text-sm text-zinc-400">
-                          Describe one change and where it goes. Use concrete nouns.
-                          Say what you want, not what to avoid.
+                          Describe one change and where it goes. Be specific, and say what you
+                          want rather than what to avoid.
                           {cfg.customPromptsNeedApproval && " The streamer approves custom effects before they run."}
                         </p>
 
@@ -582,29 +755,30 @@ export default function PortalPage() {
                         />
                         {imagePreview ? (
                           <div className="flex items-center gap-4 rounded-2xl border border-zinc-700 bg-zinc-950 p-3">
-                            <img src={imagePreview} alt="Your reference photo" className="h-20 w-20 rounded-xl object-cover" />
+                            <img src={imagePreview} alt="Your photo" className="h-20 w-20 rounded-xl object-cover" />
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-semibold text-zinc-100">Photo added</p>
-                              <p className="text-xs text-zinc-400">Safety-checked, then deleted after your effect runs.</p>
+                              <p className="text-sm text-zinc-400">Safety-checked, then deleted after your effect runs.</p>
                               <div className="mt-1 flex gap-1">
                                 <label
                                   htmlFor="rh-photo"
                                   className="inline-flex min-h-11 cursor-pointer items-center rounded-lg px-2 text-sm font-semibold text-brand-300 hover:bg-zinc-800"
                                 >
-                                  Replace
+                                  Replace photo
                                 </label>
                                 <button
                                   type="button"
                                   onClick={clearImage}
                                   className="min-h-11 rounded-lg px-2 text-sm font-semibold text-zinc-300 hover:bg-zinc-800"
                                 >
-                                  Remove
+                                  Remove photo
                                 </button>
                               </div>
                             </div>
                           </div>
                         ) : (
                           <label
+                            ref={dropRef}
                             htmlFor="rh-photo"
                             onDragOver={(e) => {
                               e.preventDefault();
@@ -617,7 +791,9 @@ export default function PortalPage() {
                               takeImage(e.dataTransfer.files?.[0] ?? null);
                             }}
                             className={`flex min-h-24 cursor-pointer items-center gap-4 rounded-2xl border-2 border-dashed p-4 ${
-                              dragging
+                              photoMissing
+                                ? "border-red-400 bg-red-400/10 ring-2 ring-red-400/50"
+                                : dragging
                                 ? "border-brand-400 bg-brand-500/10"
                                 : selectedPreset?.needsImage
                                   ? "border-amber-400/60 bg-amber-400/5 hover:border-amber-300"
@@ -653,7 +829,7 @@ export default function PortalPage() {
                             />
                             <span className="text-sm text-amber-50">
                               {cfg.consentStatement}
-                              <span className="mt-1 block text-xs text-amber-200/80">
+                              <span className="mt-1 block text-sm text-amber-200/80">
                                 Required if the photo shows a person. Public figures and
                                 anyone under 18 are always refused.
                               </span>
@@ -701,32 +877,51 @@ export default function PortalPage() {
                             key={a}
                             type="button"
                             aria-pressed={tipAmount === a}
-                            onClick={() => setTipAmount(a)}
+                            onClick={() => pickAmount(a)}
                             className={`min-h-11 min-w-14 rounded-xl border px-3 text-sm font-semibold tabular-nums ${
                               tipAmount === a
-                                ? "border-brand-400 bg-brand-400 text-zinc-950"
+                                ? "border-brand-400 bg-brand-400/10 text-brand-200"
                                 : "border-zinc-700 bg-zinc-950 text-zinc-200 hover:border-zinc-500"
                             }`}
                           >
                             ${a}
                           </button>
                         ))}
+                        {!otherAmount && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAmountDraft(String(tipAmount));
+                              setOtherAmount(true);
+                            }}
+                            className="min-h-11 rounded-xl px-3 text-sm font-semibold text-brand-300 hover:bg-zinc-800"
+                          >
+                            Other amount
+                          </button>
+                        )}
                       </div>
-                      <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div className={`mt-3 grid gap-3 ${otherAmount ? "grid-cols-2" : "grid-cols-1"}`}>
+                        {otherAmount && (
+                          <label className="block">
+                            <span className="mb-1 block text-sm text-zinc-400">{paid ? "Amount ($)" : "Tip amount ($)"}</span>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              min={minAmount}
+                              max={maxAmount}
+                              value={amountDraft}
+                              onChange={(e) => {
+                                setAmountDraft(e.target.value);
+                                if (e.target.value !== "") setTipAmount(clampAmount(Number(e.target.value)));
+                              }}
+                              onBlur={() => setAmountDraft(String(tipAmount))}
+                              className="min-h-11 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-base tabular-nums text-zinc-50 focus:border-brand-400 focus:outline-none"
+                            />
+                          </label>
+                        )}
                         <label className="block">
-                          <span className="mb-1 block text-xs text-zinc-400">{paid ? "Amount ($)" : "Tip amount ($)"}</span>
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            min={paid ? pay!.minUsd : 1}
-                            value={tipAmount}
-                            onChange={(e) => setTipAmount(Number(e.target.value))}
-                            className="min-h-11 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-base tabular-nums text-zinc-50 focus:border-brand-400 focus:outline-none"
-                          />
-                        </label>
-                        <label className="block">
-                          <span className="mb-1 block text-xs text-zinc-400">
-                            {paid ? "Name on stream" : "Name you'll tip as"}
+                          <span className="mb-1 block text-sm text-zinc-400">
+                            {paid ? "Name on stream (optional)" : "Name you'll tip as"}
                           </span>
                           <input
                             value={tipperName}
@@ -742,10 +937,14 @@ export default function PortalPage() {
                           {durationPreview} {durationPreview === 1 ? "second" : "seconds"}
                         </span>{" "}
                         of {effectName}
-                        {tipAmount > maxAmount && <span className="text-zinc-400"> · capped at {cfg.maxDurationSec}s</span>}
+                        {tipAmount >= maxAmount && (
+                          <span className="text-zinc-400"> · the most the streamer allows is {cfg.maxDurationSec}s</span>
+                        )}
                       </p>
                     </div>
 
+                  </div>
+                  <div className="mt-6 space-y-6">
                     {(submitting || checks.length > 0) && (
                       <SafetyChecklist checks={checks} preparing={preparing} running={submitting} stale={failureStale} />
                     )}
@@ -764,7 +963,7 @@ export default function PortalPage() {
                     <div className="mx-auto max-w-xl lg:max-w-none">
                       {paid && !pay!.live && (
                         <p className="mb-2 rounded-xl bg-zinc-800 px-3 py-2 text-sm text-zinc-200">
-                          Paused — {channel}'s Stream Hijack app isn't live. Check back when they're streaming.
+                          {streamerName} isn't live right now, so payments are paused. Check back when they're streaming.
                         </p>
                       )}
                       {error && (
@@ -774,6 +973,9 @@ export default function PortalPage() {
                       )}
                       {/* Re-sending exactly what just failed would fail the same way —
                           and cost the viewer a strike — so it waits for an edit. */}
+                      {unchangedFailure && !submitting && (
+                        <p className="mb-2 text-sm text-zinc-300">Change your idea or photo first.</p>
+                      )}
                       <button
                         type="submit"
                         disabled={submitting || unchangedFailure || (paid && !pay!.live)}
@@ -782,14 +984,23 @@ export default function PortalPage() {
                         }`}
                       >
                         {submitting
-                          ? (preparing ?? (checks.length ? `Running safety checks… ${checksDone}/${checks.length}` : "Checking…"))
+                          ? (preparing ?? (checks.length ? `Running safety checks… ${checksDone}/${checks.length}` : "Checking your idea…"))
                           : unchangedFailure
-                            ? "Edit your request to check again"
+                            ? "Check again"
                             : paid
-                              ? `Pay $${tipAmount} · ${durationPreview}s of ${effectName}`
+                              ? payLabel(tipAmount, durationPreview, effectName)
                               : "Get my claim code"}
                       </button>
-                      <p className="mt-2 text-center text-xs text-zinc-400">
+                      {submitting && !redirecting && (
+                        <button
+                          type="button"
+                          onClick={() => abortRef.current?.abort()}
+                          className="mt-2 min-h-11 w-full rounded-2xl px-4 text-sm font-semibold text-zinc-300 hover:bg-zinc-800"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      <p className="mt-2 text-center text-sm text-zinc-400">
                         {paid
                           ? `Starts right after payment. If it doesn't play, you're refunded automatically. Min $${pay!.minUsd}.`
                           : `Minimum tip $${cfg.minTipUSD}. Runs for ${durationPreview}s once your tip lands.`}
@@ -803,7 +1014,8 @@ export default function PortalPage() {
         </form>
       ) : (
         <ClaimView
-          paid={paid || status?.message?.startsWith("Payment received") === true}
+          paid={paid || fromCheckout}
+          receipt={receipt}
           code={code}
           secsLeft={secsLeft}
           status={status}

@@ -82,3 +82,19 @@ test("production boot gate: refuses the e2e test seams", () => {
   assert.equal(p.length, 3);
   assert.ok(p.every((x) => x.includes("test seam")));
 });
+
+test("dev routes (incl. the ungated /dev/token) are off under RH_ENV=production", async () => {
+  // env.ts reads RH_ENV at import time (and enforces the boot gate), so
+  // check it in a fresh process with a complete production config.
+  const { execFileSync } = await import("node:child_process");
+  const run = (envName: string) =>
+    execFileSync(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", "import('./src/env.ts').then(m=>console.log(m.devRoutesEnabled))"],
+      { env: { ...process.env, ...FULL, RH_ENV: envName }, cwd: new URL("..", import.meta.url).pathname },
+    )
+      .toString()
+      .trim();
+  assert.equal(run("production"), "false");
+  assert.equal(run("development"), "true");
+});
