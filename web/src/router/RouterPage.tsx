@@ -1,4 +1,4 @@
-// The Creator Studio — the streamer's control surface. Runs in a REAL Chrome
+// The Creator studio — the streamer's control surface. Runs in a REAL Chrome
 // tab or the desktop app's window (never inside OBS) because it needs
 // getUserMedia on the OBS Virtual Camera. It holds the state machine, the
 // camera, and the loopback sender (the machinery below is unchanged: one job
@@ -6,8 +6,8 @@
 // streamer's tool, in four tabs:
 //
 //   Live      turn on, see what's playing, approve, preview an effect, stop
-//   Effects   what's possible — the gallery viewers buy from, with switches
-//   Safety    viewer rules: a level, then details on demand
+//   Effects   what's possible — the effects chat buys from, with switches
+//   Rules     what chat may do: a level, then details on demand
 //   Earnings  payouts + recent hijacks (hosted dashboard for the rest)
 //
 // In cloud mode the settings / approvals / safety log / earnings calls are
@@ -25,17 +25,19 @@ import {
   type Settings,
   type StatusSnapshot,
 } from "@rh/shared";
-import { api, type RouterConfig } from "../lib/api.js";
+import { api, type PayoutsInfo, type RouterConfig } from "../lib/api.js";
+import { friendlyStreamerError } from "../lib/friendlyError.js";
+import { PANIC_KEY } from "../lib/platform.js";
 import { HubSocket } from "../lib/ws.js";
 import { LoopbackSender } from "../lib/loopback.js";
 import { desktopBridge } from "../lib/desktop.js";
 import { SafetyEditor } from "../features/SafetyEditor.js";
 import { ModerationPanel, ReviewPanel } from "../features/SafetyPanels.js";
-import { EffectArt } from "../features/EffectArt.js";
+import { EffectArt, PreviewPlayButton, previewHandlers } from "../features/EffectArt.js";
 import { EffectsTab } from "../studio/EffectsTab.js";
 import { EarningsTab } from "../studio/EarningsTab.js";
 import { FirstRunTour, tourSeen } from "../studio/FirstRunTour.js";
-import { Card, StatusChip, btn, statusOf } from "../studio/ui.js";
+import { Card, ConfirmDialog, ErrorCard, StatusChip, btn, statusOf } from "../studio/ui.js";
 import { RouterMachine } from "./stateMachine.js";
 import { browserPorts } from "./ports.js";
 import { FrameGuard } from "./frameGuard.js";
@@ -46,12 +48,18 @@ type Tab = "live" | "effects" | "safety" | "earnings";
 const TABS: { id: Tab; label: string }[] = [
   { id: "live", label: "Live" },
   { id: "effects", label: "Effects" },
-  { id: "safety", label: "Safety" },
+  { id: "safety", label: "Rules" },
   { id: "earnings", label: "Earnings" },
 ];
 
 /** Free previews are 10s on the hosted plane (server-chosen); match locally. */
 const PREVIEW_SEC = 10;
+
+/** Quiet retries (1.5 s apart) before a settings load failure is shown. */
+const SETTINGS_RETRIES = 6;
+
+/** Shown when a camera failure isn't one friendlyStreamerError knows. */
+const CAMERA_FALLBACK = "Couldn't open the camera. Check that OBS is open and its Virtual Camera is started, then try again.";
 
 export default function RouterPage() {
   const machineRef = useRef<RouterMachine | null>(null);
@@ -71,6 +79,11 @@ export default function RouterPage() {
   const [pausedByMe, setPausedByMe] = useState<boolean | null>(null);
   const [cfg, setCfg] = useState<RouterConfig | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
+  /** The studio's settings load failed — Rules/Effects show a Try again, not a forever-spinner. */
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  /** Hosted only: has Stripe cleared this streamer to take payments? */
+  const [payouts, setPayouts] = useState<PayoutsInfo | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
   const [armed, setArmed] = useState(false);
   const [armError, setArmError] = useState<string | null>(null);
   const [cams, setCams] = useState<{ deviceId: string; label: string }[]>([]);
@@ -88,6 +101,26 @@ export default function RouterPage() {
     setToast({ text, tone });
     window.setTimeout(() => setToast((t) => (t?.text === text ? null : t)), 3500);
   };
+  /** (Re)load the rules. In the desktop app the first calls can land while the
+   *  link to the hosted channel is still coming up, so a failure is retried
+   *  quietly a few times (the skeleton stays up) before it becomes a Try again
+   *  card — never swallowed, never an endless "Loading…". */
+  const loadSettings = (attempt = 0) => {
+    if (attempt === 0) setSettingsError(null);
+    api
+      .getSettings()
+      .then((s) => {
+        setSettingsError(null);
+        setSettings(s);
+        // The live safety check is opt-in: warm it now so the first guarded
+        // hijack doesn't spend its pre-LIVE budget loading; never download it when off.
+        if (s.outputGuard !== "off") void guardRef.current?.ready();
+      })
+      .catch((e) => {
+        if (attempt < SETTINGS_RETRIES) window.setTimeout(() => loadSettings(attempt + 1), 1500);
+        else setSettingsError(`We couldn't load your rules. ${friendlyStreamerError(e)}`);
+      });
+  };
   /** Diagnostics go to the app's log (terminal / log file), not the screen. */
   const pushLog = (line: string) => hubRef.current?.send({ t: "page:log", line });
 
@@ -96,21 +129,13 @@ export default function RouterPage() {
     hubRef.current = hub;
     setDebugSink((line) => hub.send({ t: "page:log", line }));
     const sender = new LoopbackSender(hub);
-    // Output guard (CONTENT-SAFETY S4) is opt-in. When it's on, warm the
-    // model now so the first guarded job doesn't spend its pre-LIVE budget
-    // loading weights; when it's off, never download it.
+    // The live safety check (CONTENT-SAFETY S4, "output guard" in code) is opt-in.
     const guard = new FrameGuard((line) => {
       pushLog(line);
       if (/output guard ready/.test(line)) setGuardReady(true);
     });
     guardRef.current = guard;
-    api
-      .getSettings()
-      .then((s) => {
-        setSettings(s);
-        if (s.outputGuard !== "off") void guard.ready();
-      })
-      .catch(() => {});
+    loadSettings();
     const machine = new RouterMachine(browserPorts(hub, sender, guard), {
       onState: (s, rem) => {
         busyRef.current = s !== "IDLE" && s !== "OFFLINE";
@@ -127,7 +152,7 @@ export default function RouterPage() {
       },
     });
     machineRef.current = machine;
-    const offDrop = hub.onDrop(() => machine.abandon("lost sidecar connection"));
+    const offDrop = hub.onDrop(() => machine.abandon("lost connection to the app"));
 
     const off = hub.on((m) => {
       const msg = m as AnyMsg;
@@ -201,7 +226,9 @@ export default function RouterPage() {
       // Labels are visible now that permission is granted — populate picker.
       setCams(await listCameras());
     } catch (e) {
-      setArmError((e as Error).message);
+      const m = friendlyStreamerError(e);
+      // friendlyStreamerError's catch-all is a server-side apology; a camera failure deserves the OBS hint.
+      setArmError(/went wrong on our side/i.test(m) ? CAMERA_FALLBACK : m);
     }
   }
 
@@ -218,8 +245,8 @@ export default function RouterPage() {
       setPausedByMe(paused);
       pushLog(paused ? "PANIC — paused" : "resumed");
       flash(paused ? "Stopped. New hijacks are paused." : "Hijacks are back on.");
-    } catch (e) {
-      flash(`Couldn't reach the stop switch: ${(e as Error).message}`, "bad");
+    } catch {
+      flash(`Couldn't stop it. Press ${PANIC_KEY}, or close the app.`, "bad");
     }
   }
 
@@ -231,8 +258,8 @@ export default function RouterPage() {
       setSettings(next);
       if (next.outputGuard !== "off") void guardRef.current?.ready();
       flash("Saved");
-    } catch (e) {
-      flash(`Not saved: ${(e as Error).message}`, "bad");
+    } catch {
+      flash("Couldn't save that. Try again.", "bad");
       api.getSettings().then(setSettings).catch(() => {});
     }
   }
@@ -244,17 +271,29 @@ export default function RouterPage() {
     setTab("live");
     try {
       const r = cfg?.cloud ? await api.testHijack(p.id) : await api.manualHijack(p.prompt, PREVIEW_SEC);
-      flash(r.outcome === "queued" || r.ok ? `Starting ${p.label}…` : r.outcome);
+      // `outcome` is engine text ("dropped: queue full"…): never shown raw.
+      const started = r.ok && !/^(dropped|ignored)/i.test(r.outcome);
+      flash(started ? `Starting ${p.label}…` : friendlyStreamerError(r.outcome), started ? "ok" : "bad");
     } catch (e) {
-      flash((e as Error).message, "bad");
+      flash(friendlyStreamerError(e), "bad");
     }
   }
+
+  // Hosted only: is this streamer cleared to take payments? Re-read whenever
+  // they land on Live, so finishing Stripe setup clears the banner.
+  const hosted = Boolean(cfg?.cloud);
+  useEffect(() => {
+    if (!hosted || tab !== "live") return;
+    api.payouts().then(setPayouts).catch(() => {});
+  }, [hosted, tab]);
+  const payoutsNotReady = hosted && payouts !== null && payouts.configured && !payouts.enabled;
 
   const paused = pausedByMe ?? status?.paused ?? false;
   const busy = state !== "IDLE" && state !== "OFFLINE";
   const chip = statusOf(state, armed, paused, remaining);
   const canTry = armed && !busy && !paused;
   const tryNote = !armed ? "Turn on Stream Hijack first" : paused ? "Resume hijacks first" : "Wait for the current effect";
+  const signedInHere = Boolean(cfg?.cloud && desktopBridge());
   const jobPreset = job?.presetId ? PRESETS_BY_ID[job.presetId] : undefined;
   const pending = status?.reviewPending ?? 0;
 
@@ -279,13 +318,18 @@ export default function RouterPage() {
                 key={t.id}
                 onClick={() => setTab(t.id)}
                 aria-current={tab === t.id ? "page" : undefined}
-                className={`relative rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors ${
+                className={`relative min-h-11 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors ${
                   tab === t.id ? "bg-white/10 text-white" : "text-zinc-400 hover:text-zinc-100"
                 }`}
               >
                 {t.label}
                 {t.id === "live" && pending > 0 && (
-                  <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-xs text-black">{pending}</span>
+                  <span
+                    aria-label={`${pending} waiting for your OK`}
+                    className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-xs text-black"
+                  >
+                    {pending}
+                  </span>
                 )}
               </button>
             ))}
@@ -294,26 +338,46 @@ export default function RouterPage() {
             <button className={btn.ghost} onClick={() => setTouring(true)}>
               How it works
             </button>
+            {signedInHere && (
+              <button className={btn.ghost} onClick={() => setSigningOut(true)}>
+                Sign out
+              </button>
+            )}
+            {/* Esc works while this window is focused; the panic key works from any app. */}
             {paused ? (
-              <button onClick={() => void panic()} className={btn.secondary} title="Esc">
-                ▶ Resume hijacks
+              <button onClick={() => void panic()} className={btn.secondary} title="Esc in this window">
+                Resume hijacks
               </button>
             ) : busy ? (
-              <button onClick={() => void panic()} className={btn.danger} title="Esc · ⌘⇧H anywhere">
-                ■ Stop effect <kbd className="rounded bg-black/25 px-1.5 text-xs font-normal">Esc</kbd>
+              <button onClick={() => void panic()} className={btn.danger} title={`Esc in this window, or ${PANIC_KEY} from any app`}>
+                Stop effect <kbd className="rounded bg-black/25 px-1.5 text-xs font-normal">Esc</kbd>
               </button>
             ) : (
-              <button onClick={() => void panic()} className={btn.secondary} title="Esc · ⌘⇧H anywhere">
-                ❚❚ Pause hijacks <kbd className="rounded bg-black/25 px-1.5 text-xs font-normal">Esc</kbd>
+              <button onClick={() => void panic()} className={btn.secondary} title={`Esc in this window, or ${PANIC_KEY} from any app`}>
+                Pause hijacks <kbd className="rounded bg-black/25 px-1.5 text-xs font-normal">Esc</kbd>
               </button>
             )}
           </div>
         </div>
       </div>
 
+      {signingOut && (
+        <ConfirmDialog
+          title="Sign out of Stream Hijack?"
+          body="Chat won't be able to pay until you sign in again."
+          confirmLabel="Sign out"
+          cancelLabel="Stay"
+          onCancel={() => setSigningOut(false)}
+          onConfirm={() => {
+            setSigningOut(false);
+            void desktopBridge()?.signOut();
+          }}
+        />
+      )}
+
       {toast && (
         <div
-          role="status"
+          role={toast.tone === "bad" ? "alert" : "status"}
           className={`fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-xl ${
             toast.tone === "ok" ? "bg-zinc-100 text-zinc-900" : "bg-red-600 text-white"
           }`}
@@ -326,7 +390,16 @@ export default function RouterPage() {
           Always mounted: the machine attaches the AI stream to these video
           elements once per job, whatever tab is showing. */}
       <div className={tab === "live" ? "space-y-6" : "hidden"}>
-        {cfg?.cloud && <ShareBar url={cfg.cloud.portalUrl} />}
+        {payoutsNotReady && (
+          <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/40 bg-amber-950/30 p-4">
+            <p className="text-amber-200">Chat can't pay yet. Set up payouts to start earning.</p>
+            <button className={btn.secondary} onClick={() => setTab("earnings")}>
+              Set up payouts
+            </button>
+          </div>
+        )}
+
+        {cfg?.cloud && <ShareBar url={cfg.cloud.portalUrl} primary={armed} />}
 
         <ReviewPanel client={api} pending={status?.reviewPending} />
 
@@ -335,23 +408,22 @@ export default function RouterPage() {
           {/* Camera inset: "am I on?" at a glance. */}
           <div className={`absolute bottom-4 right-4 w-52 overflow-hidden rounded-xl border border-white/15 bg-black shadow-2xl ${armed ? "" : "hidden"}`}>
             <video ref={previewRef} muted playsInline className="aspect-video w-full object-cover" />
-            <p className="absolute left-2 top-1.5 rounded bg-black/50 px-1.5 text-[11px] text-zinc-200">Your camera</p>
+            <p className="absolute left-2 top-1.5 rounded bg-black/50 px-1.5 text-xs text-zinc-200">Your camera</p>
           </div>
 
           {!armed ? (
             <div className="absolute inset-0 grid place-items-center bg-gradient-to-b from-zinc-950/60 to-zinc-950/90 p-6 text-center">
               <div className="max-w-md">
-                <h1 className="text-3xl font-bold tracking-tight text-zinc-50">Ready when you are</h1>
+                <h1 className="text-3xl font-bold tracking-tight text-zinc-50">Ready when you are.</h1>
                 <p className="mt-2 text-zinc-300">
-                  Turn it on when you go live. Stream Hijack watches your OBS Virtual Camera so viewer effects can
-                  play over your webcam.
+                  Turn it on when you go live. Chat's effects will play over your OBS Virtual Camera.
                 </p>
                 <button onClick={() => void arm()} className={btn.primary + " mt-6 px-7 py-3 text-lg"}>
                   Turn on Stream Hijack
                 </button>
                 {armError && (
-                  <p className="mt-4 text-sm text-red-300">
-                    Couldn't open a camera: {armError}. Check that OBS is running and its Virtual Camera is started.
+                  <p role="alert" className="mt-4 text-sm text-red-300">
+                    {armError}
                   </p>
                 )}
               </div>
@@ -360,7 +432,7 @@ export default function RouterPage() {
             !busy && (
               <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center">
                 <p className="text-zinc-500">
-                  {paused ? "Hijacks are paused." : "When a viewer pays, their effect plays here and on stream."}
+                  {paused ? "Paused. Chat can't start a hijack." : "When someone in chat pays, their effect plays here and on stream."}
                 </p>
               </div>
             )
@@ -371,12 +443,14 @@ export default function RouterPage() {
               {jobPreset ? (
                 <EffectArt preset={jobPreset} size="sm" className="w-20 rounded-xl" />
               ) : (
-                <span className="grid h-11 w-20 place-items-center rounded-xl bg-zinc-800 text-xl">✍️</span>
+                <span className="grid h-11 w-20 place-items-center rounded-xl bg-zinc-800 px-1 text-center text-xs font-semibold leading-tight text-zinc-200">
+                  Custom effect
+                </span>
               )}
               <div className="text-sm">
-                <p className="font-semibold text-white">{jobPreset?.label ?? "Typed idea"}</p>
-                <p className="text-zinc-300">
-                  {job.tip.username || "A viewer"} · {state === "LIVE" && remaining != null ? `${remaining}s left` : "starting…"}
+                <p className="font-semibold text-white">{jobPreset?.label ?? "Custom effect"}</p>
+                <p className="tabular-nums text-zinc-300">
+                  {job.tip.username || "Someone in chat"} · {state === "LIVE" && remaining != null ? `${remaining}s left` : "Starting…"}
                 </p>
               </div>
             </div>
@@ -387,14 +461,14 @@ export default function RouterPage() {
           <Readiness
             label="Camera"
             ok={armed}
-            detail={armed ? (camLabel ?? "On") : "Off — turn on Stream Hijack above"}
+            detail={armed ? (camLabel ?? "On") : "Off. Turn on Stream Hijack above."}
           >
             {armed && cams.length > 0 && !busy && (
               <select
                 aria-label="Camera"
                 value={camId}
                 onChange={(e) => switchCamera(e.target.value)}
-                className="mt-2 w-full rounded-lg border border-white/10 bg-zinc-900 px-2 py-1.5 text-sm"
+                className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-zinc-900 px-2 text-sm"
               >
                 <option value="auto">Auto (OBS Virtual Camera)</option>
                 {cams.map((c) => (
@@ -410,11 +484,7 @@ export default function RouterPage() {
             label="Up next"
             ok
             neutral
-            detail={
-              status?.queueLength
-                ? `${status.queueLength} viewer${status.queueLength === 1 ? "" : "s"} in line`
-                : "Nobody in line"
-            }
+            detail={status?.queueLength ? `${status.queueLength} in line` : "Nobody waiting"}
           >
             <button
               className={btn.secondary + " mt-2 w-full"}
@@ -422,36 +492,47 @@ export default function RouterPage() {
               title={canTry ? undefined : tryNote}
               onClick={() => setPicking(true)}
             >
-              ▶ Try an effect on me
+              Try an effect on me
             </button>
           </Readiness>
         </div>
         {settings && settings.outputGuard !== "off" && (
           <p className="text-sm text-zinc-400">
-            🛡️ {guardReady ? "Output watcher ready" : "Output watcher loading…"}
+            {guardReady ? "Live safety check ready" : "Live safety check loading…"}
           </p>
         )}
       </div>
 
       {tab === "effects" && (
-        <EffectsTab settings={settings} onChange={(p) => void saveSettings(p)} onTry={(p) => void tryEffect(p)} canTry={canTry} tryNote={tryNote} />
+        <EffectsTab
+          settings={settings}
+          settingsError={settingsError}
+          onRetry={() => loadSettings()}
+          onChange={(p) => void saveSettings(p)}
+          onTry={(p) => void tryEffect(p)}
+          canTry={canTry}
+          tryNote={tryNote}
+        />
       )}
 
       {tab === "safety" && (
         <div className="space-y-6">
           <header>
-            <h1 className="text-2xl font-bold text-zinc-50">Viewer rules</h1>
-            <p className="mt-1 text-zinc-400">What viewers may do on your stream. Changes save instantly.</p>
+            <h1 className="text-2xl font-bold text-zinc-50">Rules</h1>
+            <p className="mt-1 text-zinc-400">What chat may do on your stream. Changes save instantly.</p>
           </header>
           {settings ? (
             <SafetyEditor settings={settings} onChange={(p) => void saveSettings(p)} local={!cfg?.cloud} />
+          ) : settingsError ? (
+            <ErrorCard message={settingsError} onRetry={() => loadSettings()} />
           ) : (
-            <p className="text-zinc-500">Loading your rules…</p>
+            <p className="text-zinc-400">Loading your rules…</p>
           )}
           <ModerationPanel
             client={api}
             settings={settings}
             onBan={(name) => settings && void saveSettings({ bannedViewers: [...settings.bannedViewers, name] })}
+            onUnban={(name) => settings && void saveSettings({ bannedViewers: settings.bannedViewers.filter((x) => x !== name) })}
           />
         </div>
       )}
@@ -470,7 +551,8 @@ export default function RouterPage() {
   );
 }
 
-function ShareBar({ url }: { url: string }) {
+/** `primary` only once the camera is on — until then "Turn on Stream Hijack" is the one filled button. */
+function ShareBar({ url, primary }: { url: string; primary: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-brand-900/40 to-zinc-950 p-4">
@@ -479,7 +561,7 @@ function ShareBar({ url }: { url: string }) {
         <p className="truncate font-mono text-lg text-white">{url.replace(/^https?:\/\//, "")}</p>
       </div>
       <button
-        className={btn.primary}
+        className={primary ? btn.primary : btn.secondary}
         onClick={() =>
           void navigator.clipboard.writeText(url).then(() => {
             setCopied(true);
@@ -534,19 +616,21 @@ function ObsReadiness({ cfg }: { cfg: RouterConfig | null }) {
     ? overlay.map((p) => (p.camera ? `“${p.scene}” over “${p.camera}”` : `“${p.scene}”`)).join(", ")
     : null;
   const detail = !cfg
-    ? "Checking…"
+    ? "Checking OBS…"
     : !connected
-      ? "Not connected — open OBS and it connects automatically"
+      ? "OBS isn't open. Open it and we'll connect."
       : where
         ? `Connected · overlay in ${where}`
-        : "Connected";
+        : "Connected · overlay not added yet";
 
   async function repair() {
     if (!desktop) return;
     setWorking(true);
     try {
       const r = await desktop.provisionObs();
-      setNote(r.ok ? r.detail : `Couldn't install: ${r.detail}`);
+      setNote(r.ok ? r.detail : `Couldn't add the overlay. ${friendlyStreamerError(r.detail)}`);
+    } catch (e) {
+      setNote(`Couldn't add the overlay. ${friendlyStreamerError(e)}`);
     } finally {
       setWorking(false);
     }
@@ -558,7 +642,7 @@ function ObsReadiness({ cfg }: { cfg: RouterConfig | null }) {
         <div className="mt-2 flex gap-2">
           {connected ? (
             <button className={btn.secondary} disabled={working} onClick={() => void repair()}>
-              {working ? "Installing…" : "Reinstall overlay"}
+              {working ? "Adding the overlay…" : "Add the overlay again"}
             </button>
           ) : (
             <button className={btn.secondary} onClick={() => void desktop.launchObs().catch(() => {})}>
@@ -567,7 +651,7 @@ function ObsReadiness({ cfg }: { cfg: RouterConfig | null }) {
           )}
         </div>
       )}
-      {note && <p className="mt-2 text-xs text-zinc-400">{note}</p>}
+      {note && <p className="mt-2 text-sm text-zinc-400">{note}</p>}
     </Readiness>
   );
 }
@@ -598,17 +682,17 @@ function EffectPicker({
             <h2 id="picker-title" className="text-xl font-bold text-zinc-50">Try an effect on yourself</h2>
             <p className="mt-1 text-sm text-zinc-400">
               {cloud
-                ? `Plays for ${PREVIEW_SEC} seconds on your stream, free — one preview a day.`
+                ? `Plays for ${PREVIEW_SEC} seconds on your stream. Free, once a day.`
                 : `Plays for ${PREVIEW_SEC} seconds on your stream.`}
             </p>
           </div>
-          <button className={btn.ghost} onClick={onClose} aria-label="Close">
+          <button className={btn.ghost + " min-w-11 justify-center"} onClick={onClose} aria-label="Close">
             ✕
           </button>
         </div>
         <ul className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {list.map((p) => (
-            <li key={p.id}>
+            <li key={p.id} className="relative" {...previewHandlers(p.id)}>
               <button
                 onClick={() => onPick(p)}
                 className="w-full overflow-hidden rounded-2xl border border-white/10 text-left hover:border-brand-500"
@@ -616,6 +700,8 @@ function EffectPicker({
                 <EffectArt preset={p} size="sm" />
                 <span className="block px-3 py-2 text-sm font-semibold text-zinc-100">{p.label}</span>
               </button>
+              {/* Sibling of the card button (a button in a button is invalid HTML). */}
+              <PreviewPlayButton id={p.id} label={p.label} />
             </li>
           ))}
         </ul>

@@ -4,7 +4,10 @@
 // reaches a screen; anything we don't recognise gets the calm fallback.
 
 export const FALLBACK = "Something went wrong on our side. Try again in a moment.";
-const TOO_LARGE = "That photo is over 25 MB. Pick a smaller one.";
+const TOO_LARGE = "That photo is over 25 MB. Pick a smaller one."; // client-side pick limit
+// The SERVER's upload cap is 5 MB (server/src/index.ts, sidecar/src/uploads.ts) — a 413
+// from it is a different number from the 25 MB pre-resize limit above.
+const TOO_LARGE_SERVER = "That photo is over 5 MB. Pick a smaller one.";
 
 /** Server messages we know, matched on a lower-cased fragment. Meaning is
  *  preserved word for word where money or safety is involved. */
@@ -33,7 +36,8 @@ const KNOWN: Array<[RegExp, string]> = [
   [/photos are off on this stream|reference images are disabled/, "This streamer has turned off photos."],
   [/photo uploads are unavailable/, "Photos aren't available right now. Try again later or pick an effect without one."],
   [/confirm you have consent/, "Check the consent box. You need permission to put someone's face on stream."],
-  [/over 25 mb|image too large|too large/, TOO_LARGE],
+  [/over 25 mb/, TOO_LARGE],
+  [/over 5 mb|image too large|too large/, TOO_LARGE_SERVER],
   [/invalid upload/, "We couldn't read that photo. Pick a different one."],
   [/too many requests/, "You're going a bit fast. Wait a moment and try again."],
   [/effect expired/, "That request expired before you paid. Start again to get a new one."],
@@ -58,7 +62,7 @@ function fromStatus(status: number): string | null {
   if (status === 404) return "We couldn't find that. Reload the page and try again.";
   if (status === 408 || status === 504) return "That took too long. Try again.";
   if (status === 410) return "That request expired. Start again to get a new one.";
-  if (status === 413) return TOO_LARGE;
+  if (status === 413) return TOO_LARGE_SERVER;
   if (status === 429) return "You're going a bit fast. Wait a moment and try again.";
   if (status >= 500) return FALLBACK;
   return null;

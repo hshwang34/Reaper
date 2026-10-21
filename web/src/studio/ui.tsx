@@ -2,7 +2,7 @@
 // The studio is a streamer's tool, not a console — internal state names
 // (IDLE, AUTHORIZING, …) never reach the screen; these do.
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { RouterState } from "@rh/shared";
 
 export function statusOf(
@@ -11,8 +11,8 @@ export function statusOf(
   paused: boolean,
   remaining?: number,
 ): { label: string; tone: "idle" | "ready" | "busy" | "live" | "paused" } {
-  if (paused) return { label: "Paused · viewers can't buy", tone: "paused" };
-  if (!armed || state === "OFFLINE") return { label: "Not live yet", tone: "idle" };
+  if (paused) return { label: "Paused. Chat can't start hijacks", tone: "paused" };
+  if (!armed || state === "OFFLINE") return { label: "Not turned on yet", tone: "idle" };
   switch (state) {
     case "IDLE":
       return { label: "Ready · waiting for a viewer", tone: "ready" };
@@ -90,10 +90,10 @@ export function Switch({
   hint?: string;
 }) {
   return (
-    <label className="flex cursor-pointer items-start justify-between gap-4 py-2">
+    <label className="flex min-h-11 cursor-pointer items-start justify-between gap-4 py-2">
       <span>
         <span className="block text-sm text-zinc-100">{label}</span>
-        {hint && <span className="mt-0.5 block text-xs text-zinc-400">{hint}</span>}
+        {hint && <span className="mt-0.5 block text-sm text-zinc-400">{hint}</span>}
       </span>
       <span className="relative mt-0.5 inline-flex shrink-0">
         <input
@@ -130,7 +130,7 @@ export function Segmented<T extends string>({
         {options.map((o) => (
           <label
             key={o.value}
-            className={`flex-1 cursor-pointer rounded-lg px-3 py-2 text-center text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-400 ${
+            className={`flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-lg px-3 py-2 text-center text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-400 ${
               value === o.value ? "bg-zinc-700 font-semibold text-white" : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
@@ -144,18 +144,134 @@ export function Segmented<T extends string>({
           </label>
         ))}
       </div>
-      {hint && <p className="mt-1.5 text-xs text-zinc-400">{hint}</p>}
+      {hint && <p className="mt-1.5 text-sm text-zinc-400">{hint}</p>}
     </fieldset>
   );
 }
 
+/** BRAND §4.8: the one source of button recipes. 44px minimum touch target. */
 export const btn = {
   primary:
-    "inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40",
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40",
   secondary:
-    "inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40",
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40",
   ghost:
-    "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-zinc-400 hover:bg-white/5 hover:text-zinc-100",
+    "inline-flex min-h-11 items-center gap-1 rounded-lg px-3 py-1 text-sm text-zinc-400 hover:bg-white/5 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40",
   danger:
-    "inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500",
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40",
 };
+
+/** A grey placeholder block while something loads (always paired with words nearby). */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div aria-hidden className={`animate-pulse rounded-xl bg-white/5 ${className}`} />;
+}
+
+/** A failed load: what happened + the next step (BRAND §5). Never an empty state. */
+export function ErrorCard({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-400/30 bg-red-950/30 p-4">
+      <p className="text-sm text-red-200">{message}</p>
+      {onRetry && (
+        <button type="button" className={btn.secondary} onClick={onRetry}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Inline confirm for a destructive or money-adjacent action (BRAND §4.5):
+ * a red button that names what happens, and a ghost way out.
+ */
+export function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  cancelLabel,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  body?: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm"
+      onClick={onCancel}
+    >
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-zinc-950 p-6" onClick={(e) => e.stopPropagation()}>
+        <h2 id="confirm-title" className="text-lg font-semibold text-zinc-50">
+          {title}
+        </h2>
+        {body && <p className="mt-2 text-sm text-zinc-300">{body}</p>}
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button type="button" className={btn.ghost} onClick={onCancel} autoFocus>
+            {cancelLabel}
+          </button>
+          <button type="button" className={btn.danger} onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** How long an undo stays on offer. */
+export const UNDO_MS = 6000;
+
+/**
+ * A 6-second "Undo" for a change that overwrites something (a safety level,
+ * a ban). Lighter than a modal: the change happens at once, and this offers
+ * the way back. A newer change replaces the toast.
+ */
+export function useUndo() {
+  const [undo, setUndo] = useState<{ text: string; run: () => void } | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const clear = () => {
+    window.clearTimeout(timer.current);
+    setUndo(null);
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const offer = (text: string, run: () => void) => {
+    window.clearTimeout(timer.current);
+    setUndo({ text, run });
+    timer.current = window.setTimeout(() => setUndo(null), UNDO_MS);
+  };
+  return { undo, offer, clear };
+}
+
+export function UndoToast({ undo, onClose }: { undo: { text: string; run: () => void } | null; onClose: () => void }) {
+  if (!undo) return null;
+  return (
+    <div
+      role="status"
+      className="fixed bottom-20 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-zinc-100 py-1 pl-4 pr-1 text-sm font-semibold text-zinc-900 shadow-xl"
+    >
+      <span>{undo.text}</span>
+      <button
+        type="button"
+        onClick={() => {
+          undo.run();
+          onClose();
+        }}
+        className="inline-flex min-h-11 items-center rounded-lg px-3 font-bold text-brand-700 hover:bg-black/5"
+      >
+        Undo
+      </button>
+    </div>
+  );
+}

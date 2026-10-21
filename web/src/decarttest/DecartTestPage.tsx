@@ -381,10 +381,10 @@ export default function DecartTestPage() {
 
   return (
     <div className="mx-auto max-w-5xl p-6">
-      <h1 className="mb-1 text-xl font-bold">Decart pipeline — isolated test</h1>
+      <h1 className="mb-1 text-xl font-bold">AI pipeline — isolated test (developers only)</h1>
       <p className="mb-4 text-sm text-zinc-400">
         Camera → lucy-2.5 → output. No OBS, no loopback. If the right panel shows
-        the restyle, Decart works.
+        the restyle, the AI pipeline works.
       </p>
 
       <textarea
@@ -399,7 +399,7 @@ export default function DecartTestPage() {
           disabled={running}
           className="rounded-lg bg-emerald-600 px-4 py-2 font-semibold hover:bg-emerald-500 disabled:opacity-50"
         >
-          Run Decart test
+          Run the AI test
         </button>
         <button
           onClick={stop}
@@ -487,7 +487,7 @@ export default function DecartTestPage() {
           <video ref={inRef} muted playsInline className="w-full rounded-lg border border-zinc-800 bg-black aspect-video object-cover" />
         </div>
         <div>
-          <p className="mb-1 text-xs text-zinc-500">Decart output</p>
+          <p className="mb-1 text-xs text-zinc-500">AI output</p>
           <video ref={outRef} muted playsInline className="w-full rounded-lg border border-fuchsia-800 bg-black aspect-video object-cover" />
         </div>
       </div>

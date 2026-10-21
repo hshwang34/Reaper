@@ -162,7 +162,7 @@ async function main() {
   // on-stream chips over the effect.
   check(
     "output guard loaded in the router and passed the first frame",
-    /output (guard|watcher) ready/i.test(await router.locator("body").innerText()),
+    /live safety check ready/i.test(await router.locator("body").innerText()),
   );
   const chips = await waitFor(async () => {
     const t = await viewer.locator("body").innerText();

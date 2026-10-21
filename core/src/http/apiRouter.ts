@@ -148,7 +148,7 @@ export function buildApiRouter(opts: ApiRouterOptions): Router {
       if (!err) return next();
       const code = (err as { code?: string }).code;
       if (code === "LIMIT_FILE_SIZE") {
-        res.status(413).json({ error: "image too large" });
+        res.status(413).json({ error: "That photo is over 5 MB. Pick a smaller one." });
       } else {
         res.status(400).json({ error: "invalid upload" });
       }

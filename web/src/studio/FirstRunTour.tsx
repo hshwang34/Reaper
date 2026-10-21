@@ -1,11 +1,14 @@
 // First-run tour: four cards that explain the product before the streamer
-// sees a single control — what viewers do, what happens to the camera, that
-// it always reverts, and that the streamer stays in charge. Shown once after
+// sees a single control — what chat does, what happens to the camera, that
+// it always reverts, and that the streamer stays in charge. The visible
+// slide's art autoplays (it IS the product demo) and stops when the slide
+// changes; under reduced motion it stays still with a play button. Shown once after
 // setup (remembered per machine), re-openable from "How it works".
 
 import { useEffect, useState } from "react";
 import { PRESETS_BY_ID, type Preset } from "@rh/shared";
-import { EffectArt } from "../features/EffectArt.js";
+import { EffectArt, PreviewPlayButton } from "../features/EffectArt.js";
+import { PANIC_KEY } from "../lib/platform.js";
 import { btn } from "./ui.js";
 
 const KEY = "rhStudioTourSeen";
@@ -29,24 +32,24 @@ const p = (id: string) => PRESETS_BY_ID[id] as Preset;
 
 const STEPS: { title: string; body: string; art: Preset[]; caption?: string }[] = [
   {
-    title: "Your viewers take over your camera",
-    body: "They open your hijack link, pick an effect — or type their own idea — and pay. Every dollar buys one second.",
+    title: "Chat takes over your camera",
+    body: "They open your hijack link, pick an effect or write their own idea, and pay. $1 buys 1 second.",
     art: [p("cyberpunk"), p("watercolor"), p("space-explorer")],
   },
   {
-    title: "Your stream transforms, live",
-    body: "Stream Hijack restyles your webcam in real time and puts it on stream in OBS, exactly over your camera. Chat sees it the moment it starts.",
+    title: "Your stream changes, live",
+    body: "Stream Hijack turns your webcam into the effect and shows it in OBS, right over your camera.",
     art: [p("lava-room")],
-    caption: "Lava Room · 15 seconds · paid by a viewer",
+    caption: "Lava Room · 15 seconds · paid by someone in chat",
   },
   {
     title: "Then it snaps back",
-    body: "When the paid time runs out, your normal camera returns. The next viewer in line goes after a short pause.",
+    body: "When the paid time runs out, your normal camera returns. The next person in line goes after a short pause.",
     art: [p("winter-wonderland"), p("parrot-party")],
   },
   {
     title: "You're always in control",
-    body: "Press Esc (or ⌘⇧H anywhere) to stop an effect and pause new ones instantly. Choose which effects are on and what viewers may type or upload in Safety.",
+    body: `Press Esc, or ${PANIC_KEY} from any app, to stop an effect and pause new ones. Choose which effects are on, and whether chat can write ideas or add photos, in Rules.`,
     art: [p("knight")],
   },
 ];
@@ -82,7 +85,8 @@ export function FirstRunTour({ onDone }: { onDone: (goTo: "effects" | "live") =>
         <div className={`grid gap-1 p-1 ${step.art.length === 3 ? "grid-cols-3" : step.art.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
           {step.art.map((a) => (
             <div key={a.id} className="relative overflow-hidden rounded-2xl">
-              <EffectArt preset={a} size={step.art.length === 1 ? "lg" : "md"} />
+              <EffectArt preset={a} size={step.art.length === 1 ? "lg" : "md"} autoPlay />
+              <PreviewPlayButton id={a.id} label={a.label} reducedMotionOnly />
               <span className="absolute bottom-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-zinc-100">
                 {a.label}
               </span>
@@ -110,7 +114,7 @@ export function FirstRunTour({ onDone }: { onDone: (goTo: "effects" | "live") =>
               </button>
             )}
             {i > 0 && (
-              <button className={btn.secondary} onClick={() => setI(i - 1)}>
+              <button className={btn.ghost} onClick={() => setI(i - 1)}>
                 Back
               </button>
             )}

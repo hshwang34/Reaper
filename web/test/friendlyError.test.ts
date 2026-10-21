@@ -19,7 +19,7 @@ test("known server messages keep their meaning in plain words", () => {
 test("status codes map when the message is unknown; 5xx and unknown use the fallback", () => {
   const withStatus = (m: string, status: number) => Object.assign(new Error(m), { status });
   assert.match(friendlyError(withStatus("HTTP 429", 429)), /a bit fast/);
-  assert.match(friendlyError(withStatus("boom", 413)), /25 MB/);
+  assert.match(friendlyError(withStatus("boom", 413)), /5 MB/);
   assert.equal(friendlyError(withStatus("kaboom", 502)), FALLBACK);
   assert.equal(friendlyError("DecartError: token mint failed"), FALLBACK);
   assert.equal(friendlyError(undefined), FALLBACK);
@@ -55,8 +55,10 @@ test("rewritten server strings still map (payments + submissions)", () => {
   assert.match(friendlyError("Custom effects are off right now. Pick an effect instead."), /aren't available right now/);
 });
 
-test("413 maps to the 25 MB line", () => {
-  assert.equal(friendlyError(Object.assign(new Error("x"), { status: 413 })), "That photo is over 25 MB. Pick a smaller one.");
+test("server 413 says 5 MB (the real upload cap); the client-side pick limit stays 25 MB", () => {
+  assert.equal(friendlyError(Object.assign(new Error("x"), { status: 413 })), "That photo is over 5 MB. Pick a smaller one.");
+  assert.equal(friendlyError("That photo is over 5 MB. Pick a smaller one."), "That photo is over 5 MB. Pick a smaller one.");
+  assert.equal(friendlyError("image too large"), "That photo is over 5 MB. Pick a smaller one.");
 });
 
 test("streamer errors: IPC wrappers, HTTP 5xx, camera DOMExceptions, engine outcomes", () => {

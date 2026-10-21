@@ -404,7 +404,7 @@ function ObsStep({
             <>
               <p className="text-sm text-zinc-300">
                 Open OBS yourself and we'll connect. To add the overlay by hand later, add a
-                Browser source in OBS and paste this link:
+                “Browser” source in OBS and paste this link:
               </p>
               <code className="block break-all rounded bg-zinc-900 p-2 text-xs">
                 {state.viewerUrl}
@@ -438,7 +438,7 @@ function ObsStep({
           </button>
           {!obsRunning && (
             <p className="text-sm text-zinc-400">
-              Or do it yourself in OBS: Tools → WebSocket Server Settings → Enable.
+              Or do it yourself in OBS: “Tools → WebSocket Server Settings → Enable”.
             </p>
           )}
           {result && (

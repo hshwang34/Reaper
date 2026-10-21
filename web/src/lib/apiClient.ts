@@ -220,7 +220,7 @@ export function createApiClient(opts: ApiClientOptions) {
         t: "result",
         ok: false,
         status: res.status,
-        error: res.status === 413 ? "That photo is over 25 MB. Pick a smaller one." : (body.error ?? `HTTP ${res.status}`),
+        error: res.status === 413 ? "That photo is over 5 MB. Pick a smaller one." : (body.error ?? `HTTP ${res.status}`),
         findings: [],
         checks: [],
       };

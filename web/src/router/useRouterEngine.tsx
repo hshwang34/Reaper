@@ -100,7 +100,7 @@ export function useRouterEngine(): RouterEngine {
       onAiStream: setAiStream,
     });
     machineRef.current = machine;
-    const offDrop = hub.onDrop(() => machine.abandon("lost sidecar connection"));
+    const offDrop = hub.onDrop(() => machine.abandon("lost connection to the app"));
 
     const off = hub.on((m) => {
       const msg = m as AnyMsg;

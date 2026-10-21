@@ -258,7 +258,7 @@ async function main() {
     if (i < 4) await button(win, /^next$/i).click();
   }
   await button(win, /explore the effects/i).click();
-  check("tour ends on the Effects gallery", await waitFor(async () => /What your viewers can do/.test(await text(win)), 5000));
+  check("tour ends on the Effects gallery", await waitFor(async () => /Your effects/.test(await text(win)), 5000));
 
   // ── 3. Effects ──────────────────────────────────────────────────────────
   section("studio — effects");
@@ -286,6 +286,15 @@ async function main() {
   await sleep(500);
   await snap(win, "live-off", { fullPage: false });
   check("hijack link shown", (await text(win)).includes(`/c/${LOGIN}`));
+  check(
+    "camera off: Turn on Stream Hijack is the only filled button (Copy link is secondary)",
+    !(await button(win, /copy link/i).evaluate((el) => el.className.includes("bg-brand-600"))) &&
+      (await button(win, /turn on stream hijack/i).evaluate((el) => el.className.includes("bg-brand-600"))),
+  );
+  await button(win, /^sign out$/i).click();
+  check("Sign out asks first, in plain words", await waitFor(async () => /Chat won't be able to pay until you sign in again/.test(await text(win)), 3000));
+  await button(win, /^stay$/i).click();
+  check("Stay closes it and signs nobody out", await waitFor(async () => !/Sign out of Stream Hijack\?/.test(await text(win)), 3000));
   check("OBS readiness says where the overlay is", /overlay in “Just Chatting” over “Facecam”/.test(await text(win)));
   // The OBS stand-in (opened in the wizard) reconnects on its own.
   await button(win, /turn on stream hijack/i).click();
@@ -303,17 +312,17 @@ async function main() {
   await snap(win, "live-paused", { fullPage: false });
   await button(win, /resume hijacks/i).click();
   check("Resume brings it back", await waitFor(async () => /Ready · waiting/.test(await text(win)), 5000));
-  await button(win, /reinstall overlay/i).click();
-  check("Reinstall overlay reports where it went", await waitFor(async () => /Installed in/.test(await text(win)), 8000));
+  await button(win, /add the overlay again/i).click();
+  check("Add the overlay again reports where it went", await waitFor(async () => /Installed in/.test(await text(win)), 8000));
   await button(win, /^how it works$/i).click();
   check("How it works reopens the tour", await waitFor(async () => /How it works · 1 of 4/i.test(await text(win)), 3000));
   await button(win, /^skip$/i).click();
 
   // ── 5. Safety ───────────────────────────────────────────────────────────
-  section("studio — safety");
-  await win.getByRole("button", { name: /^safety$/i }).click();
+  section("studio — rules");
+  await win.getByRole("button", { name: /^rules$/i }).click();
   await sleep(500);
-  await snap(win, "safety");
+  await snap(win, "rules");
   for (const [label, want] of [
     ["Family-friendly", { customPrompts: "off", referenceImages: "off", maxIntensity: 3 }],
     ["Balanced", { customPrompts: "classified", referenceImages: "scenes", maxIntensity: 4 }],
@@ -326,9 +335,20 @@ async function main() {
     }, 5000);
     check(`level "${label}" saves to the hosted channel`, ok);
   }
+  // Switching level overwrites details, so it offers a six-second Undo.
+  await win.getByRole("radio", { name: /balanced/i }).click();
+  check("a level switch offers Undo", await waitFor(async () => /Switched to Balanced/.test(await text(win)), 3000));
+  await button(win, /^undo$/i).click();
+  check(
+    "Undo puts the previous rules back",
+    await waitFor(async () => {
+      const s = await cloudSettings();
+      return s.customPrompts === "classified" && s.referenceImages === "likeness" && s.maxIntensity === 5;
+    }, 5000),
+  );
   const closed = win.locator("details:not([open]) summary");
   while ((await closed.count()) > 0) await closed.first().click();
-  await snap(win, "safety-expanded");
+  await snap(win, "rules-expanded");
   await win.getByLabel(/extra blocked words/i).fill("spider, clown");
   await win.getByLabel(/extra blocked words/i).press("Enter");
   check("blocked words save", await waitFor(async () => (await cloudSettings()).blocklistExtra?.join() === "spider,clown", 5000));
