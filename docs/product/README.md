@@ -1,6 +1,10 @@
 # How we build — PM-led, agent-built
 
-The product manager (Hyunseok) owns **what** and **why**. The eng lead (the main Claude Code
+PM mode is opt-in: it runs only when the user says they want to product-manage (or `/pm`) —
+the shared skill lives in `~/Documents/Projects/.claude/skills/pm/`; this file is the
+project-specific part.
+
+The product manager (the user) owns **what** and **why**. The eng lead (the main Claude Code
 session) owns **how**, and runs specialist agents to do the work. The PM never has to read a
 diff to make a decision.
 
@@ -11,7 +15,7 @@ PM ──── idea / priority ────▶ Eng lead ──── work order
    merges                                                      reviewer
 ```
 
-## The loop (`/feature <idea>`)
+## The loop (`/pm feature <idea>`)
 
 1. **Brief.** The lead turns the idea into `briefs/NNN-slug.md` (template below): problem, who
    it's for, what success looks like, scope cuts, and open product questions — each with options
@@ -36,7 +40,7 @@ touches no money/safety code skips the brief and the agents — the lead does it
 and opens the PR, flagged as fast-lane. Multi-agent runs cost roughly 15× the tokens of a
 plain session, so they're kept for work that earns it.
 
-`/status` shows every brief, what's in flight, and what's waiting on the PM.
+`/pm status` shows every brief, what's in flight, and what's waiting on the PM.
 
 ## Why it's shaped this way
 
