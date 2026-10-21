@@ -1,6 +1,6 @@
 // The site's one moving part: a simulated hijack that every product mock on the
 // page follows. One controller runs the phases (idle → tip → live → done) on a
-// fixed list of tips, and each render pushes the same state into the stream
+// fixed list of paid hijacks, and each render pushes the same state into the stream
 // player, the chat column, the viewer portal, the mini player, the OBS dock and
 // the ledger.
 //
@@ -27,18 +27,17 @@ interface Cycle {
   amount: number;
   preset: string;
   label: string;
-  code: string;
 }
 
 // Fixed order and amounts so the replay is reproducible. Amounts are small on
 // purpose: the countdown runs in real time, one second per dollar.
 const CYCLES: Cycle[] = [
-  { who: "quartz_ok", amount: 7, preset: "lava-room", label: "Lava Room", code: "K7Q2" },
-  { who: "mossy_pond", amount: 6, preset: "underwater", label: "Underwater", code: "P3MD" },
-  { who: "vhs_ghost", amount: 5, preset: "80s-anime", label: "80s Anime", code: "V8GH" },
-  { who: "neon_rat", amount: 7, preset: "cyberpunk", label: "Cyberpunk City", code: "N4RT" },
-  { who: "cellar_door", amount: 9, preset: "haunted", label: "Haunted", code: "C9DR" },
-  { who: "snowdayyy", amount: 5, preset: "winter-wonderland", label: "Winter Wonderland", code: "S2NW" },
+  { who: "quartz_ok", amount: 7, preset: "lava-room", label: "Lava Room" },
+  { who: "mossy_pond", amount: 6, preset: "underwater", label: "Underwater" },
+  { who: "vhs_ghost", amount: 5, preset: "80s-anime", label: "80s Anime" },
+  { who: "neon_rat", amount: 7, preset: "cyberpunk", label: "Cyberpunk City" },
+  { who: "cellar_door", amount: 9, preset: "haunted", label: "Haunted" },
+  { who: "snowdayyy", amount: 5, preset: "winter-wonderland", label: "Winter Wonderland" },
 ];
 
 const PARTICLES: Record<string, ParticleMode> = {
@@ -74,9 +73,9 @@ const IDLE_LINES = [
   "do the underwater one again",
   "first time here, what is the hijack thing",
   "the countdown is so good",
-  "copying the code rn",
+  "opening the link rn",
   "W stream",
-  "wait so you pick the look and tip? sick",
+  "wait so you pick the look and pay? sick",
   "haunted one tonight pls",
 ];
 const BURST_LINES = (c: Cycle): string[] => [
@@ -88,7 +87,7 @@ const BURST_LINES = (c: Cycle): string[] => [
   "hijacked again",
   "it just switched live??",
   `${c.label} is my favorite`,
-  "W tipper",
+  "W hijacker",
   "ok that's clean",
   "run it back",
   "mine next",
@@ -193,7 +192,7 @@ class Chat {
 
   alert(c: Cycle): void {
     this.push(
-      `<li class="chat-alert"><b>${esc(c.who)}</b> tipped <b>$${c.amount}.00</b> with code ${esc(c.code)}<small>Hijack: ${esc(c.label)}, ${c.amount} seconds</small></li>`,
+      `<li class="chat-alert"><b>${esc(c.who)}</b> paid <b>$${c.amount}.00</b> to hijack<small>${esc(c.label)}, ${c.amount} seconds</small></li>`,
     );
   }
 
@@ -457,16 +456,17 @@ class Demo {
     this.obsSource.dataset.visible = String(phase === "live");
     this.obsStatus.parentElement?.setAttribute("data-live", String(phase === "live"));
 
-    // portal: the viewer's view of this same tip
+    // portal: the viewer's view of this same hijack
     for (const b of Array.from($("portalGrid").querySelectorAll<HTMLButtonElement>("button"))) {
       b.setAttribute("aria-pressed", String(b.dataset.preset === c.preset));
     }
-    $("portalCode").textContent = c.code;
+    $("portalAmount").textContent = `$${c.amount} → ${c.amount} seconds of ${c.label}`;
+    $("portalCode").textContent = `Pay $${c.amount}`;
     const status = this.portalStatus;
     status.dataset.state = phase === "idle" ? "pending" : phase === "tip" ? "queued" : phase;
     status.textContent =
-      phase === "idle" ? "Waiting for your tip…"
-      : phase === "tip" ? "Tip received — queued!"
+      phase === "idle" ? "Pick a look, then pay"
+      : phase === "tip" ? "Paid — you're up next!"
       : phase === "live" ? `LIVE · ${Math.ceil(remaining)}s left`
       : "Hijack complete";
 
