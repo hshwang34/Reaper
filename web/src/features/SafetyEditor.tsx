@@ -1,11 +1,11 @@
-// The streamer's viewer rules — ONE editor for the studio and the hosted
+// The streamer's Rules — ONE editor for the studio and the hosted
 // dashboard. Controlled and policy-free: it renders `settings` and emits
 // `onChange(patch)`; both hosts autosave each change.
 //
 // Progressive disclosure: a streamer picks one of three levels (each a
 // bundle of the underlying knobs) and only opens the details if they want
 // to. Vendor names, enum values and classifier jargon never appear — the
-// copy talks about what viewers can and can't do. The hard floor (nudity,
+// copy talks about what chat can and can't do. The hard floor (nudity,
 // minors, real people, hate, gore) sits below every setting and says so.
 
 import { useEffect, useState, type ReactNode } from "react";
@@ -20,7 +20,7 @@ import {
   type Settings,
 } from "@rh/shared";
 import { CATEGORY_LABEL } from "./EffectArt.js";
-import { Segmented, Switch } from "../studio/ui.js";
+import { Segmented, Switch, UndoToast, useUndo } from "../studio/ui.js";
 
 type Level = "family" | "balanced" | "anything";
 
@@ -28,19 +28,19 @@ const LEVELS: { id: Level; label: string; blurb: string; patch: Partial<Settings
   {
     id: "family",
     label: "Family-friendly",
-    blurb: "Effects from the gallery only. No typed ideas, no photos, nothing intense.",
+    blurb: "Only effects from your list. No custom effects, no photos, nothing intense.",
     patch: { customPrompts: "off", referenceImages: "off", maxIntensity: 3, allowedCategories: [...PRESET_CATEGORIES] },
   },
   {
     id: "balanced",
     label: "Balanced",
-    blurb: "Gallery effects and typed ideas. Photos of scenes and objects, but no face swaps.",
+    blurb: "Your list plus custom effects. Photos of places and things, but no face swaps.",
     patch: { customPrompts: "classified", referenceImages: "scenes", maxIntensity: 4, allowedCategories: [...PRESET_CATEGORIES] },
   },
   {
     id: "anything",
     label: "Anything goes",
-    blurb: "Everything on: typed ideas, face swaps from a viewer's photo, the wildest effects.",
+    blurb: "Everything on: custom effects, face swaps from a photo, the wildest effects.",
     patch: { customPrompts: "classified", referenceImages: "likeness", maxIntensity: 5, allowedCategories: [...PRESET_CATEGORIES] },
   },
 ];
@@ -61,19 +61,19 @@ function levelOf(s: Settings): Level | null {
 }
 
 const TYPED: { value: CustomPromptTier; label: string; hint: string }[] = [
-  { value: "off", label: "Off", hint: "Viewers pick from your effects only." },
-  { value: "classified", label: "On", hint: "Viewers can type their own idea. Every one is screened before it reaches you." },
-  { value: "classified+approval", label: "I approve each", hint: "Typed ideas wait for your OK in the Live tab. The viewer is refunded if you decline." },
+  { value: "off", label: "Off", hint: "Chat can only pick from your effects." },
+  { value: "classified", label: "On", hint: "Chat can write their own idea. We check every one before it reaches you." },
+  { value: "classified+approval", label: "I approve each", hint: "Custom effects wait for your OK in the Live tab. Chat is refunded if you decline." },
 ];
 const PHOTOS: { value: ReferenceImageTier; label: string; hint: string }[] = [
   { value: "off", label: "Off", hint: "No photo uploads." },
   { value: "scenes", label: "Scenes & objects", hint: "Photos of places, styles and things. Photos with faces are refused." },
-  { value: "likeness", label: "Faces too", hint: "Viewers can turn you into someone in a photo, after confirming they have consent." },
+  { value: "likeness", label: "Faces too", hint: "Chat can turn you into someone in a photo, after confirming they have consent." },
 ];
 const GUARD: { value: OutputGuardMode; label: string; hint: string }[] = [
-  { value: "off", label: "Off", hint: "Requests are screened before they run; the result isn't watched." },
-  { value: "on", label: "On", hint: "Also watches the AI output on this computer and stops the effect if it looks unsafe." },
-  { value: "required", label: "Required", hint: "Viewer-written effects only run while the watcher is working." },
+  { value: "off", label: "Off", hint: "Requests are checked before they run. The result isn't watched." },
+  { value: "on", label: "On", hint: "Also watches the effect on your computer and stops it if it looks unsafe." },
+  { value: "required", label: "Required", hint: "Custom effects only run while this check is working." },
 ];
 const WILD = ["", "Mild", "Gentle", "Lively", "Intense", "Wild"];
 
@@ -88,6 +88,20 @@ export function SafetyEditor({
   local?: boolean;
 }) {
   const level = levelOf(s);
+  const { undo, offer, clear } = useUndo();
+  /** Picking a level REPLACES the details below, so keep the way back: the
+   *  values of exactly the knobs it overwrites, offered for six seconds. */
+  const choose = (l: (typeof LEVELS)[number]) => {
+    if (level === l.id) return;
+    const before = Object.fromEntries(Object.keys(l.patch).map((k) => [k, s[k as keyof Settings]])) as Partial<Settings>;
+    onChange(l.patch);
+    offer(`Switched to ${l.label}.`, () => onChange(before));
+  };
+  const unban = (name: string) => {
+    const before = s.bannedViewers;
+    onChange({ bannedViewers: before.filter((x) => x !== name) });
+    offer(`Unbanned ${name}.`, () => onChange({ bannedViewers: before }));
+  };
   const available = PRESETS.filter((p) => presetAllowed(p, s)).length;
   const toggleCategory = (c: PresetCategory) =>
     onChange({
@@ -99,7 +113,7 @@ export function SafetyEditor({
   return (
     <div className="space-y-4">
       {/* ── Level ──────────────────────────────────────────────────── */}
-      <div role="radiogroup" aria-label="Viewer rules" className="grid gap-3 sm:grid-cols-3">
+      <div role="radiogroup" aria-label="Rules" className="grid gap-3 sm:grid-cols-3">
         {LEVELS.map((l) => {
           const on = level === l.id;
           return (
@@ -108,7 +122,7 @@ export function SafetyEditor({
               type="button"
               role="radio"
               aria-checked={on}
-              onClick={() => onChange(l.patch)}
+              onClick={() => choose(l)}
               className={`rounded-2xl border p-4 text-left transition-colors ${
                 on ? "border-brand-500 bg-brand-600/15" : "border-white/10 bg-zinc-900/60 hover:border-white/25"
               }`}
@@ -127,27 +141,24 @@ export function SafetyEditor({
       </div>
       {level === null && (
         <p className="text-sm text-zinc-400">
-          <span className="font-semibold text-zinc-200">Custom rules.</span> Pick a level above to reset, or keep
+          <span className="font-semibold text-zinc-200">Custom rules.</span> Pick a level above to replace them, or keep
           adjusting below.
         </p>
       )}
-      <p className="flex items-start gap-2 rounded-xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-        <span aria-hidden>🛡️</span>
-        <span>
-          <span className="font-semibold">Automatic screening is always on.</span> Nudity, anyone who may be under 18,
-          real public figures, hate, gore and self-harm are blocked whatever you choose here.
-        </span>
+      <p className="rounded-xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+        <span className="font-semibold">Our safety checks are always on.</span> Nudity, anyone who may be under 18,
+        real public figures, hate, gore and self-harm are blocked whatever you choose here.
       </p>
 
       {/* ── Details ────────────────────────────────────────────────── */}
-      <Section title="What viewers can do" open>
-        <Segmented label="Typed ideas" value={s.customPrompts} options={TYPED} onChange={(v) => onChange({ customPrompts: v })} />
+      <Section title="What chat can do" open>
+        <Segmented label="Custom effects" value={s.customPrompts} options={TYPED} onChange={(v) => onChange({ customPrompts: v })} />
         <Segmented label="Photos" value={s.referenceImages} options={PHOTOS} onChange={(v) => onChange({ referenceImages: v })} />
         <Switch
           checked={s.showAttribution}
           onChange={(v) => onChange({ showAttribution: v })}
-          label="Show the viewer's name on stream"
-          hint={'A small "hijacked by name" tag while their effect plays.'}
+          label="Show who paid on stream"
+          hint="A small name tag while their effect plays."
         />
         <Switch
           checked={s.showAiLabel}
@@ -173,7 +184,7 @@ export function SafetyEditor({
             onChange={(e) => onChange({ maxIntensity: Number(e.target.value) })}
             className="mt-2 w-full accent-[#bb321b]"
           />
-          <span className="flex justify-between text-xs text-zinc-500">
+          <span className="flex justify-between text-sm text-zinc-400">
             <span>Mild</span>
             <span>Wild</span>
           </span>
@@ -189,7 +200,7 @@ export function SafetyEditor({
                   type="button"
                   aria-pressed={on}
                   onClick={() => toggleCategory(c)}
-                  className={`rounded-full px-3.5 py-1.5 text-sm ${
+                  className={`min-h-11 rounded-full px-4 py-1.5 text-sm ${
                     on ? "bg-zinc-100 font-semibold text-zinc-900" : "bg-zinc-800 text-zinc-400 line-through"
                   }`}
                 >
@@ -199,7 +210,7 @@ export function SafetyEditor({
             })}
           </div>
         </div>
-        <p className="text-xs text-zinc-500">Turn single effects on or off in the Effects tab.</p>
+        <p className="text-sm text-zinc-400">Turn single effects on or off in the Effects tab.</p>
       </Section>
 
       <Section title="Price & length" summary={`From $${s.minTipUSD} · up to ${s.maxDurationSec}s`}>
@@ -222,31 +233,31 @@ export function SafetyEditor({
       </Section>
 
       <Section
-        title="Blocked words & viewers"
-        summary={`${s.blocklistExtra.length} words · ${s.bannedViewers.length} viewers`}
+        title="Blocked words & people"
+        summary={`${s.blocklistExtra.length} words · ${s.bannedViewers.length} banned`}
       >
         <ListField
           label="Extra blocked words"
-          hint="Typed ideas containing these are refused. Separate with commas."
+          hint="Custom effects with these words are refused. Separate with commas."
           value={s.blocklistExtra}
           onCommit={(v) => onChange({ blocklistExtra: v })}
         />
         <div className="py-2">
-          <span className="text-sm text-zinc-100">Banned viewers</span>
+          <span className="text-sm text-zinc-100">Banned people</span>
           {s.bannedViewers.length === 0 ? (
-            <p className="mt-1 text-xs text-zinc-500">
-              Nobody yet. Ban someone from the Live tab or the blocked-requests list.
+            <p className="mt-1 text-sm text-zinc-400">
+              Nobody banned yet. You can ban someone from the Recently blocked list.
             </p>
           ) : (
             <div className="mt-2 flex flex-wrap gap-2">
               {s.bannedViewers.map((v) => (
-                <span key={v} className="inline-flex items-center gap-1 rounded-full bg-zinc-800 py-1 pl-3 pr-1 text-sm">
+                <span key={v} className="inline-flex items-center gap-1 rounded-full bg-zinc-800 pl-4 pr-1 text-sm">
                   {v}
                   <button
                     type="button"
                     aria-label={`Unban ${v}`}
-                    onClick={() => onChange({ bannedViewers: s.bannedViewers.filter((x) => x !== v) })}
-                    className="rounded-full px-2 text-zinc-400 hover:bg-white/10 hover:text-white"
+                    onClick={() => unban(v)}
+                    className="grid h-11 w-11 place-items-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white"
                   >
                     ×
                   </button>
@@ -267,16 +278,16 @@ export function SafetyEditor({
         <Switch
           checked={s.moderationStrictness === "strict"}
           onChange={(v) => onChange({ moderationStrictness: v ? "strict" : "standard" })}
-          label="Strict screening"
-          hint="When a typed idea is borderline, refuse it instead of letting it through."
+          label="Strict safety checks"
+          hint="When a custom effect is borderline, refuse it instead of letting it through."
         />
         <Switch
           checked={s.enhanceCustomPrompts}
           onChange={(v) => onChange({ enhanceCustomPrompts: v })}
-          label="Let the AI embellish typed ideas"
-          hint="Richer results, but less predictable than what the viewer wrote."
+          label="Let the AI add detail to custom effects"
+          hint="Often looks better, but it can differ from what chat wrote."
         />
-        <Segmented label="Output watcher" value={s.outputGuard} options={GUARD} onChange={(v) => onChange({ outputGuard: v })} />
+        <Segmented label="Live safety check" value={s.outputGuard} options={GUARD} onChange={(v) => onChange({ outputGuard: v })} />
         {local && (
           <Switch
             checked={s.allowSolePendingMatch}
@@ -285,6 +296,7 @@ export function SafetyEditor({
           />
         )}
       </Section>
+      <UndoToast undo={undo} onClose={clear} />
     </div>
   );
 }
@@ -351,7 +363,7 @@ function ListField({
         }}
         className="mt-2 w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-brand-500"
       />
-      <span className="mt-1 block text-xs text-zinc-500">{hint}</span>
+      <span className="mt-1 block text-sm text-zinc-400">{hint}</span>
     </label>
   );
 }
@@ -392,7 +404,7 @@ function NumberField({
         }}
         className="mt-2 w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-brand-500"
       />
-      <span className="mt-1 block text-xs text-zinc-500">{hint}</span>
+      <span className="mt-1 block text-sm text-zinc-400">{hint}</span>
     </label>
   );
 }

@@ -225,7 +225,7 @@ export class CloudLink {
   /** Mint via the control plane (job-gated + budget-capped server-side). */
   async mint(durationSec: number): Promise<string> {
     const body = await this.authedPost<{ token?: string }>("token", { durationSec });
-    if (!body.token) throw new Error("mint returned no token");
+    if (!body.token) throw new Error("We couldn't start the effect. Try again.");
     return body.token;
   }
 
@@ -254,7 +254,7 @@ export class CloudLink {
   /** Stripe-hosted onboarding URL; `from: "app"` lands on /payouts-done. */
   async payoutsOnboardUrl(country: string): Promise<string> {
     const b = await this.authedPost<{ url?: string }>("payouts/onboard", { country, from: "app" });
-    if (!b.url) throw new Error("no onboarding link");
+    if (!b.url) throw new Error("We couldn't open Stripe. Try again.");
     return b.url;
   }
 
@@ -299,7 +299,7 @@ export class CloudLink {
       // A proxy in front of the control plane can answer 502/504 with HTML.
       return { status: res.status, body: await res.json().catch(() => ({})) };
     }
-    return { status: 401, body: { error: "cloud session expired — sign in again" } };
+    return { status: 401, body: { error: "Your sign-in expired. Sign in again." } };
   }
 
   private async authedPost<T>(path: string, payload: unknown): Promise<T> {

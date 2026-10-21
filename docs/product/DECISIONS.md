@@ -83,3 +83,15 @@ plain and calm (refunds, errors, safety screens). `docs/product/BRAND.md`. Brief
 
 **#20 · 2026-10-20 · Brief 002 ships as three PRs, viewer portal first** (brand guide + preview
 pipeline + portal → studio + wizard → website), because the portal is where money changes hands.
+
+**#21 · 2026-10-21 · Merging is CI-gated, not PM-gated** (supersedes #11). A PR merges when
+every CI check is green and the gate passed; the eng lead or the orchestrator session at
+`~/Documents/Projects` merges it (merge commit, branch kept). Confirmed by the PM in the
+orchestrator session on 2026-10-21.
+
+**#22 · 2026-10-21 · Reality Hijack is closed out to focus elsewhere.** Everything outstanding
+ships to main (brief 002 PR 2, the contact-email change) and the product launches as it stands:
+site via Vercel from `main`, control plane deployed to Fly, desktop app released from tag
+`v0.1.0`. Kept as-is: the old "Expired" refund wording and the Stripe-cancel message
+(`34aef13`). Left out: the "What's possible" site section (branch `worktree-site-tip-demo`),
+whose clips are a mock render; it needs the PM's real recording session before it can ship.

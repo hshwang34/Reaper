@@ -122,8 +122,8 @@ try {
         viewerUrl: base + "/viewer", portalUrl: null, autoLaunch: false,
       }),
       signIn: async () => ({ ok: false }),
-      signOut: async () => {},
-      provisionObs: async () => ({ ok: true, detail: 'source "AI Hijack" ready in scene "Scene"' }),
+      signOut: async () => {}, cancelSignIn: async () => {},
+      provisionObs: async () => ({ ok: true, detail: 'Installed in "Scene" over "Cam"' }),
       launchObs: async () => {},
       enableObsWebsocket: async () => "already-enabled",
       startVirtualCamera: async () => "already-on",
@@ -159,8 +159,8 @@ try {
   await page.getByRole("button", { name: "Continue" }).click();
 
   await waitFor(async () => /Step 2 of 7/.test(await body()), 3000);
-  await page.getByRole("button", { name: /add the ai hijack source/i }).click();
-  await waitFor(async () => /ready in scene/.test(await body()), 3000);
+  await page.getByRole("button", { name: /add the overlay/i }).click();
+  await waitFor(async () => /Installed in/.test(await body()), 3000);
   await shot("2-obs");
   await page.getByRole("button", { name: "Continue" }).click();
 
@@ -204,7 +204,7 @@ try {
   await shot("6-test-no");
   await page.getByRole("button", { name: /continue anyway/i }).click();
   await waitFor(async () => /Step 7 of 7/.test(await body()), 3000);
-  check("done step explains panic with the key", /Panic: press/.test(await body()));
+  check("done step explains panic with the key", /Panic key: press/.test(await body()));
   await shot("7-done");
 
   const studio = await ctx.newPage();

@@ -181,7 +181,7 @@ export class Engine {
     const s = this.getSettings();
     if (this.parked.size >= Math.max(1, s.queueDepth)) {
       warn("engine", "review backlog full — dropping job");
-      this.emit.submissionUpdate(code, { state: "failed", message: "The streamer's approval queue is full." });
+      this.emit.submissionUpdate(code, { state: "failed", message: "The streamer has too many effects waiting for approval. Try again in a minute." });
       this.emit.jobEnded?.(job, false, "review backlog full");
       return "dropped: review backlog full";
     }
@@ -249,7 +249,7 @@ export class Engine {
       warn("engine", `queue full (${s.queueDepth}) — dropping job`);
       // Not tracked in jobCode (it never enters the queue), so notify directly.
       if (code) {
-        this.emit.submissionUpdate(code, { state: "failed", message: "Queue is full." });
+        this.emit.submissionUpdate(code, { state: "failed", message: "The line is full right now. Try again in a minute." });
       }
       this.emit.jobEnded?.(job, false, "queue full");
       return "dropped: queue full";
@@ -263,7 +263,10 @@ export class Engine {
     this.notify(job, {
       state: "matched",
       queuePosition: this.queue.length,
-      message: `Matched — ${job.durationSec}s hijack queued.`,
+      message:
+        this.queue.length > 1
+          ? `You're in line · ${this.queue.length - 1} ahead of you`
+          : "Payment received. Your effect is next in line.",
     });
     this.broadcast();
     this.tryDispatch();
@@ -279,7 +282,7 @@ export class Engine {
       this.notify(this.active, {
         state: "live",
         remainingSec: this.activeRemaining,
-        message: "Your hijack is LIVE.",
+        message: "Your effect is live on stream",
       });
     }
     // The router vanished (tab closed/crashed/disarmed, or WS dropped) with a
@@ -320,7 +323,7 @@ export class Engine {
       message: ok
         ? "Hijack complete."
         : reason.startsWith(SAFETY_REASON_PREFIX)
-          ? "The effect was stopped by the stream's safety filter."
+          ? "It was stopped by the streamer's safety checks."
           : `Hijack failed: ${reason}`,
     });
     this.jobCode.delete(job.jobId);

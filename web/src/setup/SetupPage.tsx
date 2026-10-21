@@ -2,7 +2,7 @@
 // docs/product/briefs/001-setup-ux.md). Renders only inside the Electron
 // shell (window.rhDesktop). Seven steps, each skippable where the plan
 // allows; every step reads real state from the main process and deep-links
-// back when something fails. "Stream safety" is the one step that can't be
+// back when something fails. "Safety" is the one step that can't be
 // skipped: it's where the streamer acknowledges the platform obligations the
 // product can't carry for them (CONTENT-SAFETY S6).
 //
@@ -14,11 +14,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DesktopBridge, DesktopSetupState, RouterState } from "@rh/shared";
 import { desktopBridge } from "../lib/desktop.js";
+import { FALLBACK, friendlyStreamerError } from "../lib/friendlyError.js";
 import { PANIC_KEY, TRAY_NAME } from "../lib/platform.js";
 import { acquireCamera, listCameras } from "../router/decartSession.js";
 import { StreamVideo, useRouterEngine } from "../router/useRouterEngine.js";
 import { Keycap } from "../features/Keycap.js";
 import { PAYOUT_COUNTRIES } from "../dashboard/PayoutsPanel.js";
+import { btn } from "../studio/ui.js";
 
 // The wizard reads everything through the typed preload bridge
 // (shared/src/desktopBridge.ts) — no hand-declared window shape here.
@@ -30,14 +32,18 @@ const desktop = desktopBridge;
 const STEPS = [
   "Sign in",
   "Connect OBS",
-  "Camera",
+  "Pick your camera",
   "Get paid",
-  "Stream safety",
+  "Safety",
   "Test hijack",
   "Done",
 ] as const;
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
+
+/** What the streamer got done, for the last step's checklist. Lifted here so
+ *  steps (which unmount when you move on) can report into it. */
+type Progress = { overlay: boolean; camera: boolean; test: "passed" | "skipped" | null };
 
 export default function SetupPage() {
   const d = desktop();
@@ -46,6 +52,11 @@ export default function SetupPage() {
   // The device the streamer settled on in the camera step; the test step
   // arms the same one so what they previewed is what gets restyled.
   const [cameraId, setCameraId] = useState<string | undefined>(undefined);
+  const [progress, setProgress] = useState<Progress>({ overlay: false, camera: false, test: null });
+  const mark = useCallback((p: Partial<Progress>) => setProgress((cur) => ({ ...cur, ...p })), []);
+  // The test step sets this while an effect is starting or playing: leaving
+  // mid-run would strand the router page.
+  const [backLocked, setBackLocked] = useState(false);
 
   const refresh = useCallback(() => {
     void d?.setupState().then(setState);
@@ -59,15 +70,15 @@ export default function SetupPage() {
 
   if (!d) {
     return (
-      <div className="grid h-screen place-items-center text-zinc-500">
-        The setup wizard runs inside the Stream Hijack app.
+      <div className="grid h-screen place-items-center px-6 text-center text-zinc-400">
+        Setup only runs in the Stream Hijack app. Download it from streamhijack.com.
       </div>
     );
   }
   if (!state) {
     return (
-      <div className="grid h-screen place-items-center text-zinc-500">
-        Loading…
+      <div className="grid h-screen place-items-center text-zinc-400">
+        Loading setup…
       </div>
     );
   }
@@ -83,20 +94,41 @@ export default function SetupPage() {
 
       {step === 0 && <SignInStep d={d} state={state} next={next} />}
       {step === 1 && (
-        <ObsStep d={d} state={state} refresh={refresh} next={next} />
+        <ObsStep d={d} state={state} refresh={refresh} next={next} onOverlay={() => mark({ overlay: true })} />
       )}
       {step === 2 && (
-        <CameraStep d={d} state={state} refresh={refresh} next={next} onChosen={setCameraId} />
+        <CameraStep
+          d={d}
+          state={state}
+          refresh={refresh}
+          next={next}
+          onChosen={(id) => {
+            setCameraId(id);
+            mark({ camera: true });
+          }}
+        />
       )}
       {step === 3 && <PayoutsStep d={d} state={state} next={next} />}
       {step === 4 && <SafetyStep state={state} next={next} />}
-      {step === 5 && <TestStep d={d} state={state} cameraId={cameraId} next={next} />}
-      {step === 6 && <DoneStep d={d} state={state} />}
+      {step === 5 && (
+        <TestStep
+          d={d}
+          state={state}
+          cameraId={cameraId}
+          next={(passed) => {
+            mark({ test: passed ? "passed" : "skipped" });
+            next();
+          }}
+          onBusy={setBackLocked}
+        />
+      )}
+      {step === 6 && <DoneStep d={d} state={state} progress={progress} />}
 
       {step > 0 && step < STEPS.length - 1 && (
         <button
           onClick={() => setStep((s) => s - 1)}
-          className="mt-6 text-sm text-zinc-500 underline"
+          disabled={backLocked}
+          className={`${btn.ghost} mt-6 disabled:cursor-not-allowed disabled:opacity-40`}
         >
           ← Back
         </button>
@@ -111,7 +143,7 @@ export default function SetupPage() {
 function Stepper({ step }: { step: number }) {
   return (
     <div className="mt-4 flex items-center gap-3 whitespace-nowrap text-sm">
-      <span className="font-mono text-xs text-zinc-500">
+      <span className="font-mono text-xs text-zinc-400">
         Step {step + 1} of {STEPS.length}
       </span>
       <span className="font-semibold text-zinc-100">{STEPS[step]}</span>
@@ -120,6 +152,7 @@ function Stepper({ step }: { step: number }) {
           <li
             key={label}
             title={label}
+            aria-current={i === step ? "step" : undefined}
             className={`h-1.5 flex-1 rounded-full ${
               i < step ? "bg-emerald-600" : i === step ? "bg-brand-600" : "bg-zinc-800"
             }`}
@@ -127,7 +160,7 @@ function Stepper({ step }: { step: number }) {
         ))}
       </ol>
       {step + 1 < STEPS.length && (
-        <span className="hidden text-xs text-zinc-500 sm:inline">Next: {STEPS[step + 1]}</span>
+        <span className="hidden text-xs text-zinc-400 sm:inline">Next: {STEPS[step + 1]}</span>
       )}
     </div>
   );
@@ -141,62 +174,28 @@ function Card({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Primary(props: {
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={props.onClick}
-      disabled={props.disabled}
-      className="rounded-lg bg-brand-600 px-5 py-2 font-semibold hover:bg-brand-700 disabled:opacity-40"
-    >
-      {props.children}
-    </button>
-  );
-}
-
-function Secondary(props: {
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={props.onClick}
-      disabled={props.disabled}
-      className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-    >
-      {props.children}
-    </button>
-  );
-}
-
-function Skip({ next, label }: { next: () => void; label?: string }) {
-  return (
-    <button onClick={next} className="text-sm text-zinc-500 underline">
-      {label ?? "Skip for now"}
-    </button>
-  );
-}
-
 /** A compact fact row: "OBS · connected" — single line, fixed shape. */
 function Chip({ label, value, tone }: { label: string; value: string; tone: "ok" | "warn" | "off" }) {
   const color =
-    tone === "ok" ? "text-emerald-400" : tone === "warn" ? "text-amber-400" : "text-zinc-500";
+    tone === "ok" ? "text-emerald-400" : tone === "warn" ? "text-amber-400" : "text-zinc-400";
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1 text-xs">
-      <span className="text-zinc-500">{label}</span>
+      <span className="text-zinc-400">{label}</span>
       <span className={`font-semibold ${color}`}>{value}</span>
     </span>
   );
 }
 
-/** An error thrown in the main process, minus Electron's IPC wrapper
- *  ("Error invoking remote method 'rh:…': Error: "). */
-function ipcMessage(e: unknown): string {
-  return (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+/** Wizard errors: IPC wrappers, HTTP codes and camera exceptions all become
+ *  calm sentences (lib/friendlyError). Never the raw text. */
+const say = friendlyStreamerError;
+
+const CAMERA_FALLBACK =
+  "Couldn't open the camera. Check that nothing else is using it and that you allowed camera access, then try again.";
+/** Camera errors read better with a camera-specific fallback than "our side". */
+function cameraError(e: unknown): string {
+  const m = say(e);
+  return m === FALLBACK ? CAMERA_FALLBACK : m;
 }
 
 // ── Step 1: Sign in ───────────────────────────────────────────────────────
@@ -211,36 +210,47 @@ function SignInStep({
   next: () => void;
 }) {
   const [waiting, setWaiting] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [decartKey, setDecartKey] = useState("");
   const [saved, setSaved] = useState(false);
+
+  // A sign-in that takes a minute usually means the browser tab was closed.
+  useEffect(() => {
+    if (!waiting) {
+      setSlow(false);
+      return;
+    }
+    const t = setTimeout(() => setSlow(true), 60_000);
+    return () => clearTimeout(t);
+  }, [waiting]);
+
   if (state.cloudMode) {
     return (
       <Card>
         <p>
-          Signed in as <b className="text-brand-400">{state.login}</b>. Your viewer page,
-          payments and the AI model run on the Stream Hijack service — no API keys on this
-          machine.
+          You're signed in as <b className="text-brand-400">{state.login}</b>. Your hijack page,
+          payments and AI are all handled for you. Nothing to install or paste.
         </p>
-        <Primary onClick={next}>Continue</Primary>
+        <button className={btn.primary} onClick={next}>Continue</button>
       </Card>
     );
   }
   // Pasted-keys local mode: a dev fallback only (repo runs, RH_LOCAL_MODE=1).
   // Streamers never see a key field — the hosted control plane holds the
-  // Decart key for them.
+  // AI key for them.
   const localMode = state.localModeAllowed && (
-    <details className="text-sm text-zinc-500">
-      <summary className="cursor-pointer">Developer: run with my own keys instead</summary>
+    <details className="text-sm text-zinc-400">
+      <summary className="cursor-pointer">Developer: use your own AI key</summary>
       <div className="mt-3 space-y-3">
         {state.keys.decartApiKey || saved ? (
-          <p className="text-emerald-400">✓ Decart key saved — it loads when setup finishes.</p>
+          <p className="text-emerald-400">AI key saved. It loads when setup finishes.</p>
         ) : (
           <div className="flex gap-2">
             <input
               type="password"
               value={decartKey}
               onChange={(e) => setDecartKey(e.target.value)}
-              placeholder="Decart API key"
+              placeholder="AI key"
               className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200"
             />
             <button
@@ -248,30 +258,28 @@ function SignInStep({
               onClick={() =>
                 void d.saveKeys({ decartApiKey: decartKey.trim() }).then(() => setSaved(true))
               }
-              className="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700 disabled:opacity-40"
+              className={btn.secondary}
             >
               Save
             </button>
           </div>
         )}
-        <Skip next={next} label="Continue in local mode" />
+        <button className={btn.ghost} onClick={next}>Continue with my own key</button>
       </div>
     </details>
   );
 
   // This build has no control plane baked in (nothing deployed yet): say so.
-  // The app still runs end to end in passthrough demo mode, so the rest of
-  // setup — OBS, camera, the safety acknowledgement — is still worth doing.
+  // The rest of setup — OBS, camera, the safety acknowledgement — is still
+  // worth doing.
   if (!state.cloudUrl) {
     return (
       <Card>
         <p className="text-zinc-300">
-          <b>Hosted sign-in isn't available in this build yet.</b> Stream Hijack signs you in
-          with Twitch and runs payments, moderation and the AI model from our servers —
-          nothing to configure on your side. That service isn't live for this build; you can
-          still set up OBS and your camera and try the flow with a passthrough test effect.
+          <b>Sign-in isn't available in this version yet.</b> You can still set up OBS and your
+          camera and try a test.
         </p>
-        <Primary onClick={next}>Continue</Primary>
+        <button className={btn.primary} onClick={next}>Continue</button>
         {localMode}
       </Card>
     );
@@ -279,12 +287,12 @@ function SignInStep({
   return (
     <Card>
       <p className="text-zinc-300">
-        Sign in with Twitch to get your viewer page and payments — no config files, no API
-        keys. Your browser opens; the app picks the session up on its own and restarts once,
-        signed in.
+        Sign in with Twitch to get your hijack page and start taking payments. Your browser
+        opens. Come back here when you're done.
       </p>
-      <div className="flex items-center gap-4">
-        <Primary
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          className={btn.primary}
           disabled={waiting}
           onClick={() => {
             setWaiting(true);
@@ -292,8 +300,19 @@ function SignInStep({
           }}
         >
           {waiting ? "Waiting for your browser…" : "Sign in with Twitch"}
-        </Primary>
+        </button>
+        {waiting && (
+          <button className={btn.ghost} onClick={() => void d.cancelSignIn()}>
+            Cancel
+          </button>
+        )}
       </div>
+      {waiting && (
+        <p className="text-sm text-zinc-300">
+          Waiting for your browser… The app restarts once after you sign in; your place is saved.
+        </p>
+      )}
+      {slow && <p className="text-sm text-amber-300">Still waiting. Try the button again.</p>}
       {localMode}
     </Card>
   );
@@ -301,22 +320,47 @@ function SignInStep({
 
 // ── Step 2: Connect OBS ───────────────────────────────────────────────────
 
+const SWITCH_ON_TEXT =
+  "OBS needs to let Stream Hijack control it. Close OBS and we'll switch it on for you.";
+
 function ObsStep({
   d,
   state,
   refresh,
   next,
+  onOverlay,
 }: {
   d: RhDesktopSetup;
   state: SetupState;
   refresh: () => void;
   next: () => void;
+  onOverlay: () => void;
 }) {
   const [result, setResult] = useState<string | null>(null);
+  const [resultTone, setResultTone] = useState<"ok" | "bad">("ok");
   const [overlayOk, setOverlayOk] = useState(false);
   const [enabling, setEnabling] = useState(false);
+  const [manual, setManual] = useState(false);
+  const [slow, setSlow] = useState(false);
   const disc = state.obs.discovery;
   const obsRunning = state.obs.running;
+  const connecting =
+    (disc === "found" || disc === "unreadable") && !state.obs.connected && obsRunning;
+
+  // "Connecting…" that outlasts a few seconds gets a hint.
+  useEffect(() => {
+    if (!connecting) {
+      setSlow(false);
+      return;
+    }
+    const t = setTimeout(() => setSlow(true), 5000);
+    return () => clearTimeout(t);
+  }, [connecting]);
+
+  const show = (text: string, tone: "ok" | "bad") => {
+    setResult(text);
+    setResultTone(tone);
+  };
 
   return (
     <Card>
@@ -333,47 +377,47 @@ function ObsStep({
               : state.obs.connected
                 ? "connected"
                 : obsRunning
-                  ? "running, not connected"
-                  : "not running"
+                  ? "open, not connected"
+                  : "not open"
           }
           tone={state.obs.connected ? "ok" : disc === "not-installed" ? "warn" : "off"}
         />
         <Chip
-          label="Overlay source"
-          value={overlayOk ? "ready" : "not yet"}
+          label="Overlay"
+          value={overlayOk ? "added" : "not added yet"}
           tone={overlayOk ? "ok" : "off"}
         />
       </div>
 
       {disc === "not-installed" && (
         <>
-          <p className="text-zinc-300">
-            OBS Studio doesn't seem to be installed (or has never been opened). Install OBS
-            30 or newer, open it once, then come back here. Or add the overlay by hand
-            later: a Browser Source pointing at
-          </p>
-          <code className="block break-all rounded bg-zinc-900 p-2 text-xs">
-            {state.viewerUrl}
-          </code>
+          <p className="text-zinc-300">We can't find OBS on this computer.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button className={btn.primary} onClick={() => void d.openExternal("https://obsproject.com")}>
+              Get OBS
+            </button>
+            <button className={btn.ghost} onClick={() => setManual(true)}>
+              I installed it somewhere else
+            </button>
+          </div>
+          {manual && (
+            <>
+              <p className="text-sm text-zinc-300">
+                Open OBS yourself and we'll connect. To add the overlay by hand later, add a
+                “Browser” source in OBS and paste this link:
+              </p>
+              <code className="block break-all rounded bg-zinc-900 p-2 text-xs">
+                {state.viewerUrl}
+              </code>
+            </>
+          )}
         </>
       )}
       {disc === "disabled" && (
         <>
-          <p className="text-zinc-300">
-            OBS is installed but its <b>WebSocket server is off</b> — that's the door the app
-            uses. We can switch it on for you; OBS only reads the setting when it starts, so
-            it has to be closed first.
-          </p>
-          {obsRunning ? (
-            <p className="text-sm text-amber-400">
-              OBS is running — quit it, and this button unlocks on its own.
-            </p>
-          ) : (
-            <p className="text-sm text-zinc-500">
-              Or do it by hand in OBS: Tools → WebSocket Server Settings → Enable.
-            </p>
-          )}
-          <Primary
+          <p className={obsRunning ? "text-sm text-amber-300" : "text-zinc-300"}>{SWITCH_ON_TEXT}</p>
+          <button
+            className={btn.primary}
             disabled={obsRunning || enabling}
             onClick={() => {
               setEnabling(true);
@@ -381,75 +425,134 @@ function ObsStep({
               void d
                 .enableObsWebsocket()
                 .then((r) => {
-                  if (r === "obs-running") setResult("OBS is still running — quit it and try again.");
-                  else if (r === "no-config") setResult("OBS has never been started on this computer — open it once, quit, and try again.");
-                  else setResult("Switched on. Starting OBS — this page connects on its own.");
+                  if (r === "obs-running") show("OBS is still open. Close it and try again.", "bad");
+                  else if (r === "no-config") show("Open OBS once, close it, then try again.", "bad");
+                  else show("Done. Starting OBS now.", "ok");
                   refresh();
                 })
-                .catch((e) => setResult(`Couldn't switch it on: ${ipcMessage(e)}`))
+                .catch((e) => show(`Couldn't turn it on. ${say(e)}`, "bad"))
                 .finally(() => setEnabling(false));
             }}
           >
-            {enabling ? "Switching on…" : "Switch it on for me and start OBS"}
-          </Primary>
-          {result && <p className="text-sm text-zinc-300">{result}</p>}
+            {enabling ? "Switching on…" : "Switch it on"}
+          </button>
+          {!obsRunning && (
+            <p className="text-sm text-zinc-400">
+              Or do it yourself in OBS: “Tools → WebSocket Server Settings → Enable”.
+            </p>
+          )}
+          {result && (
+            <p className={`text-sm ${resultTone === "ok" ? "text-zinc-300" : "text-red-300"}`}>{result}</p>
+          )}
         </>
       )}
       {(disc === "found" || disc === "unreadable") && !state.obs.connected && (
         <>
           <p className="text-zinc-300">
             {obsRunning
-              ? "OBS is running; the app is connecting to it. If this takes more than a few seconds, check Tools → WebSocket Server Settings in OBS."
-              : "OBS is installed but not running. Start it and the app connects on its own."}
+              ? "OBS is open. Connecting…"
+              : "OBS is installed but not open. Start it and we'll connect."}
           </p>
+          {slow && (
+            <p className="text-sm text-amber-300">
+              Still working. If this doesn't connect, check that OBS is up to date.
+            </p>
+          )}
           {!obsRunning && (
-            <Primary
+            <button
+              className={btn.primary}
               onClick={() =>
                 void d
                   .launchObs()
                   .then(refresh)
-                  .catch((e) => setResult(`Couldn't start OBS: ${ipcMessage(e)}`))
+                  .catch(() => show("Couldn't start OBS. Open it yourself and we'll connect.", "bad"))
               }
             >
               Start OBS
-            </Primary>
+            </button>
           )}
-          {result && <p className="text-sm text-red-400">{result}</p>}
+          {result && <p className="text-sm text-red-300">{result}</p>}
         </>
       )}
       {state.obs.connected && (
         <>
           <p className="text-emerald-400">✓ Connected to OBS.</p>
           <p className="text-zinc-300">
-            One click adds a hidden <b>AI Hijack</b> source to your current scene (or repairs
-            it if it drifted). It stays invisible until a hijack is actually playing.
+            We'll add the AI Hijack overlay to your current scene. It stays hidden until a
+            hijack is playing.
           </p>
-          <Primary
+          <button
+            className={overlayOk ? btn.secondary : btn.primary}
             onClick={() =>
               void d
                 .provisionObs()
                 .then((r) => {
                   setOverlayOk(r.ok);
-                  setResult(r.ok ? `✓ ${r.detail}` : r.detail);
+                  if (r.ok) onOverlay();
+                  // r.detail is describePlacements(): 'Installed in "Scene" over "Cam"'.
+                  show(r.ok ? `✓ ${r.detail}` : "Couldn't add the overlay. Make sure OBS is open, then try again.", r.ok ? "ok" : "bad");
                   refresh();
                 })
-                .catch((e) => setResult(`Couldn't add the source: ${(e as Error).message}`))
+                .catch(() => show("Couldn't add the overlay. Make sure OBS is open, then try again.", "bad"))
             }
           >
-            {overlayOk ? "Add it again" : "Add the AI Hijack source"}
-          </Primary>
-          {result && <p className="text-sm text-emerald-400">{result}</p>}
+            {overlayOk ? "Add it again" : "Add the overlay"}
+          </button>
+          {result && (
+            <p className={`text-sm ${resultTone === "ok" ? "text-emerald-400" : "text-red-300"}`}>{result}</p>
+          )}
         </>
       )}
-      <div className="flex items-center gap-4">
-        {(overlayOk || result) && <Primary onClick={next}>Continue</Primary>}
-        <Skip next={next} label="Skip — I'll add the Browser Source myself" />
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Primary only once the step is done. */}
+        <button className={overlayOk ? btn.primary : btn.ghost} disabled={!overlayOk} onClick={next}>
+          Continue
+        </button>
+        <button className={btn.ghost} onClick={next}>
+          Skip. I'll add it myself
+        </button>
       </div>
     </Card>
   );
 }
 
-// ── Step 3: Camera ────────────────────────────────────────────────────────
+// ── Step 3: Pick your camera ──────────────────────────────────────────────
+
+/** gear → Output type → Source: the one setting that prevents the
+ *  hall-of-mirrors feedback loop. Inline SVG so it works offline. */
+function VirtualCamHint() {
+  return (
+    <div
+      role="note"
+      className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4"
+    >
+      <p className="text-base font-bold text-amber-100">
+        In OBS, set the Virtual Camera's output type to <b className="underline">Source</b>, not
+        Program. Otherwise you'll see yourself inside yourself.
+      </p>
+      <svg
+        viewBox="0 0 360 64"
+        role="img"
+        aria-label="In OBS, click the gear next to Start Virtual Camera, then set Output type to Source"
+        className="mt-3 w-full max-w-md"
+      >
+        <g fill="none" stroke="currentColor" strokeWidth="1.6" className="text-amber-200">
+          <circle cx="32" cy="32" r="9" />
+          <circle cx="32" cy="32" r="20" strokeDasharray="6 5" />
+          <path d="M66 32h40m-8-6 8 6-8 6" />
+          <rect x="114" y="14" width="104" height="36" rx="8" />
+          <path d="M224 32h40m-8-6 8 6-8 6" />
+          <rect x="272" y="14" width="80" height="36" rx="8" className="fill-amber-300/20" />
+        </g>
+        <g fontSize="12" fill="currentColor" className="text-amber-100" fontFamily="system-ui, sans-serif">
+          <text x="166" y="36" textAnchor="middle">Output type</text>
+          <text x="312" y="36" textAnchor="middle" fontWeight="700">Source</text>
+          <text x="32" y="62" textAnchor="middle" fontSize="10">gear</text>
+        </g>
+      </svg>
+    </div>
+  );
+}
 
 function CameraStep({
   d,
@@ -486,7 +589,7 @@ function CameraStep({
       onChosen(deviceId);
       setCams(await listCameras());
     } catch (e) {
-      setError((e as Error).message);
+      setError(cameraError(e));
     }
   }
 
@@ -496,16 +599,16 @@ function CameraStep({
     try {
       const r = await d.startVirtualCamera();
       if (r === "obs-not-connected") {
-        setNote("OBS isn't connected — go back one step.");
+        setNote("OBS isn't connected. Go back to the last step.");
         return;
       }
-      setNote(r === "started" ? "Virtual Camera started." : "The Virtual Camera was already on.");
+      setNote("Virtual Camera is on.");
       refresh();
       // The device takes a moment to appear to the OS after OBS starts it.
       await new Promise((res) => setTimeout(res, 1200));
       await grab();
-    } catch (e) {
-      setNote(`Couldn't start it: ${ipcMessage(e)}`);
+    } catch {
+      setNote("Couldn't start the Virtual Camera. Start it in OBS and press the button below.");
     } finally {
       setStarting(false);
     }
@@ -515,46 +618,42 @@ function CameraStep({
     return () => stream?.getTracks().forEach((t) => t.stop());
   }, [stream]);
 
+  const needsStart = !stream && obsConnected && vcam === false;
+
   return (
     <Card>
+      {/* The loudest thing on the step: skipping it ruins the picture. */}
+      <VirtualCamHint />
       <p className="text-zinc-300">
-        Stream Hijack takes your picture from <b>OBS's Virtual Camera</b>, not straight from
-        the webcam, so the effect lands on exactly what you show on stream — your scene,
-        framing and filters.
+        Stream Hijack uses OBS's Virtual Camera, so the effect covers exactly what chat sees:
+        your scene, framing and filters.
       </p>
       <div className="flex flex-wrap gap-2">
         <Chip label="OBS" value={obsConnected ? "connected" : "not connected"} tone={obsConnected ? "ok" : "warn"} />
         <Chip
           label="Virtual Camera"
-          value={vcam === true ? "on" : vcam === false ? "off" : "unknown"}
+          value={vcam === true ? "on" : vcam === false ? "off" : "can't tell"}
           tone={vcam === true ? "ok" : vcam === false ? "warn" : "off"}
         />
         {stream && <Chip label="Capturing" value={label} tone={usingObs ? "ok" : "warn"} />}
       </div>
 
       {!stream && !obsConnected && (
-        <p className="text-sm text-amber-400">
-          OBS isn't connected. You can pick a camera anyway, but effects will restyle the raw
-          webcam, not your OBS scene. Use ← Back to connect OBS first.
+        <p className="text-sm text-amber-300">
+          OBS isn't connected. Effects would cover your raw webcam, not your OBS scene. Go back
+          and connect OBS first.
         </p>
       )}
-      {!stream && obsConnected && vcam === false && (
-        <>
-          <p className="text-sm text-amber-400">
-            OBS's Virtual Camera is off. Start it from here, or in OBS under Controls → Start
-            Virtual Camera.
-          </p>
-          <p className="text-sm text-zinc-500">
-            In OBS, set the Virtual Camera's output type to <b>Source</b> (the gear next to
-            Start Virtual Camera), not Program — otherwise the AI effect feeds back into
-            itself.
-          </p>
-        </>
+      {needsStart && (
+        <p className="text-sm text-amber-300">
+          OBS's Virtual Camera is off. Start it from here, or in OBS under Controls → Start
+          Virtual Camera.
+        </p>
       )}
       {!stream && obsConnected && vcam !== false && (
-        <p className="text-sm text-zinc-500">
-          {IS_MAC ? "macOS" : "Windows"} asks for camera permission once. The preview that
-          appears is the Virtual Camera's picture — the same thing your viewers see.
+        <p className="text-sm text-zinc-400">
+          {IS_MAC ? "macOS" : "Windows"} will ask to use the camera once. Say yes. The preview
+          shows what chat sees.
         </p>
       )}
 
@@ -566,17 +665,17 @@ function CameraStep({
       )}
       {stream && usingObs && (
         <p className="text-sm text-emerald-400">
-          ✓ This is your OBS Virtual Camera — what effects will restyle.
+          ✓ This is your OBS Virtual Camera. Effects will play over it.
         </p>
       )}
       {stream && !usingObs && (
         <>
-          <p className="text-sm text-amber-400">
-            This is <b>{label}</b>, not the OBS Virtual Camera. If OBS's Virtual Camera is
-            running, pick it below.
+          <p className="text-sm text-amber-300">
+            This is <b>{label}</b>, not the OBS Virtual Camera. Not seeing it? Start the Virtual
+            Camera in OBS, then pick it below.
           </p>
           {cams.length > 1 && (
-            <label className="flex items-center gap-2 text-sm text-zinc-400">
+            <label className="flex items-center gap-2 text-sm text-zinc-300">
               Camera
               <select
                 onChange={(e) => void grab(e.target.value || undefined)}
@@ -594,25 +693,29 @@ function CameraStep({
           )}
         </>
       )}
-      {error && <p className="text-sm text-red-400">Camera failed: {error}</p>}
+      {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
       {note && <p className="text-sm text-zinc-300">{note}</p>}
 
-      <div className="flex flex-wrap items-center gap-4">
-        {!stream && obsConnected && vcam === false && (
-          <Primary disabled={starting} onClick={() => void startVirtualCam()}>
-            {starting ? "Starting…" : "Start the Virtual Camera"}
-          </Primary>
+      <div className="flex flex-wrap items-center gap-3">
+        {needsStart && (
+          <button className={btn.primary} disabled={starting} onClick={() => void startVirtualCam()}>
+            {starting ? "Starting Virtual Camera…" : "Start Virtual Camera"}
+          </button>
         )}
-        {!stream && !(obsConnected && vcam === false) && (
-          <Primary onClick={() => void grab()}>
+        {!stream && !needsStart && (
+          <button className={btn.primary} onClick={() => void grab()}>
             {obsConnected ? "Use the OBS Virtual Camera" : "Pick a camera anyway"}
-          </Primary>
+          </button>
         )}
-        {!stream && obsConnected && vcam === false && (
-          <Secondary onClick={() => void grab()}>I started it myself — continue</Secondary>
+        {needsStart && (
+          <button className={btn.secondary} onClick={() => void grab()}>
+            I started it myself
+          </button>
         )}
         {stream && (
-          <Primary onClick={next}>{usingObs ? "Looks good — continue" : "Use it anyway — continue"}</Primary>
+          <button className={btn.primary} onClick={next}>
+            {usingObs ? "Looks good, continue" : "Use it anyway, continue"}
+          </button>
         )}
       </div>
     </Card>
@@ -643,7 +746,7 @@ function PayoutsStep({
     if (!state.cloudMode) return;
     let alive = true;
     const tick = () =>
-      d.payouts().then((p) => alive && setInfo(p)).catch((e) => alive && setError(ipcMessage(e)));
+      d.payouts().then((p) => alive && setInfo(p)).catch((e) => alive && setError(say(e)));
     void tick();
     const t = setInterval(tick, 4000);
     return () => {
@@ -656,23 +759,26 @@ function PayoutsStep({
     return (
       <Card>
         <p className="text-zinc-300">
-          Local mode has no payments. Run effects on yourself from the studio's
-          <b> Try an effect</b> panel; nothing here bills anyone.
+          Payments aren't on in this version. You can still try effects on yourself from the
+          studio. Nothing is charged.
         </p>
-        <Primary onClick={next}>Continue</Primary>
+        <button className={btn.primary} onClick={next}>Continue</button>
       </Card>
     );
   }
 
   const ready = info !== "loading" && info?.enabled;
   const started = info !== "loading" && info?.started && !info.enabled;
+  const unavailable = info !== "loading" && (!info || !info.configured);
+  // The step's one filled button is the thing to do: Stripe, until it's done.
+  const todo = info !== "loading" && info?.configured && !info.enabled;
 
   return (
     <Card>
       <p className="text-zinc-300">
-        Viewers pay by card on your page — <b>$1 buys 1 second</b> of hijack. Stripe sends
-        your share to your bank and keeps our cut (the GPU time plus 5%). You need a Stripe
-        account once; Stripe handles identity and bank details, we never see them.
+        Chat pays by card on your hijack page. <b>$1 buys 1 second.</b> Stripe pays your share
+        to your bank. Stripe also takes our fee, which covers the AI time plus 5%. You set up a
+        Stripe account once. Stripe handles your ID and bank details. We never see them.
       </p>
       <div className="flex flex-wrap gap-2">
         <Chip
@@ -680,36 +786,36 @@ function PayoutsStep({
           value={
             info === "loading"
               ? "checking…"
-              : !info || !info.configured
-                ? "not available on this server"
-                : info.enabled
+              : unavailable
+                ? "not available yet"
+                : info?.enabled
                   ? "ready"
-                  : info.started
-                    ? "Stripe is verifying"
+                  : info?.started
+                    ? "Stripe is checking your details"
                     : "not set up"
           }
           tone={ready ? "ok" : started ? "warn" : "off"}
         />
       </div>
 
-      {info !== "loading" && (!info || !info.configured) && (
-        <p className="text-sm text-zinc-500">
-          Payments aren't switched on for this server (dev mode). Skip this step.
+      {unavailable && (
+        <p className="text-sm text-zinc-400">
+          Payments aren't available in this version. Skip this step.
         </p>
       )}
       {ready && (
-        <p className="text-sm text-emerald-400">✓ Payouts ready — viewers can pay on your page.</p>
+        <p className="text-sm text-emerald-400">✓ Payouts ready. Chat can pay on your page.</p>
       )}
       {started && (
         <p className="text-sm text-amber-300">
-          Stripe is still verifying your details. Carry on with setup — this flips to ready on
-          its own, and you can finish anything Stripe still needs from the dashboard.
+          Stripe is still checking your details. Keep going. This updates by itself. If Stripe
+          needs more from you, finish it from your dashboard.
         </p>
       )}
-      {info !== "loading" && info?.configured && !info.enabled && (
+      {todo && (
         <div className="flex flex-wrap items-center gap-3">
           {!info.started && (
-            <label className="flex items-center gap-2 text-sm text-zinc-400">
+            <label className="flex items-center gap-2 text-sm text-zinc-300">
               Country
               <select
                 value={country}
@@ -722,48 +828,56 @@ function PayoutsStep({
                   </option>
                 ))}
               </select>
+              <span className="text-xs text-zinc-400">Where your bank is.</span>
             </label>
           )}
-          <Primary
+          <button
+            className={btn.primary}
             disabled={busy}
             onClick={() => {
               setBusy(true);
               setError(null);
               void d
                 .startPayouts(country)
-                .catch((e) => setError(ipcMessage(e)))
+                .catch((e) => setError(say(e)))
                 .finally(() => setBusy(false));
             }}
           >
             {busy ? "Opening Stripe…" : info.started ? "Continue Stripe setup" : "Set up payouts with Stripe"}
-          </Primary>
-          <span className="text-xs text-zinc-500">Opens in your browser; come back here after.</span>
+          </button>
+          <span className="text-xs text-zinc-400">Opens in your browser; come back here after.</span>
         </div>
       )}
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <p className="text-xs text-zinc-500">
-        Until payouts are ready, your page can't take payments. Test hijacks still work.
+      {error && <p className="text-sm text-red-300">{error}</p>}
+      <p className="text-sm text-zinc-300">
+        Until payouts are ready, chat can't pay you. Test hijacks still work.
       </p>
-      <div className="flex items-center gap-4">
-        <Primary onClick={next}>Continue</Primary>
-        {!ready && <Skip next={next} label="Later, from the dashboard" />}
+      <div className="flex items-center gap-3">
+        {/* Primary only once there's nothing left to do here. */}
+        <button className={todo || info === "loading" ? btn.ghost : btn.primary} onClick={next}>
+          Continue
+        </button>
       </div>
     </Card>
   );
 }
 
-// ── Step 5: Stream safety ─────────────────────────────────────────────────
+// ── Step 5: Safety ────────────────────────────────────────────────────────
 
 /** What each platform asks of the streamer when viewers can restyle their
- *  stream with AI (docs/CONTENT-SAFETY.md §1). Plain-language, and every box
- *  must be ticked — this is the step that can't be skipped. */
-const SAFETY_CHECKS: { id: string; text: React.ReactNode }[] = [
+ *  stream with AI (docs/CONTENT-SAFETY.md §1). The legal wording of each box
+ *  is verbatim (it's an acknowledgement); the bold headline above it is the
+ *  plain-language handle. Every box must be ticked — this is the step that
+ *  can't be skipped. */
+const SAFETY_CHECKS: { id: string; headline: string; text: React.ReactNode }[] = [
   {
     id: "own-content",
+    headline: "You own what's on stream",
     text: "Whatever the AI shows on my stream counts as my content under Twitch, YouTube and Kick rules — nudity or sexual content can get my channel banned even if a viewer asked for it.",
   },
   {
     id: "panic",
+    headline: "Know your panic key",
     text: (
       <>
         If anything looks wrong I'll press <Keycap>{PANIC_KEY}</Keycap> — it works from any
@@ -774,10 +888,12 @@ const SAFETY_CHECKS: { id: string; text: React.ReactNode }[] = [
   },
   {
     id: "disclosure",
+    headline: "Tell your viewers it's AI",
     text: "I'll disclose AI effects where my platform asks: Kick needs it in my title or on screen (the \"AI-altered\" label covers this), and YouTube asks me to tick its altered-content box for realistic changes.",
   },
   {
     id: "likeness",
+    headline: "Photos need consent",
     text: "Face swaps only use photos viewers have consent for, and never of anyone under 18 or of real public figures. I can require my own approval for every swap.",
   },
 ];
@@ -788,12 +904,11 @@ function SafetyStep({ state, next }: { state: SetupState; next: () => void }) {
   return (
     <Card>
       <p className="text-zinc-300">
-        Viewers always write their own prompt and can add a photo. Every word and image is
-        checked by AI moderators before it reaches the model — and before the viewer can pay.
-        The presets on your page are examples of what works well, not the only options. A few
-        things are still on you:
+        Viewers always write their own prompt and can add a photo. We check every word and
+        photo before it reaches your stream, and before anyone pays. The effects on your page
+        are examples, not the only options. A few things are still your job:
       </p>
-      <div className="space-y-2">
+      <div className="space-y-3">
         {SAFETY_CHECKS.map((c) => (
           <label key={c.id} className="flex cursor-pointer items-start gap-3 text-sm text-zinc-300">
             <input
@@ -802,19 +917,23 @@ function SafetyStep({ state, next }: { state: SetupState; next: () => void }) {
               onChange={(e) => setTicked({ ...ticked, [c.id]: e.target.checked })}
               className="mt-1"
             />
-            <span>{c.text}</span>
+            <span>
+              <b className="block text-base text-zinc-100">{c.headline}</b>
+              {c.text}
+            </span>
           </label>
         ))}
       </div>
-      <p className="text-xs text-zinc-500">
+      <p className="text-sm text-zinc-400">
         {state.cloudMode
-          ? "You can tighten this anytime from your dashboard: require your approval for each effect, limit photos to scenes, or switch custom prompts off."
-          : "In local mode you supply the moderation keys (studio → Advanced → credentials). Without them, custom prompts and photos stay off."}
+          ? "You can tighten this any time in your studio or dashboard: approve each request first, limit photos to scenes and objects, or turn off custom ideas."
+          : "In this version, custom ideas and photos stay off until safety checks are set up."}
       </p>
-      <div className="flex items-center gap-4">
-        <Primary onClick={next} disabled={!all}>
-          I understand — continue
-        </Primary>
+      <div className="flex flex-wrap items-center gap-3">
+        <button className={btn.primary} onClick={next} disabled={!all}>
+          I understand, continue
+        </button>
+        {!all && <span className="text-sm text-zinc-400">Tick all four to continue.</span>}
       </div>
     </Card>
   );
@@ -824,38 +943,43 @@ function SafetyStep({ state, next }: { state: SetupState; next: () => void }) {
 
 const TEST_PROMPT = "Retro 1980s anime cel-shaded style, bold ink outlines, neon sunset gradients";
 const TEST_SEC = 10;
+/** The model usually answers in 2–5 s; the visible countdown starts here. */
+const WARMUP_SEC = 5;
 
 const PHASE_LABEL: Record<RouterState, string> = {
   OFFLINE: "camera off",
   IDLE: "ready",
   AUTHORIZING: "starting",
-  CONNECTING: "connecting to the model",
-  BUFFERING: "warming up — a few seconds",
+  CONNECTING: "connecting",
+  BUFFERING: "warming up",
   LIVE: "LIVE",
-  TEARDOWN: "reverting",
+  TEARDOWN: "going back to normal",
 };
 
 /** The wizard IS the router here (useRouterEngine): it arms the camera the
- *  streamer picked, fires the free test, shows the model's output inline,
+ *  streamer picked, fires the free test, shows the AI's output inline,
  *  and then asks the only question that matters — did you see it? */
 function TestStep({
   d,
   state,
   cameraId,
   next,
+  onBusy,
 }: {
   d: RhDesktopSetup;
   state: SetupState;
   cameraId: string | undefined;
-  next: () => void;
+  next: (passed: boolean) => void;
+  onBusy: (busy: boolean) => void;
 }) {
   const r = useRouterEngine();
   const [phase, setPhase] = useState<"idle" | "firing" | "running" | "ended">("idle");
-  const [outcome, setOutcome] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sawLive, setSawLive] = useState(false);
   const [verdict, setVerdict] = useState<"yes" | "no" | null>(null);
   const [overlayNote, setOverlayNote] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const armedOnce = useRef(false);
 
   useEffect(() => {
@@ -863,6 +987,12 @@ function TestStep({
     armedOnce.current = true;
     void r.arm(cameraId);
   }, [r, cameraId]);
+
+  // Leaving mid-run would strand the router page: the parent disables Back.
+  useEffect(() => {
+    onBusy(phase === "firing" || phase === "running");
+    return () => onBusy(false);
+  }, [phase, onBusy]);
 
   // Phase tracking off the real machine state: firing → (any non-idle
   // state) running → back to IDLE ended. "Saw live" is the truth we compare
@@ -881,8 +1011,19 @@ function TestStep({
     return () => clearTimeout(t);
   }, [phase]);
 
+  // Seconds since the press, for the visible "Starting… 3".
+  useEffect(() => {
+    if (phase !== "firing" && phase !== "running") return;
+    const t0 = Date.now();
+    setElapsed(0);
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(t);
+  }, [phase]);
+
   const armed = r.cameraStream !== null && r.state !== "OFFLINE";
   const model = state.decartEnabled;
+  const warming = (phase === "firing" || phase === "running") && r.state !== "LIVE" && r.state !== "TEARDOWN";
+  const countdown = Math.max(0, WARMUP_SEC - elapsed);
 
   function fire() {
     setError(null);
@@ -893,7 +1034,7 @@ function TestStep({
     d.testHijack(TEST_PROMPT, TEST_SEC)
       .then(setOutcome)
       .catch((e) => {
-        setError(ipcMessage(e));
+        setError(say(e));
         setPhase("idle");
       });
   }
@@ -909,8 +1050,13 @@ function TestStep({
           tone={armed ? (r.camera?.usingObs ? "ok" : "warn") : "warn"}
         />
         <Chip label="OBS" value={obsConnected ? "connected" : "not connected"} tone={obsConnected ? "ok" : "warn"} />
-        <Chip label="AI model" value={model ? "live" : "demo (passthrough)"} tone={model ? "ok" : "warn"} />
+        {!model && <Chip label="Mode" value="Demo mode" tone="warn" />}
       </div>
+
+      {/* The loudest line on the step: Preview shows the wrong picture. */}
+      <p className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-base font-bold text-amber-100">
+        Watch OBS's Program view, not the Preview.
+      </p>
 
       {/* What to expect — stated BEFORE the button, so "nothing happened"
           has something concrete to be compared with. */}
@@ -918,24 +1064,23 @@ function TestStep({
         <p className="mb-2 font-semibold text-zinc-100">What happens when you press the button</p>
         <ol className="list-decimal space-y-1 pl-5">
           <li>
-            For 2–5 seconds nothing visible changes while the model connects (the pill says
+            For 2–5 seconds nothing visible changes while the AI starts up (the label says
             "warming up").
           </li>
           {model ? (
             <li>
-              Then, for about {TEST_SEC} seconds, the preview below turns into <b>retro 80s
-              anime</b> — and in OBS, the <b>AI Hijack</b> source appears over your camera.
-              Watch OBS's <b>Program</b> view, not the preview.
+              Then, for about {TEST_SEC} seconds, the preview below turns into <b>80s Anime</b>,
+              and in OBS the <b>AI Hijack</b> overlay appears over your camera.
             </li>
           ) : (
             <li>
-              This build has <b>no AI model connected</b>, so the picture won't change style.
-              What you should see for {TEST_SEC} seconds: the <b>AI Hijack</b> source appears in
-              OBS over your camera, showing the same picture with an <b>"AI-altered"</b> label.
-              That proves the OBS wiring; the real effect needs the hosted sign-in.
+              This version has <b>no AI connected</b>, so the picture won't change style. For{" "}
+              {TEST_SEC} seconds you should see the <b>AI Hijack</b> overlay appear in OBS over
+              your camera, showing the same picture with an <b>"AI-altered"</b> label. That
+              proves the OBS connection; the real effect needs you to sign in.
             </li>
           )}
-          <li>Then everything reverts on its own. No viewer is charged for this.</li>
+          <li>Then everything goes back to normal on its own. Nobody is charged for this.</li>
         </ol>
       </div>
 
@@ -944,29 +1089,45 @@ function TestStep({
           stream={r.aiStream ?? r.cameraStream}
           className="aspect-video w-full object-contain"
         />
-        <span className="absolute left-3 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-zinc-300">
-          {r.aiStream ? "AI output" : armed ? "Your camera (effect not running)" : "Camera off"}
+        <span className="absolute left-3 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-zinc-200">
+          {r.aiStream ? "Effect" : armed ? "Your camera" : "Camera off"}
         </span>
-        {phase === "running" && (
-          <span className="absolute right-3 top-2 rounded bg-brand-600 px-2 py-0.5 text-xs font-semibold">
-            {PHASE_LABEL[r.state]}
-            {r.state === "LIVE" && r.remainingSec != null ? ` · ${r.remainingSec}s left` : ""}
+        {(phase === "running" || phase === "firing") && (
+          <span
+            role="status"
+            className="absolute right-3 top-2 rounded bg-brand-600 px-2 py-0.5 text-sm font-semibold"
+          >
+            {warming
+              ? countdown > 0
+                ? `Starting… ${countdown}`
+                : "Starting…"
+              : `${PHASE_LABEL[r.state]}${r.state === "LIVE" && r.remainingSec != null ? ` · ${r.remainingSec}s left` : ""}`}
           </span>
         )}
       </div>
 
-      {r.armError && <p className="text-sm text-red-400">Camera failed: {r.armError}</p>}
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {r.armError && <p className="text-sm text-red-300">{cameraError(r.armError)}</p>}
+      {error && <p className="text-sm text-red-300">{error}</p>}
       {outcome && phase === "firing" && (
-        <p className="text-sm text-zinc-400">Sent ({outcome}) — waiting for the model…</p>
+        <p className="text-sm text-zinc-300">Sent. Waiting for the AI…</p>
       )}
 
       {phase !== "ended" && (
-        <div className="flex items-center gap-4">
-          <Primary onClick={fire} disabled={!armed || phase === "firing" || phase === "running"}>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className={btn.primary}
+            onClick={fire}
+            disabled={!armed || phase === "firing" || phase === "running"}
+          >
             {phase === "firing" || phase === "running" ? "Running…" : `Run the ${TEST_SEC}-second test`}
-          </Primary>
-          <Skip next={next} label="Skip the test" />
+          </button>
+          <button
+            className={btn.ghost}
+            disabled={phase === "firing" || phase === "running"}
+            onClick={() => next(false)}
+          >
+            Skip the test
+          </button>
         </div>
       )}
 
@@ -978,8 +1139,10 @@ function TestStep({
               : 'Did the "AI-altered" layer appear over your camera in OBS?'}
           </p>
           <div className="flex items-center gap-3">
-            <Primary onClick={() => { setVerdict("yes"); next(); }}>Yes — it worked</Primary>
-            <Secondary onClick={() => setVerdict("no")}>No, I saw nothing</Secondary>
+            <button className={btn.primary} onClick={() => { setVerdict("yes"); next(true); }}>
+              Yes — it worked
+            </button>
+            <button className={btn.secondary} onClick={() => setVerdict("no")}>No, I saw nothing</button>
           </div>
         </div>
       )}
@@ -990,20 +1153,25 @@ function TestStep({
           <ul className="list-disc space-y-1.5 pl-5">
             {!sawLive && (
               <li>
-                The effect <b>never went live</b> on this side
-                {outcome ? ` (the engine said: ${outcome})` : ""}. The last events were:
-                <div className="mt-1 max-h-24 overflow-y-auto rounded bg-black/40 p-2 font-mono text-xs text-zinc-400">
-                  {r.logLines.slice(0, 5).map((l, i) => (
-                    <div key={i}>{l}</div>
-                  ))}
-                </div>
+                The effect <b>never started</b> on this side. Run the test again, and make
+                sure hijacks aren't paused.
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-xs text-zinc-400">Show details</summary>
+                  {outcome && <div className="mt-1 text-xs text-zinc-400">Result: {say(outcome)}</div>}
+                  <div className="mt-1 max-h-24 overflow-y-auto rounded bg-black/40 p-2 font-mono text-xs text-zinc-400">
+                    {r.logLines.slice(0, 5).map((l, i) => (
+                      <div key={i}>{l}</div>
+                    ))}
+                  </div>
+                </details>
               </li>
             )}
             {sawLive && (
               <li>
-                The effect <b>did go live here</b> — so the model worked and the problem is
-                in OBS: the AI Hijack source may be in a different scene than the one you're
-                outputting, or sit <b>below</b> your camera. Drag it to the top of the Sources list.
+                The effect <b>did go live here</b>, so the AI worked and the problem is in
+                OBS: the AI Hijack overlay may be in a different scene than the one you're
+                streaming, or sit <b>below</b> your camera. Drag it to the top of the Sources
+                list.
               </li>
             )}
             {!obsConnected && (
@@ -1015,42 +1183,43 @@ function TestStep({
             {r.camera && !r.camera.usingObs && (
               <li>
                 The camera in use is <b>{r.camera.label}</b>, not OBS's Virtual Camera. Go back
-                to Camera and start the Virtual Camera.
+                to Pick your camera and start the Virtual Camera.
               </li>
             )}
             {!model && (
               <li>
-                This build has <b>no AI model</b>: the picture doesn't change style. Look for
-                the "AI-altered" label on the overlay, not for anime.
+                This version has <b>no AI connected</b>: the picture doesn't change style.
+                Look for the "AI-altered" label on the overlay, not for anime.
               </li>
             )}
             {sawLive && obsConnected && (
               <li>
-                Re-adding the source puts it back in the current scene, on top:
+                Add the overlay again. This puts it back on top in your current scene.
                 <div className="mt-1">
-                  <Secondary
+                  <button
+                    className={btn.secondary}
                     onClick={() =>
                       void d
                         .provisionObs()
-                        .then((p) => setOverlayNote(p.ok ? `✓ ${p.detail}` : p.detail))
-                        .catch((e) => setOverlayNote(ipcMessage(e)))
+                        .then((p) => setOverlayNote(p.ok ? `✓ ${p.detail}` : "Couldn't add the overlay. Make sure OBS is open, then try again."))
+                        .catch((e) => setOverlayNote(say(e)))
                     }
                   >
-                    Add the AI Hijack source again
-                  </Secondary>
+                    Add the AI Hijack overlay again
+                  </button>
                   {overlayNote && <span className="ml-2 text-xs text-zinc-300">{overlayNote}</span>}
                 </div>
               </li>
             )}
           </ul>
-          <p className="text-xs text-zinc-400">
+          <p className="text-sm text-zinc-300">
             {state.cloudMode
-              ? "The hosted service allows one free test per day; if it's used up, the 'Run' button says so. You can always run an effect on yourself from the studio once a viewer has paid for one."
-              : "Local mode has no limit — fix the item above and run it again."}
+              ? "You get one free test a day. If it's used, the button says so. You can still try effects on yourself from the studio later."
+              : "There's no limit in this version. Fix the item above and run it again."}
           </p>
           <div className="flex items-center gap-3">
-            <Primary onClick={fire} disabled={!armed}>Run it again</Primary>
-            <Skip next={next} label="Continue anyway" />
+            <button className={btn.primary} onClick={fire} disabled={!armed}>Run it again</button>
+            <button className={btn.ghost} onClick={() => next(false)}>Continue anyway</button>
           </div>
         </div>
       )}
@@ -1060,23 +1229,61 @@ function TestStep({
 
 // ── Step 7: Done ──────────────────────────────────────────────────────────
 
-function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
+function DoneStep({
+  d,
+  state,
+  progress,
+}: {
+  d: RhDesktopSetup;
+  state: SetupState;
+  progress: Progress;
+}) {
   const [auto, setAuto] = useState(state.autoLaunch);
   const [finishing, setFinishing] = useState(false);
+  const [payoutsReady, setPayoutsReady] = useState<boolean | null>(null);
   const portal = state.portalUrl;
+
+  useEffect(() => {
+    if (!state.cloudMode) return;
+    void d.payouts().then((p) => setPayoutsReady(Boolean(p?.enabled))).catch(() => setPayoutsReady(false));
+  }, [d, state.cloudMode]);
+
+  const items: { ok: boolean; text: string }[] = [
+    { ok: state.obs.connected, text: state.obs.connected ? "OBS connected" : "OBS not connected" },
+    { ok: progress.overlay, text: progress.overlay ? "Overlay added" : "Overlay not added" },
+    { ok: progress.camera, text: progress.camera ? "Camera chosen" : "Camera not chosen" },
+    state.cloudMode
+      ? payoutsReady
+        ? { ok: true, text: "Payouts ready" }
+        : { ok: false, text: "Payouts not set up. Chat can't pay yet" }
+      : { ok: false, text: "Payments not on in this version" },
+    { ok: true, text: "Safety rules acknowledged" },
+    progress.test === "passed"
+      ? { ok: true, text: "Test hijack worked" }
+      : { ok: false, text: progress.test === "skipped" ? "Test hijack skipped" : "Test hijack not run" },
+  ];
+
   return (
     <Card>
-      <h2 className="text-lg font-bold text-emerald-400">You're set up 🎉</h2>
+      <h2 className="text-lg font-bold text-emerald-400">You're all set.</h2>
+      <ul className="space-y-1 text-sm" aria-label="What's set up">
+        {items.map((it) => (
+          <li key={it.text} className={it.ok ? "text-zinc-200" : "text-amber-300"}>
+            <span aria-hidden>{it.ok ? "✓ " : "– "}</span>
+            {it.text}
+          </li>
+        ))}
+      </ul>
       {portal ? (
         <>
-          <p className="text-zinc-300">Share your viewer page in chat or a panel:</p>
+          <p className="text-zinc-300">Share your hijack page in chat or a panel:</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 break-all rounded bg-zinc-900 p-2 text-xs">
               {portal}
             </code>
             <button
               onClick={() => void navigator.clipboard.writeText(portal)}
-              className="rounded bg-zinc-800 px-3 py-2 text-xs hover:bg-zinc-700"
+              className={btn.secondary}
             >
               Copy
             </button>
@@ -1084,9 +1291,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
         </>
       ) : (
         <p className="text-zinc-300">
-          Local mode: viewers use{" "}
-          <code className="text-xs">http://127.0.0.1:{state.port}/portal</code>{" "}
-          on this machine.
+          Chat can't reach this version. It only runs on your computer.
         </p>
       )}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-300">
@@ -1097,9 +1302,9 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
             hijack.
           </li>
           <li>
-            Panic: press <Keycap>{PANIC_KEY}</Keycap> from any app, or use the {TRAY_NAME}. The
-            effect disappears from your stream at once and new hijacks wait until you press it
-            again or click Resume.
+            Panic key: press <Keycap>{PANIC_KEY}</Keycap> from any app, or use the {TRAY_NAME}.
+            The effect disappears from your stream at once and new hijacks wait until you
+            press it again or click Resume.
           </li>
         </ul>
       </div>
@@ -1116,15 +1321,16 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
       </label>
       {/* Marks setup done and relaunches: from now on the app opens straight
           into the studio, and any key pasted in step 1 is loaded. */}
-      <Primary
+      <button
+        className={btn.primary}
         disabled={finishing}
         onClick={() => {
           setFinishing(true);
           void d.setupComplete();
         }}
       >
-        {finishing ? "Restarting…" : "Open the studio →"}
-      </Primary>
+        {finishing ? "Opening the studio…" : "Open the studio"}
+      </button>
     </Card>
   );
 }

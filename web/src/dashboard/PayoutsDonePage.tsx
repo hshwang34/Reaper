@@ -6,11 +6,10 @@ export default function PayoutsDonePage() {
   return (
     <div className="grid h-screen place-items-center p-6 text-center">
       <div className="max-w-sm space-y-3">
-        <h1 className="text-2xl font-bold">Stripe setup saved</h1>
-        <p className="text-zinc-400">
-          You can close this tab and go back to Stream Hijack — it picks up
-          your payout status on its own. If Stripe still needs something from
-          you, the app will offer to continue.
+        <h1 className="text-2xl font-bold">Back to Stream Hijack</h1>
+        <p className="text-zinc-300">
+          Close this tab and go back to the app. We'll check your payout status. If Stripe needs more from you, the
+          app will say so.
         </p>
       </div>
     </div>

@@ -199,22 +199,22 @@ export async function createSubmission(
   const preset = presetId ? getPreset(presetId) : undefined;
 
   if (presetId) {
-    if (!preset) return { ok: false, status: 400, error: "unknown preset" };
+    if (!preset) return { ok: false, status: 400, error: "That effect doesn't exist." };
     if (!presetAllowed(preset, s)) {
       return { ok: false, status: 403, error: "this effect isn't available on this stream" };
     }
     // lucy-2.5 character substitution with no reference image is a paid no-op.
     if (preset.needsImage && !input.image) {
-      return { ok: false, status: 400, error: "this effect needs a reference image" };
+      return { ok: false, status: 400, error: "This effect needs a photo." };
     }
     prompt = preset.prompt;
     finalPresetId = preset.id;
   } else if (customPrompt) {
     if (s.customPrompts === "off") {
-      return { ok: false, status: 403, error: "custom prompts are disabled by the streamer" };
+      return { ok: false, status: 403, error: "Custom effects are off on this stream." };
     }
     if (!textReady(moderation)) {
-      return { ok: false, status: 503, error: "custom prompts are unavailable right now — pick a preset" };
+      return { ok: false, status: 503, error: "Custom effects are off right now. Pick an effect instead." };
     }
     prompt = customPrompt;
     finalPresetId = null;
@@ -223,12 +223,12 @@ export async function createSubmission(
       reviewWhy = "approval tier";
     }
   } else {
-    return { ok: false, status: 400, error: "provide a preset or a custom prompt" };
+    return { ok: false, status: 400, error: "Pick an effect or describe your own." };
   }
 
   if (input.image) {
     if (s.referenceImages === "off") {
-      return { ok: false, status: 403, error: "reference images are disabled by the streamer" };
+      return { ok: false, status: 403, error: "Photos are off on this stream." };
     }
     if (!imagesReady(moderation)) {
       return { ok: false, status: 503, error: "photo uploads are unavailable right now" };
@@ -283,7 +283,7 @@ export async function createSubmission(
       status: 503,
       error:
         text?.verdict === "unavailable"
-          ? "custom prompts are unavailable right now — pick a preset"
+          ? "Custom effects are off right now. Pick an effect instead."
           : "photo uploads are unavailable right now",
       findings: [],
       checks: checks(),

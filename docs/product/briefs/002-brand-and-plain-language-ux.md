@@ -94,3 +94,48 @@ their money buys. Our users are streamers and their chat — not software engine
 - Rewriting copy can silently change meaning on money/safety screens — the reviewer's money
   and safety checklists apply to copy too.
 - Playful voice in error states reads as mocking; errors stay plain.
+
+## Resume 2026-10-21 (updated 2026-10-21 morning) — where PR 2 stands
+
+PR 1 (#25) **merged** to `main` at fb0569c; main CI green. PR 2 lives on branch
+`feature-brand-ux-2` (worktree `.claude/worktrees/feature-brand-ux-2`), **rebased onto main
+(fb0569c) on 2026-10-21 morning — clean, no conflicts**; no PR opened yet. Commits after the
+rebase: `acec613` BRAND vocabulary for streamer surfaces · `34aef13` Stripe-cancel message
+(isolated, revertable) · `33f92a9` pass A (setup wizard, friendlyError, server/app-shell
+strings; all five gates were green before the rebase) · `715b721` **WIP** pass B (studio,
+dashboard, previews, undo/confirm, blocklist over all of web/src; `npm run check` was green
+before the rebase, e2e gates NOT re-run after the last UI edits; tour was 40/41 with two flaky
+steps: "preview goes live on my camera" and "OBS readiness says where the overlay is") ·
+`98668c6` this note + the pass B work order (`002-pr2b-work-order.md` beside this file;
+sections A–C and E done, D (gates) not).
+
+The morning resume was stopped by the session's permission classifier (it denied commands
+triggered by the orchestrator session, including `npm run check`); no gate has run on the
+rebased branch yet. Decision #21 (eng lead merges on green, superseding #11) was requested by
+the orchestrator but is **not logged** — the PM confirms it directly before it goes in.
+
+**Single next step (run from the worktree, Node 24 on PATH; the Electron binary in
+`node_modules/electron/dist` is restored):** `npm run check` → `npm run e2e` → `npm run
+e2e:wizard` → `npm run e2e:hosted` → `npm run tour`; triage the two flaky tour steps (fix or
+make the step wait on its real signal, never loosen the assertion); then the tester + a
+fresh-context reviewer on the branch diff; then open PR 2 against `main` with both "Expired"
+wordings and the Stripe-cancel commit flagged for the PM. Merge only per whichever of #11 / #21
+the PM has confirmed.
+
+Open product items for the PM: (1) "Expired" refund sentence (kept old meaning); (2) keep or
+revert the Stripe-cancel commit (`34aef13`); (3) the PM's recording session for the effect
+previews (`/decart-test` → Record all effects, then `site/tools/encode-clips.sh --app`);
+(4) confirm decision #21 (eng lead merges on green) or keep #11 (PM merges) — the shared `pm`
+skill already says the eng lead merges.
+
+## Close-out 2026-10-21 afternoon — PR 2 ships as-is
+
+The PM closed Reality Hijack out to focus on other projects (decision #22): everything
+outstanding goes to `main` and the product launches as it stands. All five gates ran green on
+the rebased branch from the orchestrator session: `check` (core 88, web 45, server 33, sidecar
+11, app 7), `e2e` 29/29, `e2e:wizard` 11/11, `e2e:hosted` 42/42, `tour` 41/41 (the two
+previously flaky steps passed; not hardened). Product items (1) and (2) above are kept as-is;
+(4) is logged as decision #21; (3) stays open — the effect previews and the site's "What's
+possible" section (branch `worktree-site-tip-demo`, mock clips only) wait on a real recording.
+PR 3 (website) is not started. Not done on this branch: the tester + fresh-context reviewer
+pass the work order asked for; the gates stand in for it.

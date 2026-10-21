@@ -112,7 +112,7 @@ function obsExecutable(): string {
 export async function launchObs(): Promise<void> {
   const target = obsExecutable();
   if (!existsSync(target)) {
-    throw new Error("OBS isn't in its default install location — start it yourself and this page connects on its own.");
+    throw new Error("We couldn't find OBS. Open it yourself and we'll connect.");
   }
   if (process.platform === "win32") {
     // OBS must start with its own bin dir as the working directory, or it

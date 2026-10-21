@@ -174,6 +174,8 @@ export default function PortalPage() {
   const [fromCheckout, setFromCheckout] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  /** Backed out of Stripe Checkout (?cancelled=1): tell them nothing was charged. */
+  const [cancelledPay, setCancelledPay] = useState(false);
   /** A photo-only effect was submitted without its photo: highlight the drop zone. */
   const [photoMissing, setPhotoMissing] = useState(false);
   const dropRef = useRef<HTMLLabelElement>(null);
@@ -217,6 +219,11 @@ export default function PortalPage() {
       setFromCheckout(true);
       setReceipt(loadReceipt(back));
       setStatus({ code: back, state: "pending", message: "Payment received. Your effect is next in line." });
+      history.replaceState(null, "", location.pathname);
+    }
+    // Backed out of Stripe (cancel_url → ?cancelled=1). Say so, then clean the URL.
+    if (new URLSearchParams(location.search).get("cancelled") === "1") {
+      setCancelledPay(true);
       history.replaceState(null, "", location.pathname);
     }
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -541,6 +548,14 @@ export default function PortalPage() {
 
   return (
     <div className={`mx-auto max-w-6xl px-4 pt-2 sm:px-6 ${code || !chosen ? "pb-10" : "pb-48 lg:pb-10"}`}>
+      {cancelledPay && (
+        <div
+          role="status"
+          className="mb-6 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200"
+        >
+          Payment cancelled. Nothing was charged.
+        </div>
+      )}
       {offline && (
         <div
           role="status"

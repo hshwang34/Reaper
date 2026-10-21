@@ -130,6 +130,7 @@ function startFakeStripe(port, serverBase) {
         fee: Number(f["payment_intent_data[application_fee_amount]"]),
         metadata: { paymentId: f["metadata[paymentId]"], channelId: f["metadata[channelId]"], code: f["metadata[code]"] },
         successUrl: f.success_url,
+        cancelUrl: f.cancel_url,
         paymentIntent: `pi_e2e_${n}`,
       });
       return json(200, { id, object: "checkout.session", url: `http://127.0.0.1:${port}/pay/${id}` });
@@ -430,13 +431,24 @@ async function main() {
   // hijack is over, so look for the "Payment received" status instead.
   check(
     "Pay → Checkout → back on the portal, showing the paid status",
-    await waitFor(async () => /payment received|in the queue|live on stream|hijack complete/i.test(await portal.locator("body").innerText()), 20_000),
+    await waitFor(async () => /payment received|in line|live on stream|hijack complete/i.test(await portal.locator("body").innerText()), 20_000),
     portal.url().replace(serverBase, ""),
   );
   check("signed webhook accepted (200)", stripeState.webhooks.at(-1)?.status === 200, JSON.stringify(stripeState.webhooks.at(-1)));
   const s1 = [...stripeState.sessions.values()].at(-1);
   check("direct charge on the streamer's account", s1?.account === ACCOUNT);
   check("application fee = GPU + margin (4s → 28¢)", s1?.fee === 28, `${s1?.fee}¢ of ${s1?.amount}¢`);
+  // Backing out of Stripe: cancel_url carries ?cancelled=1 (success_url stays paid=…),
+  // and the portal tells the viewer nothing was charged.
+  check("checkout cancel_url carries cancelled=1", /[?&]cancelled=1$/.test(s1?.cancelUrl ?? "") && /paid=/.test(s1?.successUrl ?? ""), s1?.cancelUrl);
+  const cancelPage = await (await browser.newContext()).newPage();
+  await cancelPage.goto(`${serverBase}/c/${LOGIN}?cancelled=1`);
+  check(
+    "portal says nothing was charged after backing out of Stripe",
+    await waitFor(async () => /payment cancelled\. nothing was charged/i.test(await cancelPage.locator("body").innerText()), 15_000),
+  );
+  check("…and cleans ?cancelled=1 from the URL", !cancelPage.url().includes("cancelled"));
+  await cancelPage.close();
 
   const shown = await waitFor(async () => obsCalls.some((c) => c.visible === true), 30_000);
   check("OBS unhidden after the buffering gate", shown, shown ? `${Date.now() - t0} ms after Pay` : "");

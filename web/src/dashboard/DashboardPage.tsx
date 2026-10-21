@@ -1,5 +1,4 @@
-// Streamer dashboard v0 (hosted) — plan M4: per-channel settings + tip
-// connect + the hijack ledger. Session model: the OAuth callback redirects
+// Streamer dashboard (hosted) — per-channel Rules + Payouts + Recent hijacks. Session model: the OAuth callback redirects
 // here with #code=… (a single-use, ~60s exchange code — never the refresh
 // token itself, which would sit in browser history); we redeem it once for a
 // session, keep the access token in memory and the refresh in localStorage,
@@ -20,6 +19,9 @@ import {
   type SessionTokens,
 } from "../lib/apiClient.js";
 import { SafetyEditor } from "../features/SafetyEditor.js";
+import { friendlyStreamerError } from "../lib/friendlyError.js";
+import { effectName, hijackReason, hijackResult } from "../lib/streamerCopy.js";
+import { ConfirmDialog, ErrorCard, Skeleton, btn } from "../studio/ui.js";
 import { ModerationPanel, ReviewPanel } from "../features/SafetyPanels.js";
 import { PayoutsPanel } from "./PayoutsPanel.js";
 
@@ -49,14 +51,14 @@ export default function DashboardPage() {
       if (code) history.replaceState(null, "", location.pathname);
       if (code) {
         const s = remember(await redeemExchangeCode(code));
-        if (!s) setProblem("That sign-in link has expired — please sign in again.");
+        if (!s) setProblem("That sign-in link has expired. Sign in again.");
         setSession(s);
       } else {
         // 2. Returning visit: rotate the stored refresh token.
         const refresh = localStorage.getItem(REFRESH_KEY);
         if (refresh) {
           const s = remember(await rotateRefresh(refresh));
-          if (!s) setProblem("Your session has expired — please sign in again.");
+          if (!s) setProblem("You were signed out. Sign in again.");
           setSession(s);
         }
       }
@@ -66,8 +68,8 @@ export default function DashboardPage() {
 
   if (!checked) {
     return (
-      <div className="grid h-screen place-items-center text-zinc-500">
-        Loading…
+      <div className="grid h-screen place-items-center text-zinc-400">
+        Loading your dashboard…
       </div>
     );
   }
@@ -75,11 +77,15 @@ export default function DashboardPage() {
     return (
       <div className="grid h-screen place-items-center">
         <div className="space-y-4 text-center">
-          <h1 className="text-2xl font-bold">Your creator dashboard</h1>
-          {problem && <p className="text-sm text-amber-400">{problem}</p>}
+          <h1 className="text-2xl font-bold">Your studio dashboard</h1>
+          {problem && (
+            <p role="alert" className="text-sm text-amber-300">
+              {problem}
+            </p>
+          )}
           <a
             href="/auth/twitch"
-            className="inline-block rounded-lg bg-brand-600 px-5 py-2 font-semibold hover:bg-brand-700"
+            className={btn.primary}
           >
             Sign in with Twitch
           </a>
@@ -118,143 +124,187 @@ function Dashboard({
   );
 
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [ledger, setLedger] = useState<LedgerRow[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  // Errors belong next to the thing that failed, never one global line.
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
 
-  /** Run a call; a 401 that survived rotation means the session is gone. */
-  async function guarded<T>(work: () => Promise<T>): Promise<T | undefined> {
+  /** Run a call; a 401 that survived rotation means the session is gone.
+   *  Any other failure goes to `onFail` as a sentence, not a raw message. */
+  async function guarded<T>(work: () => Promise<T>, onFail: (message: string) => void): Promise<T | undefined> {
     try {
-      const out = await work();
-      setError(null);
-      return out;
+      return await work();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        onSignedOut("Your session has expired — please sign in again.");
+        onSignedOut("You were signed out. Sign in again.");
         return undefined;
       }
-      setError((e as Error).message);
+      onFail(friendlyStreamerError(e));
       return undefined;
     }
   }
 
+  const loadSettings = () => {
+    setSettingsError(null);
+    void guarded(client.getSettings, setSettingsError).then((s) => s && setSettings(s));
+  };
+  const loadLedger = () => {
+    setLedgerError(null);
+    void guarded(client.ledger, setLedgerError).then((rows) => rows && setLedger(rows));
+  };
   useEffect(() => {
-    void guarded(client.getSettings).then((s) => s && setSettings(s));
-    void guarded(client.ledger).then((rows) => rows && setLedger(rows));
+    loadSettings();
+    loadLedger();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
   const flash = (text: string) => {
     setNote(text);
-    setTimeout(() => setNote(null), 1500);
+    setTimeout(() => setNote(null), 3500);
   };
 
   async function save(patch: Partial<Settings>) {
-    const next = await guarded(() => client.saveSettings(patch));
+    setSaveError(null);
+    const next = await guarded(() => client.saveSettings(patch), (m) => setSaveError(`Couldn't save that. ${m}`));
     if (next) {
       setSettings(next);
-      flash("Saved.");
+      flash("Saved");
     }
   }
 
-  const portal = `${location.origin}/c/${encodeURIComponent(session.login)}`;
+  const hijackPage = `${location.origin}/c/${encodeURIComponent(session.login)}`;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
-      <header className="flex items-center justify-between">
+      {confirmSignOut && (
+        <ConfirmDialog
+          title="Sign out of Stream Hijack?"
+          body="Chat won't be able to pay until you sign in again."
+          confirmLabel="Sign out"
+          cancelLabel="Stay"
+          onCancel={() => setConfirmSignOut(false)}
+          onConfirm={() => onSignedOut("")}
+        />
+      )}
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <h1 className="text-2xl font-bold">Studio</h1>
           <p className="text-sm text-zinc-400">
             {session.login} ·{" "}
             <button
-              onClick={() => void navigator.clipboard.writeText(portal)}
-              className="underline"
-              title={portal}
+              onClick={() =>
+                void navigator.clipboard.writeText(hijackPage).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                })
+              }
+              className="inline-flex min-h-11 items-center underline"
+              title={hijackPage}
             >
-              copy portal link
+              {copied ? "Copied" : "Copy hijack link"}
             </button>
           </p>
         </div>
-        {note && <span className="text-sm text-emerald-400">{note}</span>}
-        {error && <span className="text-sm text-red-400">{error}</span>}
+        <div className="flex items-center gap-3">
+          {note && (
+            <span role="status" className="text-sm text-emerald-300">
+              {note}
+            </span>
+          )}
+          <button className={btn.ghost} onClick={() => setConfirmSignOut(true)}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       {/* In cloud mode the approval queue lives here (the control plane's
           engine holds parked jobs, not the streamer's local bridge). */}
       <ReviewPanel client={client} />
 
-      {settings && (
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-zinc-100">Viewer rules</h2>
-          {/* Hosted: every change autosaves — the channel row is the source
-              of truth and the engine reads it fresh on the next tip. */}
+      <section className="space-y-3" aria-busy={!settings && !settingsError}>
+        <h2 className="text-lg font-semibold text-zinc-100">Rules</h2>
+        {saveError && (
+          <p role="alert" className="text-sm text-red-300">
+            {saveError}
+          </p>
+        )}
+        {settings ? (
+          // Hosted: every change autosaves — the channel row is the source
+          // of truth and the engine reads it fresh on the next payment.
           <SafetyEditor settings={settings} onChange={(p) => void save(p)} />
-        </section>
-      )}
+        ) : settingsError ? (
+          <ErrorCard message={`We couldn't load your rules. ${settingsError}`} onRetry={loadSettings} />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-zinc-400">Loading your rules…</p>
+            <Skeleton className="h-28" />
+          </div>
+        )}
+      </section>
 
       <ModerationPanel
         client={client}
         settings={settings}
-        onBan={(name) =>
-          settings && void save({ bannedViewers: [...settings.bannedViewers, name] })
+        onBan={(name) => settings && void save({ bannedViewers: [...settings.bannedViewers, name] })}
+        onUnban={(name) =>
+          settings && void save({ bannedViewers: settings.bannedViewers.filter((x) => x !== name) })
         }
       />
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
-          Get paid
-        </h2>
+        <h2 className="mb-3 text-lg font-semibold text-zinc-100">Payouts</h2>
         <PayoutsPanel client={client} from="dashboard" />
       </section>
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
-          Hijack ledger
-        </h2>
-        {ledger.length === 0 ? (
-          <p className="text-sm text-zinc-500">No hijacks yet.</p>
+        <h2 className="mb-3 text-lg font-semibold text-zinc-100">Recent hijacks</h2>
+        {ledgerError ? (
+          <ErrorCard message="We couldn't load your earnings. Try again." onRetry={loadLedger} />
+        ) : ledger === null ? (
+          <div aria-busy="true" className="space-y-2">
+            <p className="text-sm text-zinc-400">Loading hijacks…</p>
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+          </div>
+        ) : ledger.length === 0 ? (
+          <p className="text-sm text-zinc-400">No hijacks yet. Share your hijack page and chat can start paying.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase text-zinc-500">
+              <thead className="text-xs uppercase text-zinc-400">
                 <tr>
                   <th className="py-1 pr-4">When</th>
                   <th className="py-1 pr-4">From</th>
-                  <th className="py-1 pr-4">Tip</th>
-                  <th className="py-1 pr-4">Secs</th>
-                  <th className="py-1 pr-4">Outcome</th>
-                  <th className="py-1">Prompt</th>
+                  <th className="py-1 pr-4">Paid</th>
+                  <th className="py-1 pr-4">Seconds</th>
+                  <th className="py-1 pr-4">Result</th>
+                  <th className="py-1">Effect</th>
                 </tr>
               </thead>
               <tbody className="text-zinc-300">
-                {ledger.map((r) => (
-                  <tr key={r.jobId} className="border-t border-zinc-900">
-                    <td className="py-1.5 pr-4 text-zinc-500">
-                      {new Date(r.createdAt).toLocaleString()}
-                    </td>
-                    <td className="py-1.5 pr-4">{r.username}</td>
-                    <td className="py-1.5 pr-4">${r.amountUsd}</td>
-                    <td className="py-1.5 pr-4">{r.durationSec}</td>
-                    <td
-                      className={`py-1.5 pr-4 ${
-                        r.outcome === "completed"
-                          ? "text-emerald-400"
-                          : r.outcome === "failed"
-                            ? "text-red-400"
-                            : "text-zinc-400"
-                      }`}
-                    >
-                      {r.outcome}
-                      {r.reason ? ` (${r.reason})` : ""}
-                    </td>
-                    <td
-                      className="max-w-[16rem] truncate py-1.5 text-zinc-500"
-                      title={r.prompt}
-                    >
-                      {r.prompt}
-                    </td>
-                  </tr>
-                ))}
+                {ledger.map((r) => {
+                  const o = hijackResult(r);
+                  const why = hijackReason(r);
+                  return (
+                    <tr key={r.jobId} className="border-t border-zinc-900">
+                      <td className="py-1.5 pr-4 text-zinc-400">{new Date(r.createdAt).toLocaleString()}</td>
+                      <td className="py-1.5 pr-4">{r.username || "someone in chat"}</td>
+                      <td className="py-1.5 pr-4 tabular-nums">{r.amountUsd > 0 ? `$${r.amountUsd}` : "Free test"}</td>
+                      <td className="py-1.5 pr-4 tabular-nums">{r.durationSec}</td>
+                      <td className={`py-1.5 pr-4 ${o.tone}`}>
+                        {o.label}
+                        {why && <span className="block text-xs text-zinc-400">{why}</span>}
+                      </td>
+                      <td className="max-w-[16rem] truncate py-1.5 text-zinc-400" title={effectName(r.prompt)}>
+                        {effectName(r.prompt)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
