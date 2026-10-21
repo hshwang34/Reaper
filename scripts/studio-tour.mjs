@@ -153,6 +153,8 @@ async function main() {
       SIGHTENGINE_API_SECRET: "",
       STRIPE_SECRET_KEY: "",
       STRIPE_WEBHOOK_SECRET: "",
+      // The wizard's test and the studio preview each use a free test.
+      RH_FREE_TESTS_PER_DAY: "5",
     },
     stdio: process.env.TOUR_VERBOSE ? "inherit" : "ignore",
   });
@@ -186,12 +188,10 @@ async function main() {
   await waitFor(async () => (await text(win)).includes(LOGIN), 10_000);
   await snap(win, "setup-1-signed-in");
   await button(win, /^continue$/i).click();
-  await button(win, /allow camera/i).click();
-  check("camera step captures a camera", await waitFor(async () => /Capturing/.test(await text(win)), 10_000));
-  await snap(win, "setup-2-camera");
-  await button(win, /looks good/i).click();
-  await waitFor(async () => /Connected to OBS/.test(await text(win)), 15_000);
-  await button(win, /add the overlay to obs/i).click();
+
+  // OBS first: the overlay is installed before the camera is chosen.
+  await waitFor(async () => /add the ai hijack source/i.test(await text(win)), 15_000);
+  await button(win, /add the ai hijack source/i).click();
   check(
     "OBS step installs into every webcam scene, in plain words",
     await waitFor(async () => /Installed in "Just Chatting" over "Facecam", "Gaming" over "Facecam"/.test(await text(win)), 10_000),
@@ -199,8 +199,14 @@ async function main() {
   );
   check("overlay sits directly above the webcam, under frame + alerts", obs.scene("Just Chatting").join() === "Background,Facecam,AI Hijack,Cam frame,Alerts", obs.scene("Just Chatting").join(" < "));
   check("the scene with no webcam is untouched", obs.scene("Starting Soon").join() === "Countdown");
-  await snap(win, "setup-3-obs");
+  await snap(win, "setup-2-obs");
   await button(win, /^continue$/i).click();
+
+  await button(win, /use the obs virtual camera/i).click();
+  check("camera step captures a camera", await waitFor(async () => /Capturing/.test(await text(win)), 10_000));
+  await snap(win, "setup-3-camera");
+  await button(win, /continue/i).first().click();
+
   await sleep(800);
   await snap(win, "setup-4-get-paid");
   check("no Streamlabs / API-key step", !/streamlabs|api key/i.test(await text(win)));
@@ -208,9 +214,23 @@ async function main() {
   for (const box of await win.getByRole("checkbox").all()) await box.check();
   await snap(win, "setup-5-safety");
   await button(win, /i understand/i).click();
+
+  // The test step is itself a router: it plays a real (MOCK) effect, which
+  // needs OBS's Browser Source rendering /viewer — headless Chrome stands in.
+  browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ["--autoplay-policy=no-user-gesture-required"] });
+  const obsSource = await (await browser.newContext()).newPage();
+  await obsSource.goto(obs.provisionedUrl());
+  const run = button(win, /run the 10-second test/i);
+  check("test step arms the camera", await waitFor(async () => await run.isEnabled(), 15_000));
+  await run.click();
+  check("wizard test hijack goes live", await waitFor(async () => /LIVE/.test(await text(win)), 20_000));
+  check("…and shows in OBS", await waitFor(async () => obs.visibility.some((v) => v.visible), 5000));
+  await snap(win, "setup-6-test-live");
+  check("asks 'did you see it?'", await waitFor(async () => /Did your|Did the/.test(await text(win)), 25_000));
+  await button(win, /yes — it worked/i).click();
   await sleep(500);
-  await snap(win, "setup-6-done");
-  await button(win, /open stream hijack/i).click();
+  await snap(win, "setup-7-done");
+  await button(win, /open the studio/i).click();
   // The app marks setup done and relaunches ITSELF (same argv, so same debug
   // port) — a process we didn't spawn, holding the single-instance lock.
   // Wait for the flag, then stop that copy so the next launch is ours.
@@ -267,11 +287,7 @@ async function main() {
   await snap(win, "live-off", { fullPage: false });
   check("hijack link shown", (await text(win)).includes(`/c/${LOGIN}`));
   check("OBS readiness says where the overlay is", /overlay in “Just Chatting” over “Facecam”/.test(await text(win)));
-  // OBS's Browser Source renders the /viewer page; headless Chrome stands in
-  // for it (the buffering gate needs its frames before anything goes on air).
-  browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ["--autoplay-policy=no-user-gesture-required"] });
-  const obsSource = await (await browser.newContext()).newPage();
-  await obsSource.goto(obs.provisionedUrl());
+  // The OBS stand-in (opened in the wizard) reconnects on its own.
   await button(win, /turn on stream hijack/i).click();
   check("turn on → ready", await waitFor(async () => /Ready · waiting for a viewer/.test(await text(win)), 15_000));
   await snap(win, "live-ready", { fullPage: false });

@@ -275,7 +275,7 @@ async function boot(): Promise<void> {
   // Local mode (pasted keys, no control plane) is reachable only on purpose:
   // running from the repo, or RH_LOCAL_MODE=1 on a packaged build.
   const localModeAllowed = !app.isPackaged || process.env.RH_LOCAL_MODE === "1";
-  ipcMain.handle("rh:setup-state", () => ({
+  ipcMain.handle("rh:setup-state", async () => ({
     cloudMode,
     login: cloudCfg?.login ?? null,
     cloudUrl,
@@ -284,7 +284,11 @@ async function boot(): Promise<void> {
       discovery: discoverObsWebsocket().status,
       connected: local?.obs.isConnected() ?? false,
       running: isObsRunning(),
+      virtualCamActive: (await local?.obs.virtualCamActive()) ?? null,
     },
+    // Cloud mode always has a model (the control plane's key); local mode
+    // only with a pasted key — otherwise a test is passthrough + label.
+    decartEnabled: cloudMode || keysStatus().decartApiKey,
     keys: keysStatus(),
     port,
     viewerUrl: viewerUrlGlobal,
@@ -340,6 +344,17 @@ async function boot(): Promise<void> {
     // by the bridge, which only reads them at boot.
     app.relaunch();
     app.exit(0);
+  });
+  ipcMain.handle("rh:start-virtual-cam", () =>
+    local ? local.obs.startVirtualCam() : "obs-not-connected",
+  );
+  // Payouts live on the control plane; the renderer only ever sees booleans
+  // and the browser does the Stripe part (returns to /payouts-done).
+  ipcMain.handle("rh:payouts", () => (link ? link.payouts() : null));
+  ipcMain.handle("rh:start-payouts", async (_e, country: string) => {
+    if (!link) throw new Error("payouts need the hosted sign-in");
+    const url = await link.payoutsOnboardUrl(String(country || "US"));
+    if (/^https:\/\//.test(url)) await shell.openExternal(url);
   });
   ipcMain.handle("rh:test-hijack", async (_e, prompt: string, d: number) => {
     if (link) return link.testHijack();

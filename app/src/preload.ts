@@ -32,6 +32,10 @@ const bridge = {
     ipcRenderer.invoke("rh:provision-obs"),
   launchObs: (): Promise<void> => ipcRenderer.invoke("rh:launch-obs"),
   enableObsWebsocket: () => ipcRenderer.invoke("rh:enable-obs-websocket"),
+  startVirtualCamera: () => ipcRenderer.invoke("rh:start-virtual-cam"),
+  payouts: () => ipcRenderer.invoke("rh:payouts"),
+  startPayouts: (country: string): Promise<void> =>
+    ipcRenderer.invoke("rh:start-payouts", country),
   setupComplete: (): Promise<void> => ipcRenderer.invoke("rh:setup-complete"),
   testHijack: (prompt: string, durationSec: number): Promise<string> =>
     ipcRenderer.invoke("rh:test-hijack", prompt, durationSec),

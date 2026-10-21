@@ -53,6 +53,7 @@ export function productionProblems(e: NodeJS.ProcessEnv): string[] {
   // grace. Harmless-looking, so refuse them loudly rather than ignore them.
   if (get("STRIPE_API_BASE")) problems.push("STRIPE_API_BASE is a test seam — never set it in production");
   if (get("RH_OFFLINE_GRACE_MS")) problems.push("RH_OFFLINE_GRACE_MS is a test seam — never set it in production");
+  if (get("RH_FREE_TESTS_PER_DAY")) problems.push("RH_FREE_TESTS_PER_DAY is a test seam — never set it in production");
   const url = get("RH_PUBLIC_URL");
   if (url && !url.startsWith("https://")) problems.push("RH_PUBLIC_URL must be https:// in production");
   return problems;
@@ -120,6 +121,9 @@ export const env = {
   /** How long the streamer's app may be offline before its queued paid
    *  hijacks are refunded. Overridable only so the e2e needn't wait 2 min. */
   offlineGraceMs: Number(process.env.RH_OFFLINE_GRACE_MS ?? 2 * 60_000),
+  /** Free test hijacks per channel per UTC day — the only GPU we fund.
+   *  Test seam (the UI tour runs the wizard test AND a studio preview). */
+  freeTestsPerDay: Math.max(1, Number(process.env.RH_FREE_TESTS_PER_DAY ?? 1) || 1),
 };
 
 /** No Twitch app registered (dev only) → dev auth, loudly. Never in prod:

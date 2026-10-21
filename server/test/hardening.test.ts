@@ -73,7 +73,12 @@ test("free test hijack: one per channel per day, fixed duration, then 429", () =
 });
 
 test("production boot gate: refuses the e2e test seams", () => {
-  const p = productionProblems({ ...FULL, STRIPE_API_BASE: "http://127.0.0.1:1", RH_OFFLINE_GRACE_MS: "1000" });
-  assert.equal(p.length, 2);
+  const p = productionProblems({
+    ...FULL,
+    STRIPE_API_BASE: "http://127.0.0.1:1",
+    RH_OFFLINE_GRACE_MS: "1000",
+    RH_FREE_TESTS_PER_DAY: "5",
+  });
+  assert.equal(p.length, 3);
   assert.ok(p.every((x) => x.includes("test seam")));
 });

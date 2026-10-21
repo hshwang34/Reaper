@@ -33,6 +33,7 @@ jobs:
   # The two end-to-end suites, on a real browser + the real Electron app.
   # Still zero secrets: MOCK Decart, DEV AUTH, a fake OBS and a fake Stripe.
   #   e2e         — the local demo rig (sidecar)
+  #   e2e:wizard  — the first-run wizard, with a stubbed desktop bridge
   #   e2e:hosted  — the commercial path: control plane + desktop app + portal
   #                 checkout + signed webhooks + settle/refund
   e2e:
@@ -48,5 +49,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run e2e
+      - run: npm run e2e:wizard
       # Electron needs a display; xvfb-run provides a virtual one.
       - run: xvfb-run -a npm run e2e:hosted

@@ -245,6 +245,19 @@ export class CloudLink {
    *  "send yourself a test hijack" in cloud mode). */
   /** The channel's free daily test hijack. The server picks the preset and
    *  length — the hosted key never runs free text without a payment. */
+  /** Stripe payout status for the wizard's "Get paid" step. */
+  async payouts(): Promise<{ configured: boolean; started: boolean; enabled: boolean }> {
+    const b = await this.authedGet<{ configured?: boolean; started?: boolean; enabled?: boolean }>("payouts");
+    return { configured: Boolean(b.configured), started: Boolean(b.started), enabled: Boolean(b.enabled) };
+  }
+
+  /** Stripe-hosted onboarding URL; `from: "app"` lands on /payouts-done. */
+  async payoutsOnboardUrl(country: string): Promise<string> {
+    const b = await this.authedPost<{ url?: string }>("payouts/onboard", { country, from: "app" });
+    if (!b.url) throw new Error("no onboarding link");
+    return b.url;
+  }
+
   async testHijack(): Promise<string> {
     const body = await this.authedPost<{ outcome?: string }>("test-hijack", {});
     return body.outcome ?? "queued";
@@ -291,6 +304,13 @@ export class CloudLink {
 
   private async authedPost<T>(path: string, payload: unknown): Promise<T> {
     const { status, body } = await this.request("POST", path, payload);
+    const b = body as T & { error?: string };
+    if (status < 200 || status >= 300) throw new Error(b.error ?? `HTTP ${status}`);
+    return b;
+  }
+
+  private async authedGet<T>(path: string): Promise<T> {
+    const { status, body } = await this.request("GET", path);
     const b = body as T & { error?: string };
     if (status < 200 || status >= 300) throw new Error(b.error ?? `HTTP ${status}`);
     return b;

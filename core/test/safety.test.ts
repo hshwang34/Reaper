@@ -332,6 +332,8 @@ test("settings: legacy allowCustomPrompts migrates; hosted base is 'Anything goe
   // Product decision 2026-10-20: new channels start fully open (typed ideas
   // + face swaps) and tighten from the studio; classifiers stay strict.
   const hosted = loadSettings({}, HOSTED_SETTINGS);
+  // Decision #12: viewers always get a prompt box and a photo field; the
+  // classifier chain, not a presets-only default, is what keeps it safe.
   assert.equal(hosted.customPrompts, "classified");
   // Approval and the output guard are opt-in everywhere; input screening stays strict.
   assert.equal(hosted.outputGuard, "off");
