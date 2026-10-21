@@ -23,6 +23,20 @@ guardrail/moderation layer (stages S0–S6, policy model, implementation phases)
 before touching `moderation.ts`, `submissions.ts`, uploads, or anything that puts viewer
 bytes in front of the model or on stream.
 
+## Operating model — the user is the PM, you are the eng lead
+
+The user works as **product manager** and doesn't want to do low-level work. You own the *how*:
+turn their intent into a brief, decide technical questions yourself, and coordinate the project
+agents in `.claude/agents/` (`payments-engineer`, `implementer`, `tester`, `reviewer`). Bring
+the PM only **product** calls (money users see, permissions, safety policy, UX, scope, anything
+deploying or hard to reverse), batched, with options and a recommendation; check
+`docs/product/DECISIONS.md` first and append every new answer. One agent writes code per
+feature; others only read, test or review. One-sentence changes take the fast lane (no brief).
+The PM runs `/feature <idea>` and `/status`; if they describe a feature in plain words, follow
+`.claude/skills/feature/SKILL.md` all the same. A PreToolUse hook blocks `git push` /
+`gh pr create` until `npm run check` passes. The PM merges every PR; deploys and live Stripe need
+their explicit go. Full model: `docs/product/README.md`.
+
 ## Commands
 
 The **demo rig** runs on one machine with no cloud (the "server" is a local sidecar). The
@@ -89,8 +103,7 @@ Server tests fake Stripe through the narrow `StripeLike` interface (`setStripeFo
 whole payment path is testable offline. Run workspace scripts from the workspace dir
 (or via `npm run … --workspace`): `tsx` applies that workspace's `tsconfig.json` `paths`, which
 is what resolves `@rh/*` to source — from the repo root it would fall back to the hoisted
-`node_modules` symlinks instead. `docs/ARCHITECTURE-REVIEW.md` records the 2026-09 review, what
-it fixed, and the migration to the target layout.
+`node_modules` symlinks instead.
 
 ### Demoing the loop without credentials
 1. Open `http://localhost:5173/router`, click **Arm camera** (needs a real Chrome tab).
@@ -145,16 +158,13 @@ plane's per-channel runtimes — which is the whole point of the extraction.
   Electron app embed. OBS scene/source names are host wiring (`.env` / the app's keys.json),
   not `Settings`. `obs.ts` also does `ensureBrowserSource()` auto-provisioning: with no scene configured the overlay is added to every scene that shows a webcam, directly above that webcam (`planOverlay` in `obsAlign.ts`); nothing the streamer owns is moved. In production
   mode (`npm run start`) it serves the built web app — one process, one port.
-- **`app/`** (`@rh/app`, Electron) — the "single download" for streamers. Main process embeds
-  the sidecar composition as a local bridge (127.0.0.1:17712), auto-provisions the OBS Browser
-  Source, holds a per-install auth token, tray + ⌘⇧H panic, and — when signed in — a
-  `cloudLink.ts` to the control plane (**cloud mode**: no Decart key on the machine; the local
-  bridge keeps only OBS control + signaling + page serving, and panic/status go to the cloud
-  engine through the bridge's `moneyProxy` — the local engine never holds the job in cloud
-  mode). Renderer opens `/setup` (the first-run wizard: Twitch sign-in, camera, OBS websocket
-  enable, safety acknowledgement) until it has completed once (`app-state.json` → `setupDone`),
-  then `/router` in bundled Chromium. `local mode` (pasted keys) is the offline/dev path; on
-  packaged builds it is hidden behind `RH_LOCAL_MODE=1`.
+- **`app/`** (`@rh/app`, Electron) — the streamer's download. Main process embeds the sidecar
+  composition as a local bridge (127.0.0.1:17712): OBS provisioning, per-install auth token,
+  tray + ⌘⇧H panic. Signed in, `cloudLink.ts` links to the control plane (**cloud mode**: no
+  Decart key on the machine; the bridge keeps only OBS control + signaling + page serving, and
+  panic/status reach the cloud engine through `moneyProxy` — the local engine never holds the
+  job). Renderer shows `/setup` until the first-run wizard completes (`setupDone`), then
+  `/router`. Local mode (pasted keys) is dev-only on packaged builds (`RH_LOCAL_MODE=1`).
 - **`server/`** (`@rh/server`, tsx) — the hosted control plane. Twitch OAuth → our JWTs,
   per-channel in-memory `ChannelRuntime` (one `@rh/core` engine each), server-side job-gated +
   budget-capped minting, the hijack ledger (SQLite/Drizzle, versioned migrations on
@@ -168,11 +178,9 @@ plane's per-channel runtimes — which is the whole point of the extraction.
   dashboard). `lib/auth.ts` + `lib/channel.ts` make the same pages work local and hosted.
 - **`site/`** — the public marketing site. Deliberately **not** a workspace: a standalone Vite
   project (`cd site && npm install && npm run dev`) so Vercel installs nothing but Vite. No
-  framework, no runtime deps. `site/src/main.ts` drives one simulated tip→hijack→revert loop
-  that every product mock on the page follows; the picture is a CSS-treated stock photo
-  (`site/CREDITS.md`) unless `public/clips/manifest.json` lists recorded clips of the real model
-  (`site/CLIPS.md`). The site never calls Decart. Vercel project `reality-hijack` on the
-  personal account. Brand sources live in `branding/`.
+  framework, no runtime deps. The hero simulates the loop over a stock photo until recorded clips
+  exist (`site/CLIPS.md`); the site never calls Decart. Vercel project `reality-hijack`
+  (personal account). Brand sources: `branding/`.
 
 Browser pages talk to whichever host serves them, same-origin (Vite proxy in dev). Secrets
 never reach a page. The **local plane** (rtc signaling + `viewer:frames-ok`) never leaves the
@@ -204,43 +212,28 @@ channel is a fraud/runaway backstop, and the only GPU we fund ourselves is one f
 
 ### Viewer payments (`server/src/payments.ts`) — don't "simplify" these either
 
-Direct charges with Stripe **Managed Risk** on Express accounts: the Checkout session lives on
-the streamer's account (they're seller of record, Stripe absorbs fraud/chargebacks), and our
-`application_fee_amount` = GPU cost (rounded **up**) + platform margin (`fees.ts`; margin, GPU
-rate and the $3 minimum are server env, never streamer `Settings`). Only account *creation*
-uses the preview API version; everything else is on the stable API. Every rule below came
-from a security review or a real test payment:
+Stripe Connect direct charges with Managed Risk; our fee = GPU (rounded up) + margin, pure in
+`fees.ts`, set by server env, never streamer `Settings`. Full rationale: the header comment of
+`payments.ts` and `.claude/agents/payments-engineer.md`; tests in `server/test/payments.test.ts`.
+Each rule came from a security review or a real test payment:
 
-- **Checkout refuses (409) while the channel's router is offline or panic-paused** — a viewer
-  must never pay for a hijack that can't run.
-- **The webhook trusts nothing the streamer can write.** The streamer can see the session's
-  metadata on their own dashboard, so `onPaid` finds the payment by the Checkout session id
-  *we* stored, and requires the event's `account` and the amount/currency to match. A paid
-  session becomes a `TipEvent { source: "stripe", message: code, ref: paymentId }` into the
-  same engine path as every trigger.
-- **Refunds are decided from the mint ledger, never the router's report** (the router runs on
-  the streamer's machine). No token minted → automatic full refund. Token minted + router
-  says failed → `failed_after_start` for manual review, no automatic refund.
-- **Payment status is an explicit state machine; every change is one conditional UPDATE**
-  (`transition(id, from[], to)`):
+- Checkout refuses (409) while the router is offline or panic-paused.
+- The webhook trusts nothing the streamer can write: match on the session id *we* stored, plus
+  `event.account` and amount/currency — never on metadata.
+- Refunds are decided from the **mint ledger**, never the router's report. Minted + "failed" →
+  `failed_after_start` (manual review).
+- Status changes only via `transition(id, from[], to)` (one conditional UPDATE):
   `pending → paid → delivered | failed_after_start | refunding → refunded | refund_failed`.
-  Concurrent paths (webhook, job end, offline drop, sweep, boot) can't both act; a refund
-  claims `paid → refunding` atomically, with a Stripe idempotency key.
-- **Paid hijacks that never start are refunded**: app offline 2 min → queued paid jobs dropped
-  (`Engine.dropQueued`) and refunded; a 1-minute sweep refunds any not started within 15 min,
-  but never one already dispatched (`recordDispatch` writes the jobId at dispatch). At boot,
-  anything still `paid` belonged to a destroyed in-memory engine and is refunded.
-- Settlement hangs off `createRuntime`'s `onJobEnded` hook, which fires **exactly once** for
-  every accepted job (finished, failed, dropped, rejected in review, cancelled by dispose).
-  Any new way for a job to end must still go through it.
+- Paid hijacks that never start are refunded (offline 2 min / not started in 15 min / at boot),
+  never one already dispatched.
+- Settlement hangs off `onJobEnded`, which fires exactly once per accepted job — any new way for
+  a job to end must still reach it.
 
 ### Request flow of one hijack
 
 1. Viewer `POST /api/submissions` (prompt/preset + optional image) → gets a short **claim code**.
-   Preset prompts are resolved **server-side from the id** (`core/src/submissions.ts`, called by
-   both hosts' routes) so a client
-   can't spoof preset text; custom free-text runs through `moderation.ts` against
-   streamer-configurable guardrails.
+   Preset prompts are resolved **server-side from the id** (`core/src/submissions.ts`) so a
+   client can't spoof preset text; custom text runs the moderation chain.
 2. Viewer pays with the code. Hosted: `POST /api/c/:channel/checkout` → Stripe Checkout (the
    submission is `hold()`-ed for the session's 30 min) → webhook → `TipEvent`. Demo rig: a tip
    with the code in the message, normalized by a trigger adapter (`triggers/streamlabs.ts`, or
