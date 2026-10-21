@@ -56,6 +56,23 @@ refund, error or safety text.
 | Streamer sign-off | **approval** — "the streamer approves it first" | review, queue |
 | Typed description | **your own idea** / **custom effect** | prompt (in headings; a field label may say "describe") |
 | Reference photo | **photo** | reference image, upload |
+| Stopping a live effect | **Stop effect** (action); state **Pause hijacks** / undo **Resume hijacks**; the hotkey is "the panic key", always rendered from `PANIC_KEY` | panic (as a button), kill, abort |
+| The live output check | **live safety check** | output guard, output watcher |
+| The streamer's rules page | **Rules** (tab, heading) | Safety (except "safety checks" and the setup step) |
+| A custom effect's text | **custom effect** (noun) / **your own idea** (to the viewer) | prompt, typed idea |
+| Money, streamer side | **Earnings** (tab) · **Payouts** (Stripe setup card / setup step) · **Recent hijacks** (the list) | ledger, getting paid |
+| A hijack's end state | **Played / Didn't play / Refunded / In progress** | completed, failed, dispatched |
+| The free first-run hijack | **free test** | preview, test hijack (as a noun) |
+| Column for an amount | **Paid** | Tip |
+| Installing the overlay | **Add the overlay** / **Add the overlay again** | reinstall, re-provision, repair |
+| People waiting | **in line** | queue, queued |
+| The app window | **the studio**; "the Stream Hijack window" only in "keep it open" reminders | router window |
+| Leaving the account | **Sign out** | log out, disconnect |
+
+**OBS's own menu names** may be quoted, in quotes, only inside a manual "do it yourself"
+instruction, because they're what the streamer sees in OBS: "Browser", "WebSocket Server
+Settings", "Virtual Camera", "Sources", "Program" / "Preview". Everywhere else we say "the
+overlay", "OBS remote control", "your camera". The blocklist test exempts these only when quoted.
 
 Vendor names (Decart, Lucy, Sightengine, OpenAI, Anthropic) never appear on a user surface — say
 "AI" or "our safety checks". Stripe may be named where money is explained, because viewers see
@@ -123,13 +140,22 @@ This can take a few seconds." Never a blank screen; never a spinner without word
 
 ## 8. Jargon blocklist
 
-Enforced by a test over user-facing string literals (currently `web/src/portal/**` and
-`web/src/features/EffectArt.tsx`; the scope widens as each surface is rewritten). Case-insensitive,
+Enforced by a test over user-facing string literals in `web/src/**` (viewer page, setup, studio,
+dashboard, shared features) — quoted OBS menu names per §3 are exempt. Case-insensitive,
 one term per line. Identifiers, comments, test files and the local-demo-rig-only claim-code view
 are exempt.
 
 ```
 preset
+wizard
+provision
+re-provision
+ledger
+queue
+router window
+output guard
+output watcher
+typed idea
 browser source
 websocket
 classifier
