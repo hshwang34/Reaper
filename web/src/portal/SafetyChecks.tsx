@@ -27,13 +27,13 @@ const STATE_TEXT: Record<CheckState, string> = {
 };
 
 const STATE_TONE: Record<CheckState, string> = {
-  pending: "text-zinc-600",
+  pending: "text-zinc-400",
   running: "text-cyan-300",
   pass: "text-emerald-400",
   review: "text-amber-300",
   fail: "text-red-400",
   unavailable: "text-zinc-400",
-  skipped: "text-zinc-600",
+  skipped: "text-zinc-400",
 };
 
 function StateIcon({ state }: { state: CheckState }) {
@@ -55,7 +55,7 @@ function StateIcon({ state }: { state: CheckState }) {
     case "unavailable":
       return <span aria-hidden className={`${base} bg-zinc-700/40 text-zinc-300`}>–</span>;
     case "skipped":
-      return <span aria-hidden className={`${base} border border-dashed border-zinc-700 text-zinc-600`} />;
+      return <span aria-hidden className={`${base} border border-dashed border-zinc-600 text-zinc-500`} />;
     default:
       return <span aria-hidden className={`${base} border border-zinc-700`} />;
   }
@@ -99,11 +99,11 @@ export function SafetyChecklist({
       aria-label="Safety checks"
       aria-live="polite"
       aria-busy={running}
-      className={`rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 transition-opacity ${stale ? "opacity-50" : ""}`}
+      className={`rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 transition-opacity ${stale ? "opacity-50" : ""}`}
     >
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Safety checks</h3>
-        <span className="text-xs tabular-nums text-zinc-500">
+        <span className="text-xs tabular-nums text-zinc-400">
           {preparing ?? (checks.length ? `${finished} of ${checks.length}` : "")}
         </span>
       </div>
@@ -119,7 +119,7 @@ export function SafetyChecklist({
         {subjects.map((subject) => (
           <div key={subject}>
             {subjects.length > 1 && (
-              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-400">
                 {SUBJECT_TITLE[subject]}
               </p>
             )}
@@ -129,7 +129,7 @@ export function SafetyChecklist({
                 .map((c) => (
                   <li key={c.id} className="flex items-center gap-3 text-sm">
                     <StateIcon state={c.state} />
-                    <span className={c.state === "pending" || c.state === "skipped" ? "text-zinc-500" : "text-zinc-200"}>
+                    <span className={c.state === "pending" || c.state === "skipped" ? "text-zinc-400" : "text-zinc-200"}>
                       {c.label}
                     </span>
                     <span className={`ml-auto text-xs ${STATE_TONE[c.state]}`}>{STATE_TEXT[c.state]}</span>
@@ -141,7 +141,7 @@ export function SafetyChecklist({
       </div>
 
       {running && elapsed >= 5 && (
-        <p className="mt-3 text-xs text-zinc-500">
+        <p className="mt-3 text-xs text-zinc-400">
           Still checking — reading a request against the stream's rules can take a few seconds.
         </p>
       )}
@@ -176,7 +176,7 @@ export function SafetyFindings({
     <section
       ref={ref}
       role="alert"
-      className={`rounded-xl border border-red-500/40 bg-red-950/20 p-4 transition-opacity ${stale ? "opacity-50" : ""}`}
+      className={`scroll-mb-48 rounded-2xl border border-red-500/40 bg-red-950/30 p-4 lg:scroll-mb-4 transition-opacity ${stale ? "opacity-50" : ""}`}
     >
       <h3 className="font-semibold text-red-300">
         Didn't pass — {findings.length} {findings.length === 1 ? "problem" : "problems"} found
@@ -192,7 +192,7 @@ export function SafetyFindings({
       <div className="mt-3 space-y-3">
         {subjects.map((subject) => (
           <div key={subject}>
-            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-400">
               {SUBJECT_TITLE[subject]}
             </p>
             <ul className="space-y-2">
@@ -202,7 +202,7 @@ export function SafetyFindings({
                   <div className="min-w-0 text-sm">
                     <p className="text-zinc-100">
                       {g.label}
-                      <span className="ml-2 text-xs text-zinc-500">· {labelOf(g.check)}</span>
+                      <span className="ml-2 text-xs text-zinc-400">· {labelOf(g.check)}</span>
                     </p>
                     {g.matches.length > 0 && (
                       <p className="mt-1 flex flex-wrap gap-1.5">

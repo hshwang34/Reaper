@@ -39,9 +39,12 @@ a primary source):
 The portfolio framing from `FEASIBILITY.md` §5 still holds and gets sharper:
 *the safest guardrail is a data model where untrusted bytes never reach the
 model.* Presets are that. Everything below is the price of letting any
-untrusted bytes (free text, images) through at all — and the honest product
-answer is that **new streamers get presets-only by default**, and every
-further tier is an opt-in with its own cost.
+untrusted bytes (free text, images) through at all. The original answer was
+presets-only by default with every further tier opt-in. **Product decision
+2026-10-20:** new channels start on "Anything goes" (typed ideas and face
+swaps open, intensity 5). The classifiers stay strict and fail closed, the
+hard floor below applies whatever the setting, and the studio's Safety tab
+tightens it in one click (Family-friendly / Balanced / Anything goes).
 
 ---
 
@@ -90,8 +93,9 @@ highest cost — someone using the upload path to move CSAM.
    storage beyond the preservation copy, no job, immediate runbook.
 8. **Liability follows the key.** Local mode (streamer's own Decart key):
    the streamer is the "developer" under Decart's terms, and the app says so.
-   Hosted mode (our key, our uploads dir): we are. The hosted defaults are
-   therefore stricter.
+   Hosted mode (our key, our uploads dir): we are. The hosted defaults
+   therefore keep classifier thresholds strict and never match an unlabeled
+   tip to a sole pending request.
 
 ---
 
@@ -453,7 +457,7 @@ numbers in `VERIFICATION.md`.
   streamers already accept from Streamlabs: TTS has a word filter, a spam
   filter and a skip, with no approval queue; Media Share's manual-play mode is
   optional. Here the equivalent baseline is input screening (S1/S2, which
-  stays strict on hosted: presets-only, scene-only images, strict thresholds)
+  stays strict on hosted: strict thresholds, fail closed)
   plus the panic hotkey. Approval adds dead time to a tip someone already
   paid for, and a refund question whenever the streamer declines. The output
   guard adds a model load before every go-live and can false-positive on a

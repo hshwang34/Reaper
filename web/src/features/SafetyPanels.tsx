@@ -50,10 +50,10 @@ export function ReviewPanel({ client, pending }: { client: ApiClient; pending?: 
   }
 
   return (
-    <div className="rounded-xl border border-amber-600/60 bg-amber-950/30 p-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-amber-300">
-        Waiting for your approval ({items.length})
-      </h3>
+    <div className="rounded-2xl border border-amber-500/50 bg-amber-950/30 p-5">
+      <h2 className="mb-3 text-base font-semibold text-amber-200">
+        Waiting for your OK ({items.length})
+      </h2>
       <div className="space-y-3">
         {items.map((it) => {
           const left = Math.max(0, Math.round((it.expiresAt - now) / 1000));
@@ -98,12 +98,16 @@ export function ReviewPanel({ client, pending }: { client: ApiClient; pending?: 
   );
 }
 
-const VERDICT_TONE: Record<ModerationEvent["verdict"], string> = {
-  allow: "text-emerald-400",
-  reject: "text-red-400",
-  review: "text-amber-300",
-  error: "text-orange-400",
-  info: "text-sky-300",
+/** What the streamer is told about a blocked request — never a vendor name
+ *  or a stage code. */
+const WHAT: Record<ModerationEvent["stage"], string> = {
+  text: "Typed idea blocked",
+  image: "Photo blocked",
+  review: "Declined",
+  output: "Effect stopped mid-way",
+  report: "Viewer report",
+  takedown: "Removal request",
+  ban: "Viewer banned",
 };
 
 export function ModerationPanel({
@@ -118,7 +122,6 @@ export function ModerationPanel({
   onBan?: (tipper: string) => void;
 }) {
   const [log, setLog] = useState<ModerationLog | null>(null);
-  const [showAllows, setShowAllows] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -138,63 +141,49 @@ export function ModerationPanel({
   if (!log) return null;
   const c = log.classifiers;
   const banned = new Set((settings?.bannedViewers ?? []).map((b) => b.toLowerCase()));
-  const events = showAllows ? log.events : log.events.filter((e) => e.verdict !== "allow");
+  const events = log.events.filter((e) => e.verdict !== "allow" && e.verdict !== "info").slice(0, 20);
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
-        Safety
-      </h3>
-      <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
-        <Readiness
-          label="Viewer text"
-          ok={c.textReady}
-          detail={c.devMode ? "demo mode — blocklist only" : c.text.join(" → ") || "no classifier key"}
-        />
-        <Readiness
-          label="Viewer photos"
-          ok={c.imagesReady}
-          detail={c.devMode ? "demo mode — structure checks only" : c.image.join(" → ") || "needs Sightengine"}
-        />
-      </div>
-      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-500">
-        <input type="checkbox" checked={showAllows} onChange={(e) => setShowAllows(e.target.checked)} />
-        show passed checks
-      </label>
-      <div className="max-h-64 space-y-1 overflow-y-auto font-mono text-xs">
-        {events.length === 0 && <p className="text-zinc-600">Nothing flagged yet.</p>}
-        {events.map((e) => (
-          <div key={e.id} className="flex items-baseline gap-2 text-zinc-400">
-            <span className="shrink-0 text-zinc-600">{new Date(e.ts).toLocaleTimeString()}</span>
-            <span className={`shrink-0 ${VERDICT_TONE[e.verdict]}`}>{e.stage}:{e.verdict}</span>
-            <span className="min-w-0 flex-1 truncate" title={e.reason}>
-              {e.source} — {e.reason}
-              {e.tipper ? ` (${e.tipper})` : ""}
-            </span>
-            {onBan && e.tipper && e.verdict === "reject" && !banned.has(e.tipper.toLowerCase()) && (
-              <button
-                onClick={() => onBan(e.tipper!)}
-                className="shrink-0 rounded bg-zinc-800 px-1.5 text-[10px] text-zinc-300 hover:bg-red-700"
-              >
-                ban
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Readiness({ label, ok, detail }: { label: string; ok: boolean; detail: string }) {
-  return (
-    <div className={`rounded-lg border p-2 ${ok ? "border-emerald-800" : "border-amber-700"}`}>
-      <p className={ok ? "text-emerald-400" : "text-amber-300"}>
-        {label}: {ok ? "protected" : "off"}
-      </p>
-      <p className="truncate text-zinc-500" title={detail}>
-        {detail}
-      </p>
-    </div>
+    <section className="rounded-2xl border border-white/10 bg-zinc-950/70 p-5">
+      <h2 className="text-base font-semibold text-zinc-100">Recently blocked</h2>
+      {/* Only say something about screening when part of it is down — then
+          the matching viewer option is closed (fail closed), and the
+          streamer should know why viewers can't use it. */}
+      {!c.devMode && (!c.textReady || !c.imagesReady) && (
+        <p className="mt-3 rounded-xl bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          {!c.textReady && "Typed ideas are paused right now — screening for them is unavailable. "}
+          {!c.imagesReady && "Photo uploads are paused right now — screening for them is unavailable. "}
+          Gallery effects keep working.
+        </p>
+      )}
+      {events.length === 0 ? (
+        <p className="mt-3 text-sm text-zinc-500">Nothing blocked yet. Requests that break your rules show up here.</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-white/5">
+          {events.map((e) => (
+            <li key={e.id} className="flex items-center gap-3 py-2.5 text-sm">
+              <span className="w-16 shrink-0 text-xs text-zinc-500">
+                {new Date(e.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="text-zinc-100">{WHAT[e.stage]}</span>
+                {e.tipper && <span className="text-zinc-400"> · {e.tipper}</span>}
+                <span className="block truncate text-xs text-zinc-500" title={e.reason}>
+                  {e.reason}
+                </span>
+              </span>
+              {onBan && e.tipper && e.verdict === "reject" && !banned.has(e.tipper.toLowerCase()) && (
+                <button
+                  onClick={() => onBan(e.tipper!)}
+                  className="shrink-0 rounded-lg border border-white/10 px-2.5 py-1 text-xs text-zinc-300 hover:border-red-500 hover:text-red-300"
+                >
+                  Ban
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

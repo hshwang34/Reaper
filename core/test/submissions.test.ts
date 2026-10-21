@@ -34,7 +34,7 @@ test("unknown, disabled, and policy-excluded presets are refused", async () => {
   const unknown = await createSubmission(intakeDeps(), { ...noImage, presetId: "nope" });
   assert.equal(!unknown.ok && unknown.status, 400);
 
-  const disabled = await createSubmission(intakeDeps(settings({ enabledPresetIds: [] })), {
+  const disabled = await createSubmission(intakeDeps(settings({ disabledPresetIds: ["lava-room"] })), {
     ...noImage,
     presetId: "lava-room",
   });
@@ -330,7 +330,7 @@ test("parseEnhance: absent = Decart default (on); only explicit off values disab
 });
 
 test("a needsImage preset without a photo is a 400 and stores nothing", async () => {
-  const d = intakeDeps(settings({ enabledPresetIds: ["photo-swap"] }), emptySuite(true));
+  const d = intakeDeps(settings(), emptySuite(true));
   const noPhoto = await createSubmission(d, { ...noImage, presetId: "photo-swap" });
   assert.deepEqual(noPhoto, { ok: false, status: 400, error: "this effect needs a reference image" });
   assert.equal(d.store.size, 0);

@@ -2,7 +2,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_SETTINGS, computeDurationSec, sanitizeSettingsPatch } from "@rh/shared";
+import { DEFAULT_SETTINGS, computeDurationSec, loadSettings, sanitizeSettingsPatch } from "@rh/shared";
 
 test("computeDurationSec: floor, min 1, capped", () => {
   const s = { secondsPerUSD: 1, maxDurationSec: 60 };
@@ -19,7 +19,7 @@ test("sanitizeSettingsPatch keeps known, well-typed, in-bounds fields only", () 
     queueDepth: -5, // clamped up
     allowCustomPrompts: "yes", // wrong type → dropped
     allowSolePendingMatch: false,
-    enabledPresetIds: ["lava-room", 7, "  ", "x"],
+    disabledPresetIds: ["lava-room", 7, "  ", "x"],
     blocklistExtra: "notalist",
     defaultPresetId: "  cyberpunk ",
     __proto__: { polluted: true },
@@ -29,7 +29,7 @@ test("sanitizeSettingsPatch keeps known, well-typed, in-bounds fields only", () 
     secondsPerUSD: 60,
     queueDepth: 0,
     allowSolePendingMatch: false,
-    enabledPresetIds: ["lava-room", "x"],
+    disabledPresetIds: ["lava-room", "x"],
     defaultPresetId: "cyberpunk",
   });
   assert.deepEqual(sanitizeSettingsPatch(null), {});
@@ -39,4 +39,17 @@ test("sanitizeSettingsPatch keeps known, well-typed, in-bounds fields only", () 
 test("defaults are themselves a valid patch (round-trip)", () => {
   const out = sanitizeSettingsPatch(DEFAULT_SETTINGS);
   assert.deepEqual({ ...DEFAULT_SETTINGS, ...out }, DEFAULT_SETTINGS);
+});
+
+test("a legacy opt-in preset list becomes the opt-out list, and new presets start on", () => {
+  // Saved before presets were opt-out: the streamer had switched Haunted off.
+  const legacy = {
+    enabledPresetIds: ["lava-room", "underwater", "80s-anime", "cyberpunk", "winter-wonderland", "photo-swap"],
+  };
+  const s = loadSettings(legacy);
+  assert.deepEqual(s.disabledPresetIds, ["haunted"]);
+  // An older app build patching with the old field gets the same translation…
+  assert.deepEqual(sanitizeSettingsPatch(legacy).disabledPresetIds, ["haunted"]);
+  // …and an explicit opt-out list always wins over a stale opt-in one.
+  assert.deepEqual(loadSettings({ ...legacy, disabledPresetIds: [] }).disabledPresetIds, []);
 });

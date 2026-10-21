@@ -24,15 +24,7 @@ export const DEFAULT_SETTINGS: Settings = {
   queueDepth: 5,
   cooldownSec: 3,
   defaultPresetId: "80s-anime",
-  enabledPresetIds: [
-    "lava-room",
-    "underwater",
-    "80s-anime",
-    "cyberpunk",
-    "haunted",
-    "winter-wonderland",
-    "photo-swap",
-  ],
+  disabledPresetIds: [],
   allowSolePendingMatch: true,
   customPrompts: "classified",
   maxIntensity: 5,
@@ -49,16 +41,19 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 /** Hosted defaults (CONTENT-SAFETY §5): our key, our uploads, our liability —
- *  so a new channel starts presets-only with strict thresholds and scene-only
- *  images. Input screening is the baseline everywhere; streamer approval and
+ *  so classifier thresholds start strict. Input screening is the baseline everywhere; streamer approval and
  *  the output guard are opt-in, as on the local rig (same model as Streamlabs
  *  TTS: filter + skip, no approval queue). The streamer can open or tighten
  *  each tier deliberately from the dashboard. */
 export const HOSTED_SETTINGS: Settings = {
   ...DEFAULT_SETTINGS,
   allowSolePendingMatch: false,
-  customPrompts: "off",
-  referenceImages: "scenes",
+  // Product decision 2026-10-20: new channels start on "Anything goes" —
+  // typed prompts and face swaps open, intensity 5 — and the streamer
+  // tightens from the studio's Safety tab. Every tier still runs through the
+  // classifiers, which fail closed, and the hard floor no setting lowers.
+  customPrompts: "classified",
+  referenceImages: "likeness",
   moderationStrictness: "strict",
   outputGuard: "off",
   reviewLikeness: false,
@@ -79,10 +74,31 @@ export function loadSettings(persisted: unknown, base: Settings = DEFAULT_SETTIN
 function migrateLegacy(persisted: unknown): Partial<Settings> {
   if (!persisted || typeof persisted !== "object") return {};
   const p = persisted as Record<string, unknown>;
+  const out: Partial<Settings> = {};
   if (typeof p.allowCustomPrompts === "boolean" && p.customPrompts === undefined) {
-    return { customPrompts: p.allowCustomPrompts ? "classified" : "off" };
+    out.customPrompts = p.allowCustomPrompts ? "classified" : "off";
   }
-  return {};
+  return out;
+}
+
+/** The catalog before presets became opt-out. A saved opt-IN list can only
+ *  have meant something about these seven; every later preset starts on. */
+const LEGACY_CATALOG = [
+  "lava-room",
+  "underwater",
+  "80s-anime",
+  "cyberpunk",
+  "haunted",
+  "winter-wonderland",
+  "photo-swap",
+];
+
+/** Settings saved (or patched by an older app build) with `enabledPresetIds`
+ *  → the equivalent opt-out list. Ignored once `disabledPresetIds` exists. */
+function disabledFromLegacyEnabled(p: Record<string, unknown>): string[] | undefined {
+  if (p.disabledPresetIds !== undefined || !Array.isArray(p.enabledPresetIds)) return undefined;
+  const enabled = new Set(p.enabledPresetIds.filter((x): x is string => typeof x === "string"));
+  return LEGACY_CATALOG.filter((id) => !enabled.has(id));
 }
 
 /** Paid seconds for a tip: floor(amount × rate), at least 1, capped. */
@@ -176,9 +192,13 @@ export function sanitizeSettingsPatch(input: unknown): Partial<Settings> {
     const v = p.defaultPresetId;
     if (typeof v === "string" && v.trim()) out.defaultPresetId = v.trim().slice(0, 64);
   }
-  for (const key of ["enabledPresetIds", "blocklistExtra", "bannedViewers"] as const) {
+  for (const key of ["disabledPresetIds", "blocklistExtra", "bannedViewers"] as const) {
     const v = stringList(p[key]);
     if (v) out[key] = v;
+  }
+  {
+    const legacy = disabledFromLegacyEnabled(p);
+    if (legacy) out.disabledPresetIds = legacy;
   }
   {
     const v = stringList(p.allowedCategories);

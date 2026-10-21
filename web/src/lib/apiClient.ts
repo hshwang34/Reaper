@@ -55,6 +55,10 @@ export interface RouterConfig {
   obsScene: string;
   obsSource: string;
   obsConnected: boolean;
+  /** Scenes the overlay is installed in + the webcam it covers (null: unknown yet). */
+  obsOverlay?: { scene: string; camera: string | null }[] | null;
+  /** Signed in to the hosted service (cloud mode), else null (local rig). */
+  cloud?: { login: string; portalUrl: string } | null;
 }
 
 export interface LedgerRow {
@@ -295,7 +299,8 @@ export function createApiClient(opts: ApiClientOptions) {
     startPayouts: (country: string, from: "app" | "dashboard") =>
       request<{ url: string }>("/payouts/onboard", json("POST", { country, from })),
     /** The free daily test hijack (fixed preset, server-chosen length). */
-    testHijack: () => request<{ ok: boolean; outcome: string }>("/test-hijack", { method: "POST" }),
+    testHijack: (presetId?: string) =>
+      request<{ ok: boolean; outcome: string }>("/test-hijack", json("POST", { presetId })),
   };
 }
 
