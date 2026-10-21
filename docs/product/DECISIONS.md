@@ -50,3 +50,23 @@ HOW to get around it.** The portal lists every failure point.
 **#11 · 2026-10-20 · Ways of working:** the PM approves a brief up front and merges every PR;
 the eng lead orchestrates agents; deploys and live-Stripe changes need the PM's explicit go.
 `docs/product/README.md`.
+
+**#12 · 2026-10-20 · New channels start on "Anything goes":** typed prompts and photos (face
+swaps included) on by default, behind strict classifiers that fail closed. Presets are examples
+of what works, not the menu. The streamer tightens from the studio's Safety tab
+(Family-friendly / Balanced / Anything goes). `HOSTED_SETTINGS`, PR #18 + #20.
+
+**#13 · 2026-10-20 · Payments are Stripe-only — no Streamlabs/tips.** Every hijack is paid on
+the streamer's hijack page because each payment must fund its own Decart time; Streamlabs pays
+the streamer directly, so it could never carry our cut. No product, site or wizard copy
+describes tips as the payment path. PR #18, #20, #21.
+
+**#14 · 2026-10-20 · The effect catalog grows to 17 presets** written to Decart's Lucy 2.5
+prompt guide (grouped by its edit types); presets are opt-out so new ones reach every channel.
+The 10 new prompts still need one real-model run each before we lean on them. PR #20.
+
+**#15 · 2026-10-20 · First run shows a one-time "How it works" tour** (four cards, ending in
+the Effects gallery), re-openable from the studio. PR #20.
+
+**#16 · 2026-10-20 · The marketing site deploys itself:** Vercel is connected to `main` with
+root `site/`; any merge touching `site/` ships streamhijack.com, PRs get preview links.
