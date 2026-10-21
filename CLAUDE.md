@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Reality Hijack: viewers pay a live streamer, type a prompt (or pick a preset) + optional
+Stream Hijack: viewers pay a live streamer, type a prompt (or pick a preset) + optional
 reference image, and the streamer's webcam is restyled in real time by Decart's `lucy-2.5`
-video model for a duration proportional to the payment (**$1 = 1s**), then reverts. It is both a
+video model for a duration proportional to the payment (**$1 = 1s**), then reverts. (Formerly "Reality Hijack" — renamed 2026-10; infra slugs like
+`reality-hijack.fly.dev` are intentionally unchanged, see `docs/DOMAIN-AND-EMAIL.md`.) It is both a
 working product and a portfolio case study in AI product design under real constraints
 (per-second GPU billing, monetization policy, live-video latency, content safety).
 
@@ -47,6 +48,8 @@ npm run e2e:hosted        # the commercial path, zero secrets: real control plan
                           #   app (CDP-driven) + portal checkout against a fake Stripe (signed
                           #   webhooks) + fake OBS; asserts pay→play, settle, panic, refunds
 npm run smoke:prod        # read-only checks against the deployed server (hourly in CI: smoke.yml)
+npm run tour              # the Creator Studio, clicked through end to end: real app + dev server + fake
+                          #   OBS; every button asserted, every screen screenshotted → tour/<time>/
 npm run smoke:live        # on demand: a real test-mode Stripe Checkout (4242) on prod → real hijack;
                           #   needs the streamer app open + armed; ~$0.06 of Decart per run
 npm run build             # builds the web app only
@@ -105,7 +108,8 @@ With a real Decart key, viewer-authored bytes reach the model only through class
 custom text needs `OPENAI_API_KEY` (the non-LLM floor; `ANTHROPIC_API_KEY` adds the policy check but never suffices alone); **any** reference image needs
 Sightengine (`SIGHTENGINE_API_USER`/`SECRET`), the minors check. Missing keys switch the
 matching tier off (fail closed); presets always work. MOCK mode ("dev mode") runs blocklist +
-structural checks only. Streamer approval and the output guard are **opt-in** (default off, local and
+structural checks only. New hosted channels start on "Anything goes" (typed prompts + face swaps on, strict
+classifiers); the studio's Safety tab tightens it. Streamer approval and the output guard are **opt-in** (default off, local and
 hosted): input screening + the panic hotkey are the baseline, like Streamlabs TTS's filter +
 skip. With no approval tier on, a borderline (`review`) classifier result is rejected at
 intake, never parked. Invariants: the chain runs before a claim code exists; suspected CSAM
@@ -139,7 +143,7 @@ plane's per-channel runtimes — which is the whole point of the extraction.
   `createLocalServer(host)` factory (`createRuntime` + `buildApiRouter` + OBS control + static
   serving + the install-token gate) that both the CLI (`index.ts`, config from `.env`) and the
   Electron app embed. OBS scene/source names are host wiring (`.env` / the app's keys.json),
-  not `Settings`. `obs.ts` also does `ensureBrowserSource()` auto-provisioning. In production
+  not `Settings`. `obs.ts` also does `ensureBrowserSource()` auto-provisioning: with no scene configured the overlay is added to every scene that shows a webcam, directly above that webcam (`planOverlay` in `obsAlign.ts`); nothing the streamer owns is moved. In production
   mode (`npm run start`) it serves the built web app — one process, one port.
 - **`app/`** (`@rh/app`, Electron) — the "single download" for streamers. Main process embeds
   the sidecar composition as a local bridge (127.0.0.1:17712), auto-provisions the OBS Browser
@@ -159,7 +163,7 @@ plane's per-channel runtimes — which is the whole point of the extraction.
   split) are the money layer — see *Viewer payments* below. Exactly **one** Fly machine on
   purpose: every channel's queue and active job live in this process's memory.
 - **`web/`** (`@rh/web`, Vite + React 19 + Tailwind 4) — routes: `/portal` (viewer; also served
-  hosted at `/c/:channel`), `/router` (streamer capture + state machine), `/viewer` (OBS
+  hosted at `/c/:channel`), `/router` (the Creator Studio: capture + state machine behind Live / Effects / Safety / Earnings tabs; in cloud mode its settings/approvals/earnings calls are forwarded to the hosted channel by the bridge), `/viewer` (OBS
   Browser Source display), `/setup` (desktop onboarding wizard), `/dashboard` (hosted streamer
   dashboard). `lib/auth.ts` + `lib/channel.ts` make the same pages work local and hosted.
 - **`site/`** — the public marketing site. Deliberately **not** a workspace: a standalone Vite

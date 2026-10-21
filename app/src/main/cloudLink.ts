@@ -271,17 +271,15 @@ export class CloudLink {
     return `${this.cfg.url}/c/${encodeURIComponent(this.cfg.login)}`;
   }
 
-  private authedGet<T>(path: string): Promise<T> {
-    return this.authed<T>(path, "GET");
-  }
-
-  private authedPost<T>(path: string, payload: unknown): Promise<T> {
-    return this.authed<T>(path, "POST", payload);
-  }
-
-  /** Call this channel's authed API, rotating the access token once on 401.
-   *  Every control call shares this so the retry logic exists once. */
-  private async authed<T>(path: string, method: "GET" | "POST", payload?: unknown): Promise<T> {
+  /** Call this channel's authed API, rotating the access token once on
+   *  401. Every control call shares this so the retry logic exists once.
+   *  Returns the status + body as-is (the studio's cloud pass-through needs
+   *  the real status); `authedPost` is the throwing convenience. */
+  async request(
+    method: "GET" | "POST",
+    path: string,
+    payload?: unknown,
+  ): Promise<{ status: number; body: unknown }> {
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await fetch(
         `${this.cfg.url}/api/c/${encodeURIComponent(this.cfg.channelId)}/${path}`,
@@ -299,11 +297,23 @@ export class CloudLink {
         continue;
       }
       // A proxy in front of the control plane can answer 502/504 with HTML.
-      const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      return body;
+      return { status: res.status, body: await res.json().catch(() => ({})) };
     }
-    throw new Error("cloud session expired — sign in again");
+    return { status: 401, body: { error: "cloud session expired — sign in again" } };
+  }
+
+  private async authedPost<T>(path: string, payload: unknown): Promise<T> {
+    const { status, body } = await this.request("POST", path, payload);
+    const b = body as T & { error?: string };
+    if (status < 200 || status >= 300) throw new Error(b.error ?? `HTTP ${status}`);
+    return b;
+  }
+
+  private async authedGet<T>(path: string): Promise<T> {
+    const { status, body } = await this.request("GET", path);
+    const b = body as T & { error?: string };
+    if (status < 200 || status >= 300) throw new Error(b.error ?? `HTTP ${status}`);
+    return b;
   }
 
   private send(m: AnyMsg): boolean {

@@ -1,5 +1,5 @@
 {
-  "name": "reality-hijack",
+  "name": "stream-hijack",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -26,7 +26,8 @@
     "e2e:wizard": "node scripts/e2e-wizard.mjs",
     "e2e:hosted": "node scripts/e2e-hosted.mjs",
     "smoke:prod": "node scripts/smoke-prod.mjs",
-    "smoke:live": "node scripts/smoke-live.mjs"
+    "smoke:live": "node scripts/smoke-live.mjs",
+    "tour": "node scripts/studio-tour.mjs"
   },
   "devDependencies": {
     "@msgpack/msgpack": "^3.1.3",

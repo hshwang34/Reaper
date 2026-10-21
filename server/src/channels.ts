@@ -130,7 +130,7 @@ export type TestHijackResult =
 /** Free test hijacks per channel per UTC day, and their length. 10s of
  *  lucy-2.5 ≈ $0.20 — a deliberate onboarding cost, the only GPU time not
  *  paid for by a viewer. */
-export const TEST_HIJACKS_PER_DAY = 1;
+export const TEST_HIJACKS_PER_DAY = env.freeTestsPerDay;
 export const TEST_HIJACK_SEC = 10;
 const TEST_PRESET = "80s-anime";
 
@@ -283,7 +283,7 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
   // setStreamlabsToken), even for a token stored before that rule.
   startStreamlabs(isProduction ? "" : (row.streamlabsToken ?? ""));
 
-  let lastTestAt = 0;
+  let testsToday = { day: 0, n: 0 };
 
   const runtime: ChannelRuntime = {
     ...core,
@@ -335,10 +335,12 @@ export function getRuntime(channelId: string): ChannelRuntime | null {
           .get()?.n ?? 0;
       // The row is written at DISPATCH, so a test still queued behind another
       // job isn't in the ledger yet — the in-memory stamp closes that gap.
-      if (usedToday >= TEST_HIJACKS_PER_DAY || lastTestAt >= utcDayStart()) {
+      // The in-memory count covers tests dispatched but not yet in the ledger.
+      if (testsToday.day !== utcDayStart()) testsToday = { day: utcDayStart(), n: 0 };
+      if (Math.max(usedToday, testsToday.n) >= TEST_HIJACKS_PER_DAY) {
         return { ok: false, status: 429, error: "today's free test hijack is used — it resets at 00:00 UTC" };
       }
-      lastTestAt = Date.now();
+      testsToday.n++;
       const outcome = core.engine.manual(preset.prompt, TEST_HIJACK_SEC);
       log(tag, `free test hijack (${preset.id}) → ${outcome}`);
       return { ok: true, outcome };

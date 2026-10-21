@@ -36,6 +36,7 @@ import {
   type TriggerAdapter,
 } from "@rh/core";
 import { ObsController } from "./obs.js";
+export type { OverlayPlacement } from "./obs.js";
 import { createUploads } from "./uploads.js";
 import { isLoopbackRequest, loopbackGuard } from "./loopback.js";
 
@@ -47,6 +48,7 @@ export interface LocalServerHost {
   obsWsPassword: string;
   /** The OBS scene + Browser Source the hijack overlay lives in. Machine
    *  wiring, not streamer policy — so it's host config, not Settings. */
+  /** OBS scene to pin the overlay to; "" = every scene with a webcam. */
   obsScene: string;
   obsSource: string;
   /** Live settings access — host owns persistence. */
@@ -89,6 +91,15 @@ export interface LocalServerHost {
   moneyProxy?: {
     togglePause(): Promise<boolean>;
     status(): StatusSnapshot;
+  };
+  /** Cloud mode: the hosted channel owns settings, approvals, the safety
+   *  log, payouts and the test hijack — the studio's calls for those are
+   *  forwarded there (signed in as the streamer) instead of answered by the
+   *  idle local engine, whose copies the cloud never reads. */
+  cloudApi?: {
+    request(method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; body: unknown }>;
+    login: string;
+    portalUrl: string;
   };
 }
 
@@ -244,6 +255,9 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       obsScene: host.obsScene,
       obsSource: host.obsSource,
       obsConnected: obs.isConnected(),
+      // Where the overlay is installed, in the streamer's own words.
+      obsOverlay: obs.overlayPlacements()?.map((p) => ({ scene: p.scene, camera: p.camera })) ?? null,
+      cloud: host.cloudApi ? { login: host.cloudApi.login, portalUrl: host.cloudApi.portalUrl } : null,
     });
   });
 
@@ -257,6 +271,27 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       res.status(502).json({ ok: false, error: (e as Error).message });
     }
   });
+
+  // Cloud mode: the hosted channel's own settings, approvals, safety log,
+  // earnings and test hijack. Matched before the local channel API so the
+  // idle local engine never answers for them.
+  if (host.cloudApi) {
+    const cloud = host.cloudApi;
+    const FORWARD = /^\/(settings|review(\/[^/]+)?|moderation|ledger|payouts|payouts\/onboard|payments|test-hijack)$/;
+    app.use("/api", (req, res, next) => {
+      if (!FORWARD.test(req.path) || (req.method !== "GET" && req.method !== "POST")) return next();
+      requireAuth(req, res, () => {
+        // Forward an allowlist of query params only: the local install
+        // token can ride in ?auth=, and it must never leave this machine.
+        const limit = Number(req.query.limit);
+        const qs = Number.isFinite(limit) && limit > 0 ? `?limit=${Math.floor(limit)}` : "";
+        cloud
+          .request(req.method as "GET" | "POST", req.path.slice(1) + qs, req.body)
+          .then(({ status, body }) => res.status(status).json(body))
+          .catch((e) => res.status(502).json({ error: `cloud: ${(e as Error).message}` }));
+      });
+    });
+  }
 
   // config · presets · submissions · settings · token · panic · dev/* —
   // the channel API shared with the hosted plane.

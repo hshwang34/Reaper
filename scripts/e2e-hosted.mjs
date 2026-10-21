@@ -32,8 +32,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WebSocketServer } from "ws";
-import { encode, decode } from "@msgpack/msgpack";
+import { startFakeObs, webcam, layer } from "./lib/fakeObs.mjs";
 import { chromium } from "playwright-core";
 import Stripe from "stripe";
 
@@ -73,41 +72,13 @@ function freePort() {
   });
 }
 
-// ── fake OBS ────────────────────────────────────────────────────────────────
-/** Every SetSceneItemEnabled, in order. */
-const obsCalls = [];
-/** The Browser Source URL the app provisioned (= the /viewer page + token). */
-let provisionedUrl = "";
-function startFakeObs(port) {
-  const wss = new WebSocketServer({
-    port,
-    host: "127.0.0.1",
-    handleProtocols: (p) => (p.has("obswebsocket.msgpack") ? "obswebsocket.msgpack" : "obswebsocket.json"),
-  });
-  wss.on("connection", (ws) => {
-    const msgpack = ws.protocol === "obswebsocket.msgpack";
-    const send = (m) => ws.send(msgpack ? encode(m) : JSON.stringify(m));
-    send({ op: 0, d: { obsWebSocketVersion: "5.5.0", rpcVersion: 1 } });
-    ws.on("message", (raw, isBinary) => {
-      const m = isBinary ? decode(raw) : JSON.parse(String(raw));
-      if (m.op === 1) return send({ op: 2, d: { negotiatedRpcVersion: 1 } });
-      if (m.op !== 6) return;
-      const { requestType, requestId, requestData = {} } = m.d;
-      let responseData = {};
-      if (requestType === "GetSceneItemId") responseData = { sceneItemId: 7 };
-      if (requestType === "GetSceneItemList") responseData = { sceneItems: [] };
-      if (requestType === "GetInputSettings") responseData = { inputSettings: { url: "" } };
-      if (requestType === "SetInputSettings" || requestType === "CreateInput") {
-        provisionedUrl = requestData.inputSettings?.url ?? provisionedUrl;
-      }
-      if (requestType === "SetSceneItemEnabled") {
-        obsCalls.push({ visible: requestData.sceneItemEnabled, at: Date.now() });
-      }
-      send({ op: 7, d: { requestType, requestId, requestStatus: { result: true, code: 100 }, responseData } });
-    });
-  });
-  return wss;
-}
+// ── fake OBS (stateful: scripts/lib/fakeObs.mjs) ─────────────────────────────
+// A real streamer layout: no scene called "Scene", a webcam under a frame and
+// alerts. The app must find the webcam scene and slot the overlay directly
+// above the webcam without touching anything else.
+/** Every overlay show/hide, in order. */
+let obsCalls = [];
+let fakeObs = null;
 
 // ── fake Stripe ────────────────────────────────────────────────────────────
 const stripeState = {
@@ -292,7 +263,14 @@ async function main() {
 
   const [port, obsPort, stripePort] = [await freePort(), await freePort(), await freePort()];
   serverBase = `http://127.0.0.1:${port}`;
-  obs = startFakeObs(obsPort);
+  fakeObs = obs = startFakeObs(obsPort, {
+    scenes: {
+      "Starting Soon": [layer("Countdown", "ffmpeg_source")],
+      "Just Chatting": [layer("Background"), webcam("Facecam"), layer("Cam frame"), layer("Alerts", "browser_source")],
+    },
+    program: "Starting Soon",
+  });
+  obsCalls = obs.visibility;
   stripeSrv = await startFakeStripe(stripePort, serverBase);
 
   const data = join(scratch, "server");
@@ -357,7 +335,7 @@ async function main() {
     "wizard shows the signed-in Twitch login",
     await waitFor(async () => (await win.locator("body").innerText()).toLowerCase().includes(LOGIN), 15_000),
   );
-  check("first run does NOT touch OBS before consent", provisionedUrl === "");
+  check("first run does NOT touch OBS before consent", fakeObs.provisionedUrl() === "");
   await app.close();
 
   // The same dev sign-in the app just did gives us the streamer's API token.
@@ -392,8 +370,26 @@ async function main() {
   check("returning launch opens /router", await waitFor(async () => new URL(win.url()).pathname === "/router", 20_000), win.url());
   check(
     "app provisions the OBS Browser Source with the /viewer URL",
-    await waitFor(async () => /\/viewer\?auth=/.test(provisionedUrl), 15_000),
-    provisionedUrl.replace(/auth=[^&]+/, "auth=…"),
+    await waitFor(async () => /\/viewer\?auth=/.test(fakeObs.provisionedUrl()), 15_000),
+    fakeObs.provisionedUrl().replace(/auth=[^&]+/, "auth=…"),
+  );
+  // An ADDITION to the streamer's layout: into the scene with the webcam
+  // (there's no "Scene"), directly above the webcam, under their frame and
+  // alerts, born hidden, sized to the webcam — and nothing of theirs moved.
+  await waitFor(async () => fakeObs.scene("Just Chatting").join() === "Background,Facecam,AI Hijack,Cam frame,Alerts", 10_000);
+  check(
+    "overlay lands directly above the webcam, under the streamer's frame + alerts",
+    fakeObs.scene("Just Chatting").join() === "Background,Facecam,AI Hijack,Cam frame,Alerts",
+    fakeObs.scene("Just Chatting").join(" < "),
+  );
+  check("scenes without a webcam are left alone", fakeObs.scene("Starting Soon").join() === "Countdown");
+  const ov = fakeObs.item("Just Chatting", "AI Hijack");
+  check(
+    "overlay is hidden and covers the webcam's drawn rect (398,181 1104×621)",
+    ov?.enabled === false &&
+      ov.transform.positionX === 398 && Math.round(ov.transform.positionY) === 181 &&
+      ov.transform.boundsWidth === 1104 && Math.round(ov.transform.boundsHeight) === 621,
+    JSON.stringify(ov && { enabled: ov.enabled, x: ov.transform.positionX, y: ov.transform.positionY, w: ov.transform.boundsWidth, h: ov.transform.boundsHeight }),
   );
 
   browser = await chromium.launch({
@@ -402,12 +398,15 @@ async function main() {
     args: ["--autoplay-policy=no-user-gesture-required"],
   });
   const viewerPage = await (await browser.newContext()).newPage(); // the OBS Browser Source
-  await viewerPage.goto(provisionedUrl);
+  await viewerPage.goto(fakeObs.provisionedUrl());
 
-  await win.getByRole("button", { name: /turn the camera on|arm camera/i }).click();
+  // First launch shows the "how it works" tour; a streamer can skip it.
+  const skipTour = win.getByRole("button", { name: /^skip$/i });
+  if (await skipTour.waitFor({ timeout: 5000 }).then(() => true, () => false)) await skipTour.click();
+  await win.getByRole("button", { name: /turn on stream hijack/i }).click();
   check(
     "router arms the (fake) camera",
-    await waitFor(async () => !(await win.getByRole("button", { name: /turn the camera on|arm camera/i }).isVisible()), 15_000),
+    await waitFor(async () => !(await win.getByRole("button", { name: /turn on stream hijack/i }).isVisible()), 15_000),
   );
   check(
     "portal goes live once the app is connected",
@@ -421,7 +420,7 @@ async function main() {
   await portal.getByRole("button", { name: /80s Anime/i }).first().click();
   await portal.getByPlaceholder("optional").first().fill("e2e viewer");
   await portal.locator('input[type="number"]').fill("4");
-  obsCalls.length = 0;
+  obsCalls.splice(0);
   const t0 = Date.now();
   await portal.getByRole("button", { name: /^Pay \$4/ }).click();
   // The portal consumes ?paid= and cleans the URL, so assert on what the
@@ -465,7 +464,7 @@ async function main() {
   const forgedSub = await api(`/api/c/${LOGIN}/submissions`, { body: { presetId: "80s-anime" } });
   const forgedCo = await api(`/api/c/${LOGIN}/checkout`, { body: { code: forgedSub.json?.code, amountUsd: 50 } });
   const forged = [...stripeState.sessions.values()].at(-1);
-  obsCalls.length = 0;
+  obsCalls.splice(0);
   // Signed correctly, but claims 50¢ was paid for a $50 session.
   await sendWebhook(signer, serverBase, forged, { amount_total: 50 });
   await sleep(2500);
@@ -492,7 +491,7 @@ async function main() {
     await fetch(co.json.url, { redirect: "manual" }); // "pay" → signed webhook
     return [...stripeState.sessions.values()].at(-1);
   };
-  obsCalls.length = 0;
+  obsCalls.splice(0);
   const playing = await buy(10);
   const queued = await buy(5);
   check("first paid hijack goes live", await waitFor(async () => obsCalls.some((c) => c.visible === true), 30_000));

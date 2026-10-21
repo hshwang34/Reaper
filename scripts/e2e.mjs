@@ -19,8 +19,7 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WebSocketServer } from "ws";
-import { encode, decode } from "@msgpack/msgpack";
+import { startFakeObs } from "./lib/fakeObs.mjs";
 import { chromium } from "playwright-core";
 import sharp from "sharp";
 
@@ -53,38 +52,10 @@ function freePort() {
   });
 }
 
-// ── fake OBS (obs-websocket v5, json + msgpack subprotocols) ────────────────
-/** Every SetSceneItemEnabled the rig makes, in order: [{visible, at}]. */
-const obsCalls = [];
-function startFakeObs(port) {
-  const wss = new WebSocketServer({
-    port,
-    host: "127.0.0.1",
-    handleProtocols: (protocols) =>
-      protocols.has("obswebsocket.msgpack") ? "obswebsocket.msgpack" : "obswebsocket.json",
-  });
-  wss.on("connection", (ws) => {
-    const msgpack = ws.protocol === "obswebsocket.msgpack";
-    const send = (m) => ws.send(msgpack ? encode(m) : JSON.stringify(m));
-    send({ op: 0, d: { obsWebSocketVersion: "5.5.0", rpcVersion: 1 } }); // Hello, no auth
-    ws.on("message", (raw, isBinary) => {
-      const m = isBinary ? decode(raw) : JSON.parse(String(raw));
-      if (m.op === 1) return send({ op: 2, d: { negotiatedRpcVersion: 1 } }); // Identified
-      if (m.op !== 6) return;
-      const { requestType, requestId, requestData = {} } = m.d;
-      let responseData = {};
-      if (requestType === "GetSceneItemId") responseData = { sceneItemId: 7 };
-      if (requestType === "SetSceneItemEnabled") {
-        obsCalls.push({ visible: requestData.sceneItemEnabled, at: Date.now() });
-      }
-      send({
-        op: 7,
-        d: { requestType, requestId, requestStatus: { result: true, code: 100 }, responseData },
-      });
-    });
-  });
-  return wss;
-}
+// ── fake OBS (obs-websocket v5, json + msgpack): scripts/lib/fakeObs.mjs ──
+// The demo rig's hand setup: one scene, a webcam, the overlay already in it.
+/** Every overlay show/hide the rig makes, in order: [{visible, at}]. */
+let obsCalls = [];
 
 // ── run ─────────────────────────────────────────────────────────────────────
 let sidecar, browser, obs, settingsDir;
@@ -95,7 +66,8 @@ async function main() {
   execSync("npm run build", { cwd: root, stdio: "ignore" });
 
   const [port, obsPort] = [await freePort(), await freePort()];
-  obs = startFakeObs(obsPort);
+  obs = startFakeObs(obsPort, { overlayIn: ["Scene"] });
+  obsCalls = obs.visibility;
   const base = `http://127.0.0.1:${port}`;
 
   // Explicit empty values win over .env (dotenv never overrides set vars), so
@@ -122,7 +94,7 @@ async function main() {
       SIDECAR_SETTINGS_PATH: settingsFile,
       OBS_WS_URL: `ws://127.0.0.1:${obsPort}`,
       OBS_WS_PASSWORD: "",
-      OBS_SCENE: "Scene",
+      OBS_SCENE: "", // auto: wherever the overlay sits over a webcam
       OBS_SOURCE: "AI Hijack",
     },
     stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore",
@@ -160,10 +132,13 @@ async function main() {
   await viewer.goto(`${base}/viewer`);
   const router = await ctx.newPage();
   await router.goto(`${base}/router`);
-  await router.getByRole("button", { name: /turn the camera on|arm camera/i }).click();
+  // First launch shows the "how it works" tour; a streamer can skip it.
+  const skipTour = router.getByRole("button", { name: /^skip$/i });
+  if (await skipTour.waitFor({ timeout: 5000 }).then(() => true, () => false)) await skipTour.click();
+  await router.getByRole("button", { name: /turn on stream hijack/i }).click();
   check(
     "router arms the camera",
-    await waitFor(async () => !(await router.getByRole("button", { name: /turn the camera on|arm camera/i }).isVisible()), 10_000),
+    await waitFor(async () => !(await router.getByRole("button", { name: /turn on stream hijack/i }).isVisible()), 10_000),
   );
   check(
     "router OBS tile shows connected",
@@ -175,7 +150,7 @@ async function main() {
   check("submission returns a claim code", sub.status === 200 && typeof sub.json?.code === "string", sub.json?.code);
 
   const N = 4;
-  obsCalls.length = 0;
+  obsCalls.splice(0);
   const t0 = Date.now();
   const tip = await api("/api/dev/fake-tip", { amount: N, message: `go ${sub.json?.code}`, username: "e2e" });
   check("tip is accepted and queued", tip.status === 200 && tip.json?.ok === true, String(tip.json?.outcome));
@@ -187,7 +162,7 @@ async function main() {
   // on-stream chips over the effect.
   check(
     "output guard loaded in the router and passed the first frame",
-    /output guard ready/i.test(await router.locator("body").innerText()),
+    /output (guard|watcher) ready/i.test(await router.locator("body").innerText()),
   );
   const chips = await waitFor(async () => {
     const t = await viewer.locator("body").innerText();
@@ -210,7 +185,7 @@ async function main() {
 
   // ── 2. panic mid-job: hides immediately ─────────────────────────────────
   await sleep(4000); // cooldown between jobs
-  obsCalls.length = 0;
+  obsCalls.splice(0);
   await api("/api/dev/fake-tip", { amount: 10, message: "panic test", username: "e2e" });
   const shown2 = await waitFor(() => obsCalls.some((c) => c.visible === true), 20_000);
   check("second job goes live", shown2);
@@ -292,13 +267,18 @@ async function main() {
     final?.error,
   );
 
-  // …and what the viewer actually sees: type, press Enter, read the findings.
+  // …and what the viewer actually sees: pick "Write your own", type, press
+  // Enter, read the findings.
   const portal = await ctx.newPage();
   await portal.goto(`${base}/portal`);
-  const promptBox = portal.getByPlaceholder(/snow globe/i);
-  // The box renders only after the portal fetches its config — isVisible()
+  const writeOwn = portal.getByRole("button", { name: /write your own/i });
+  const promptBox = portal.getByRole("textbox", { name: /describe your effect/i });
+  // The tile renders only after the portal fetches its config — isVisible()
   // doesn't wait, so on a slow CI runner it raced the first render.
-  if (await promptBox.waitFor({ timeout: 10_000 }).then(() => true, () => false)) {
+  if (
+    (await writeOwn.waitFor({ timeout: 10_000 }).then(() => true, () => false)) &&
+    (await writeOwn.click().then(() => promptBox.waitFor({ timeout: 5_000 })).then(() => true, () => false))
+  ) {
     await promptBox.fill("a nude beach with naked surfers");
     await promptBox.press("Enter");
     const shownFindings = await waitFor(async () => /Didn't pass/.test(await portal.locator("body").innerText()), 8000);

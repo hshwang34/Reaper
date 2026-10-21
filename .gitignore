@@ -11,3 +11,4 @@ server/safety/
 .claude/worktrees/
 server/data.sqlite*
 server/uploads/
+tour/

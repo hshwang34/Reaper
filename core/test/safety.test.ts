@@ -323,12 +323,14 @@ test("jobs carry the streamer's safety policy; the public label hides custom tex
 
 // ── Settings ─────────────────────────────────────────────────────────────
 
-test("settings: legacy allowCustomPrompts migrates; hosted base opens prompts + photos behind classifiers", () => {
+test("settings: legacy allowCustomPrompts migrates; hosted base is 'Anything goes' with strict screening", () => {
   assert.equal(loadSettings({ allowCustomPrompts: false }).customPrompts, "off");
   assert.equal(loadSettings({ allowCustomPrompts: true }).customPrompts, "classified");
   assert.equal(loadSettings({ allowCustomPrompts: true, customPrompts: "off" }).customPrompts, "off");
   assert.ok(!("allowCustomPrompts" in loadSettings({ allowCustomPrompts: true })));
 
+  // Product decision 2026-10-20: new channels start fully open (typed ideas
+  // + face swaps) and tighten from the studio; classifiers stay strict.
   const hosted = loadSettings({}, HOSTED_SETTINGS);
   // Decision #12: viewers always get a prompt box and a photo field; the
   // classifier chain, not a presets-only default, is what keeps it safe.

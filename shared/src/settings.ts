@@ -24,15 +24,7 @@ export const DEFAULT_SETTINGS: Settings = {
   queueDepth: 5,
   cooldownSec: 3,
   defaultPresetId: "80s-anime",
-  enabledPresetIds: [
-    "lava-room",
-    "underwater",
-    "80s-anime",
-    "cyberpunk",
-    "haunted",
-    "winter-wonderland",
-    "photo-swap",
-  ],
+  disabledPresetIds: [],
   allowSolePendingMatch: true,
   customPrompts: "classified",
   maxIntensity: 5,
@@ -81,10 +73,31 @@ export function loadSettings(persisted: unknown, base: Settings = DEFAULT_SETTIN
 function migrateLegacy(persisted: unknown): Partial<Settings> {
   if (!persisted || typeof persisted !== "object") return {};
   const p = persisted as Record<string, unknown>;
+  const out: Partial<Settings> = {};
   if (typeof p.allowCustomPrompts === "boolean" && p.customPrompts === undefined) {
-    return { customPrompts: p.allowCustomPrompts ? "classified" : "off" };
+    out.customPrompts = p.allowCustomPrompts ? "classified" : "off";
   }
-  return {};
+  return out;
+}
+
+/** The catalog before presets became opt-out. A saved opt-IN list can only
+ *  have meant something about these seven; every later preset starts on. */
+const LEGACY_CATALOG = [
+  "lava-room",
+  "underwater",
+  "80s-anime",
+  "cyberpunk",
+  "haunted",
+  "winter-wonderland",
+  "photo-swap",
+];
+
+/** Settings saved (or patched by an older app build) with `enabledPresetIds`
+ *  → the equivalent opt-out list. Ignored once `disabledPresetIds` exists. */
+function disabledFromLegacyEnabled(p: Record<string, unknown>): string[] | undefined {
+  if (p.disabledPresetIds !== undefined || !Array.isArray(p.enabledPresetIds)) return undefined;
+  const enabled = new Set(p.enabledPresetIds.filter((x): x is string => typeof x === "string"));
+  return LEGACY_CATALOG.filter((id) => !enabled.has(id));
 }
 
 /** Paid seconds for a tip: floor(amount × rate), at least 1, capped. */
@@ -178,9 +191,13 @@ export function sanitizeSettingsPatch(input: unknown): Partial<Settings> {
     const v = p.defaultPresetId;
     if (typeof v === "string" && v.trim()) out.defaultPresetId = v.trim().slice(0, 64);
   }
-  for (const key of ["enabledPresetIds", "blocklistExtra", "bannedViewers"] as const) {
+  for (const key of ["disabledPresetIds", "blocklistExtra", "bannedViewers"] as const) {
     const v = stringList(p[key]);
     if (v) out[key] = v;
+  }
+  {
+    const legacy = disabledFromLegacyEnabled(p);
+    if (legacy) out.disabledPresetIds = legacy;
   }
   {
     const v = stringList(p.allowedCategories);

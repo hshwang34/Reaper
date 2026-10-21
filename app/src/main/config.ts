@@ -2,7 +2,7 @@
 // CLI keeps in the repo (.env + settings.json + uploads/).
 //
 // Layout under app.getPath("userData") (e.g. ~/Library/Application Support/
-// Reality Hijack/):
+// Stream Hijack/):
 //   settings.json — the same Settings shape as the demo rig
 //   keys.json     — Decart/Streamlabs/OBS credentials (M2 "paste keys" mode;
 //                   moves to safeStorage with the settings UI, and mostly
@@ -151,7 +151,8 @@ export function loadKeys(): Keys {
     obsWsPassword: obsExplicit
       ? String(saved.obsWsPassword ?? "")
       : (discovered.password ?? process.env.OBS_WS_PASSWORD ?? ""),
-    obsScene: String(saved.obsScene ?? "") || process.env.OBS_SCENE?.trim() || "Scene",
+    // "" = auto: the overlay goes in every scene that shows a webcam.
+    obsScene: String(saved.obsScene ?? "") || process.env.OBS_SCENE?.trim() || "",
     obsSource:
       String(saved.obsSource ?? "") || process.env.OBS_SOURCE?.trim() || "AI Hijack",
     openaiApiKey: String(saved.openaiApiKey ?? "") || process.env.OPENAI_API_KEY?.trim() || "",

@@ -60,7 +60,7 @@ export default function SetupPage() {
   if (!d) {
     return (
       <div className="grid h-screen place-items-center text-zinc-500">
-        The setup wizard runs inside the Reality Hijack app.
+        The setup wizard runs inside the Stream Hijack app.
       </div>
     );
   }
@@ -77,7 +77,7 @@ export default function SetupPage() {
   return (
     <div className="mx-auto max-w-2xl p-8">
       <header className="mb-8">
-        <h1 className="text-2xl font-bold">Set up Reality Hijack</h1>
+        <h1 className="text-2xl font-bold">Set up Stream Hijack</h1>
         <Stepper step={step} />
       </header>
 
@@ -218,7 +218,7 @@ function SignInStep({
       <Card>
         <p>
           Signed in as <b className="text-brand-400">{state.login}</b>. Your viewer page,
-          payments and the AI model run on the Reality Hijack service — no API keys on this
+          payments and the AI model run on the Stream Hijack service — no API keys on this
           machine.
         </p>
         <Primary onClick={next}>Continue</Primary>
@@ -266,7 +266,7 @@ function SignInStep({
     return (
       <Card>
         <p className="text-zinc-300">
-          <b>Hosted sign-in isn't available in this build yet.</b> Reality Hijack signs you in
+          <b>Hosted sign-in isn't available in this build yet.</b> Stream Hijack signs you in
           with Twitch and runs payments, moderation and the AI model from our servers —
           nothing to configure on your side. That service isn't live for this build; you can
           still set up OBS and your camera and try the flow with a passthrough test effect.
@@ -321,7 +321,7 @@ function ObsStep({
   return (
     <Card>
       <p className="text-sm text-zinc-400">
-        Reality Hijack talks to OBS to show and hide the effect. Nothing else in your scenes
+        Stream Hijack talks to OBS to show and hide the effect. Nothing else in your scenes
         changes.
       </p>
       <div className="flex flex-wrap gap-2">
@@ -518,7 +518,7 @@ function CameraStep({
   return (
     <Card>
       <p className="text-zinc-300">
-        Reality Hijack takes your picture from <b>OBS's Virtual Camera</b>, not straight from
+        Stream Hijack takes your picture from <b>OBS's Virtual Camera</b>, not straight from
         the webcam, so the effect lands on exactly what you show on stream — your scene,
         framing and filters.
       </p>
@@ -1093,7 +1093,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
         <p className="mb-1 font-semibold text-zinc-100">Two things to remember on stream</p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
-            Keep the Reality Hijack window open (it can sit behind OBS). It's what runs each
+            Keep the Stream Hijack window open (it can sit behind OBS). It's what runs each
             hijack.
           </li>
           <li>
@@ -1112,7 +1112,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
             void d.setAutoLaunch(e.target.checked);
           }}
         />
-        Start Reality Hijack when I log in
+        Start Stream Hijack when I log in
       </label>
       {/* Marks setup done and relaunches: from now on the app opens straight
           into the studio, and any key pasted in step 1 is loaded. */}

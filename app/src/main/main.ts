@@ -33,7 +33,7 @@ import {
   systemPreferences,
   Tray,
 } from "electron";
-import { createLocalServer, type LocalServer } from "@rh/sidecar";
+import { createLocalServer, type LocalServer, type OverlayPlacement } from "@rh/sidecar";
 import { log, warn } from "@rh/core";
 import {
   getAppState,
@@ -83,13 +83,14 @@ let viewerUrlGlobal = "";
 /** The bridge's origin — the only thing the router window may navigate to. */
 let ownOriginGlobal = "";
 /** OBS scene + source the overlay lives in — resolved once at boot from
- *  keys.json / .env (machine wiring, not streamer Settings). */
-let obsWiring = { scene: "Scene", source: "AI Hijack" };
+ *  keys.json / .env (machine wiring, not streamer Settings). scene "" =
+ *  auto: every scene that shows a webcam. */
+let obsWiring = { scene: "", source: "AI Hijack" };
 
 // Windows keys taskbar grouping, notifications and the pinned shortcut on
 // this id; it must match electron-builder's appId or the installed shortcut
 // and the running window show up as two different apps.
-if (process.platform === "win32") app.setAppUserModelId("com.realityhijack.app");
+if (process.platform === "win32") app.setAppUserModelId("com.streamhijack.app");
 
 // ── Single instance ────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -181,6 +182,20 @@ async function boot(): Promise<void> {
             },
         }
       : undefined,
+    // Cloud mode: the studio's settings / approvals / safety log / earnings
+    // live on the hosted channel. `link` is created just below; until it is,
+    // the studio gets a plain 503 it already knows how to show.
+    cloudApi:
+      cloudMode && cloudCfg
+        ? {
+            request: (method, path, body) =>
+              link
+                ? link.request(method, path, body)
+                : Promise.resolve({ status: 503, body: { error: "still connecting to Stream Hijack" } }),
+            login: cloudCfg.login,
+            portalUrl: `${cloudCfg.url}/c/${encodeURIComponent(cloudCfg.login)}`,
+          }
+        : undefined,
   });
 
   const port = await listenOnFirstFreePort(local, PORTS);
@@ -203,7 +218,20 @@ async function boot(): Promise<void> {
   // On a first run this is the wizard's consent-gated step instead: the app
   // shouldn't add a source to someone's OBS before they've seen it explained.
   viewerUrlGlobal = `http://127.0.0.1:${port}/viewer?auth=${authToken}`;
-  if (!firstRun) void provisionObs(viewerUrlGlobal);
+  if (!firstRun) {
+    void provisionObs(viewerUrlGlobal);
+    // Keep the overlay where the streamer goes live: OBS launched after us,
+    // a new scene with a webcam, a switched scene collection. Debounced —
+    // our own placement edits fire the same events (and are no-ops second
+    // time round, so this settles after one pass).
+    let again: ReturnType<typeof setTimeout> | null = null;
+    const reprovision = () => {
+      if (again) clearTimeout(again);
+      again = setTimeout(() => void provisionObs(viewerUrlGlobal), 1500);
+    };
+    local.obs.onConnected(reprovision);
+    local.obs.onLayoutChanged(reprovision);
+  }
 
   // ── Keys/settings IPC for the in-app setup panel ───────────────────────
   // Only our own loopback pages get the install token (see preload.ts).
@@ -289,7 +317,7 @@ async function boot(): Promise<void> {
         viewerUrlGlobal,
       );
       refreshTray();
-      return { ok: true, detail: result };
+      return { ok: true, detail: describePlacements(result.placements) };
     } catch (e) {
       return { ok: false, detail: (e as Error).message };
     }
@@ -343,7 +371,7 @@ async function boot(): Promise<void> {
   win = new BrowserWindow({
     width: 1280,
     height: 840,
-    title: "Reality Hijack",
+    title: "Stream Hijack",
     // Windows/Linux draw Electron's default File/Edit/View bar inside the
     // window; the router has no use for it (Alt still reveals it).
     autoHideMenuBar: true,
@@ -476,7 +504,7 @@ async function provisionObs(viewerUrl: string): Promise<void> {
       obsWiring.source,
       viewerUrl,
     );
-    log("app", `OBS source "${obsWiring.source}": ${result}`);
+    log("app", `OBS source "${obsWiring.source}": ${result.status} — ${describePlacements(result.placements)}`);
   } catch (e) {
     warn(
       "app",
@@ -484,6 +512,15 @@ async function provisionObs(viewerUrl: string): Promise<void> {
     );
   }
   refreshTray();
+}
+
+/** "Installed in Just Chatting (over Facecam), Gaming (over Cam)" */
+function describePlacements(ps: OverlayPlacement[]): string {
+  if (!ps.length) return "not installed in any scene";
+  return (
+    "Installed in " +
+    ps.map((p) => `"${p.scene}"${p.camera ? ` over "${p.camera}"` : " (no webcam found)"}`).join(", ")
+  );
 }
 
 // ── Tray ──────────────────────────────────────────────────────────────────
@@ -530,7 +567,7 @@ function refreshTray(): void {
   // so the state goes in the hover tooltip instead.
   if (process.platform === "darwin") tray.setTitle(` ${stateGlyph}`);
   tray.setToolTip(
-    `Reality Hijack — ${snap.paused ? "PAUSED" : snap.routerState}` +
+    `Stream Hijack — ${snap.paused ? "PAUSED" : snap.routerState}` +
       (snap.queueLength ? ` · ${snap.queueLength} queued` : ""),
   );
   tray.setContextMenu(
@@ -575,7 +612,7 @@ function refreshTray(): void {
         },
       },
       { type: "separator" },
-      { label: "Quit Reality Hijack", role: "quit" },
+      { label: "Quit Stream Hijack", role: "quit" },
     ]),
   );
 }
