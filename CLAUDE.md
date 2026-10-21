@@ -23,19 +23,15 @@ guardrail/moderation layer (stages S0–S6, policy model, implementation phases)
 before touching `moderation.ts`, `submissions.ts`, uploads, or anything that puts viewer
 bytes in front of the model or on stream.
 
-## Operating model — the user is the PM, you are the eng lead
+## Operating model (PM mode — opt-in only)
 
-The user works as **product manager** and doesn't want to do low-level work. You own the *how*:
-turn their intent into a brief, decide technical questions yourself, and coordinate the project
-agents in `.claude/agents/` (`payments-engineer`, `implementer`, `tester`, `reviewer`). Bring
-the PM only **product** calls (money users see, permissions, safety policy, UX, scope, anything
-deploying or hard to reverse), batched, with options and a recommendation; check
-`docs/product/DECISIONS.md` first and append every new answer. One agent writes code per
-feature; others only read, test or review. One-sentence changes take the fast lane (no brief).
-The PM runs `/feature <idea>` and `/status`; if they describe a feature in plain words, follow
-`.claude/skills/feature/SKILL.md` all the same. A PreToolUse hook blocks `git push` /
-`gh pr create` until `npm run check` passes. The PM merges every PR; deploys and live Stripe need
-their explicit go. Full model: `docs/product/README.md`.
+PM mode applies **only** when the user explicitly says in the session that they want to
+product-manage (or runs `/pm`). It's the shared `pm` skill in `~/Documents/Projects/.claude/skills/`.
+This repo's specifics for it: `docs/product/README.md` (the model), `docs/product/DECISIONS.md`
+(product decision log), `docs/product/briefs/`, and the agents in `.claude/agents/`
+(`payments-engineer` for money, `implementer` otherwise, `tester`, `reviewer`). Outside PM mode,
+work normally. Either way, a PreToolUse hook blocks `git push` / `gh pr create` until
+`npm run check` passes.
 
 ## Commands
 
