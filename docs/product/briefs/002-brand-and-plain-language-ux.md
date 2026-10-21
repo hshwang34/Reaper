@@ -127,3 +127,15 @@ revert the Stripe-cancel commit (`34aef13`); (3) the PM's recording session for 
 previews (`/decart-test` → Record all effects, then `site/tools/encode-clips.sh --app`);
 (4) confirm decision #21 (eng lead merges on green) or keep #11 (PM merges) — the shared `pm`
 skill already says the eng lead merges.
+
+## Close-out 2026-10-21 afternoon — PR 2 ships as-is
+
+The PM closed Reality Hijack out to focus on other projects (decision #22): everything
+outstanding goes to `main` and the product launches as it stands. All five gates ran green on
+the rebased branch from the orchestrator session: `check` (core 88, web 45, server 33, sidecar
+11, app 7), `e2e` 29/29, `e2e:wizard` 11/11, `e2e:hosted` 42/42, `tour` 41/41 (the two
+previously flaky steps passed; not hardened). Product items (1) and (2) above are kept as-is;
+(4) is logged as decision #21; (3) stays open — the effect previews and the site's "What's
+possible" section (branch `worktree-site-tip-demo`, mock clips only) wait on a real recording.
+PR 3 (website) is not started. Not done on this branch: the tester + fresh-context reviewer
+pass the work order asked for; the gates stand in for it.
