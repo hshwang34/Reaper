@@ -1,6 +1,6 @@
 # 002 — One brand, real previews, plain-language UX everywhere
 
-**Status:** approved (pending PM's one-line approve) · **Owner:** PM · **PR:** — · **Updated:** 2026-10-20
+**Status:** building · **Owner:** PM · **PR:** — · **Updated:** 2026-10-20
 
 ## Problem
 The product was built surface by surface (wizard, studio, viewer portal, OBS overlay, website)
@@ -66,7 +66,10 @@ their money buys. Our users are streamers and their chat — not software engine
 4. **Sequencing.** — A: three PRs: (1) BRAND.md + preview pipeline + viewer portal, (2) studio +
    wizard, (3) website; B: one PR for everything; C: copy audit first, previews later.
    **Recommendation:** A — the portal is where money changes hands, and each PR stays reviewable.
-   → *Answer:* **A** — three PRs, viewer portal first (DECISIONS #20).
+   → *Answer:* **A** — three PRs, viewer portal first (DECISIONS #20). **PM, 2026-10-20:** the
+   recording session itself is out of this run; the PM records tomorrow with their photo ready.
+   PR 1 ships the brand guide, the portal rewrite, and the preview slots + batch recorder with
+   the CSS art as fallback, so the files drop in without code changes.
 
 ## Engineering decisions (filled in by the lead while building)
 - The base clip is the PM's own webcam. The recorder batches all 17 effects from one sitting
