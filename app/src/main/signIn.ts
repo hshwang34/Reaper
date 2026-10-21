@@ -44,11 +44,14 @@ export function signInWithBrowser(cloudUrl: string): Promise<CloudConfig | null>
       const refresh = url.searchParams.get("refresh") ?? "";
       const channelId = url.searchParams.get("channel") ?? "";
       const login = url.searchParams.get("login") ?? "";
-      res.writeHead(200, { "content-type": "text/html" }).end(
-        `<body style="font-family:system-ui;background:#0a0a0a;color:#e4e4e7;display:grid;place-items:center;height:100vh">
+      // charset is load-bearing: without it the browser decodes the ✅ as
+      // Latin-1 and the streamer sees "âœ…".
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(
+        `<!doctype html><meta charset="utf-8"><title>Stream Hijack</title>
+         <body style="font-family:system-ui;background:#0a0a0a;color:#e4e4e7;display:grid;place-items:center;height:100vh">
            <div style="text-align:center">
              <h2>${refresh ? "Signed in ✅" : "Sign-in failed"}</h2>
-             <p>You can close this tab and return to Reality Hijack.</p>
+             <p>You can close this tab and return to Stream Hijack.</p>
            </div></body>`,
       );
       if (!refresh || !channelId) {

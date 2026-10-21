@@ -128,3 +128,21 @@ test("job:done ok is coerced strictly — a truthy string is a failure", () => {
   join("router").receive({ t: "job:done", jobId: "j", ok: "false" });
   assert.deepEqual(calls, ["done:j:false"]);
 });
+
+test("a busy port surfaces on the http server, not as an uncaught WS error", async () => {
+  const { createServer } = await import("node:http");
+  const blocker = createServer();
+  // unref: if this regresses (an uncaught throw), the test must fail, not hang.
+  blocker.unref();
+  await new Promise<void>((r) => blocker.listen(0, "127.0.0.1", () => r()));
+  const port = (blocker.address() as { port: number }).port;
+
+  const server = createServer().unref();
+  new Hub(server, build().hub["handlers"]);
+  const err = await new Promise<NodeJS.ErrnoException>((resolve) => {
+    server.once("error", resolve); // the host's port-fallback listener
+    server.listen(port, "127.0.0.1");
+  });
+  assert.equal(err.code, "EADDRINUSE");
+  blocker.close();
+});

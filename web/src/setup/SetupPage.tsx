@@ -1,5 +1,5 @@
 // The onboarding wizard — the "≤5 minutes to live" flow (plan M4).
-// Renders only inside the Electron shell (window.rhDesktop). Seven steps, each
+// Renders only inside the Electron shell (window.rhDesktop). Six steps, each
 // skippable where the plan allows; every step reads real state from the main
 // process and deep-links back when something fails. "Stream safety" is the one
 // step that can't be skipped: it's where the streamer acknowledges the
@@ -10,6 +10,8 @@ import type { DesktopBridge, DesktopSetupState } from "@rh/shared";
 import { desktopBridge } from "../lib/desktop.js";
 import { PANIC_KEY, TRAY_NAME } from "../lib/platform.js";
 import { acquireCamera } from "../router/decartSession.js";
+import { api } from "../lib/api.js";
+import { PayoutsPanel } from "../dashboard/PayoutsPanel.js";
 
 // The wizard reads everything through the typed preload bridge
 // (shared/src/desktopBridge.ts) — no hand-declared window shape here.
@@ -18,13 +20,14 @@ type RhDesktopSetup = DesktopBridge;
 
 const desktop = desktopBridge;
 
+// No "test hijack" step: effects play through the studio's camera, which
+// isn't open during setup — the studio's "Try an effect on me" is the test.
 const STEPS = [
   "Sign in",
   "Camera",
   "Connect OBS",
-  "Connect tips",
+  "Get paid",
   "Stream safety",
-  "Test hijack",
   "Done",
 ] as const;
 
@@ -46,7 +49,7 @@ export default function SetupPage() {
   if (!d) {
     return (
       <div className="grid h-screen place-items-center text-zinc-500">
-        The setup wizard runs inside the Reality Hijack app.
+        The setup wizard runs inside the Stream Hijack app.
       </div>
     );
   }
@@ -63,7 +66,7 @@ export default function SetupPage() {
   return (
     <div className="mx-auto max-w-2xl p-8">
       <header className="mb-8">
-        <h1 className="text-2xl font-bold">Set up Reality Hijack</h1>
+        <h1 className="text-2xl font-bold">Set up Stream Hijack</h1>
         <ol className="mt-4 flex gap-2 text-xs">
           {STEPS.map((label, i) => (
             <li
@@ -88,10 +91,9 @@ export default function SetupPage() {
       {step === 2 && (
         <ObsStep d={d} state={state} refresh={refresh} next={next} />
       )}
-      {step === 3 && <TipsStep state={state} next={next} />}
+      {step === 3 && <PayStep state={state} next={next} />}
       {step === 4 && <SafetyStep state={state} next={next} />}
-      {step === 5 && <TestStep d={d} next={next} />}
-      {step === 6 && <DoneStep d={d} state={state} />}
+      {step === 5 && <DoneStep d={d} state={state} />}
 
       {step > 0 && step < STEPS.length - 1 && (
         <button
@@ -156,7 +158,7 @@ function SignInStep({
       <Card>
         <p>
           Signed in as <b className="text-brand-400">{state.login}</b>. Your
-          viewer portal and tips run through the Reality Hijack cloud — no API
+          viewer portal and tips run through the Stream Hijack cloud — no API
           keys on this machine.
         </p>
         <Primary onClick={next}>Continue</Primary>
@@ -204,7 +206,7 @@ function SignInStep({
     return (
       <Card>
         <p className="text-zinc-300">
-          <b>Hosted sign-in isn't available in this build yet.</b> Reality
+          <b>Hosted sign-in isn't available in this build yet.</b> Stream
           Hijack signs you in with Twitch and runs tips, moderation and the AI
           model from our servers — nothing to configure on your side. That
           service isn't live for this build; you can still set up your camera
@@ -267,7 +269,7 @@ function CameraStep({ next }: { next: () => void }) {
   return (
     <Card>
       <p className="text-zinc-300">
-        Reality Hijack restyles your <b>OBS Virtual Camera</b>. Start it in
+        Stream Hijack restyles your <b>OBS Virtual Camera</b>. Start it in
         OBS (set its output type to <b>Source</b>, not Program — otherwise the
         AI feeds back into itself) and allow camera access.
       </p>
@@ -396,9 +398,9 @@ function ObsStep({
         <>
           <p className="text-emerald-400">✓ Connected to OBS.</p>
           <p className="text-zinc-300">
-            One click creates the hidden <b>AI Hijack</b> overlay source (or
-            repairs it if it drifted). It only becomes visible during a paid
-            hijack.
+            One click adds a hidden <b>AI Hijack</b> layer directly above your
+            webcam, in every scene that shows it. Nothing else in OBS changes,
+            and it's only visible while a viewer's effect plays.
           </p>
           <Primary
             onClick={() =>
@@ -411,7 +413,7 @@ function ObsStep({
                 .catch((e) => setResult(`Couldn't create the source: ${(e as Error).message}`))
             }
           >
-            Create the overlay source
+            Add the overlay to OBS
           </Primary>
           {result && <p className="text-sm text-emerald-400">{result}</p>}
         </>
@@ -424,27 +426,29 @@ function ObsStep({
   );
 }
 
-// ── Step 4: Tips ──────────────────────────────────────────────────────────
+// ── Step 4: Get paid ──────────────────────────────────────────────────────
 
-function TipsStep({ state, next }: { state: SetupState; next: () => void }) {
+/** Viewers pay through Stripe; the streamer's share lands in their own
+ *  Stripe account. Skippable — the studio's Earnings tab has the same panel. */
+function PayStep({ state, next }: { state: SetupState; next: () => void }) {
   return (
     <Card>
       {state.cloudMode ? (
-        <p className="text-zinc-300">
-          Connect your <b>Streamlabs</b> account from the dashboard (Settings →
-          Connect tips) so real donations trigger hijacks. Until then, test
-          hijacks work fine.
-        </p>
+        <>
+          <p className="text-zinc-300">
+            Viewers pay on your hijack page and you get paid through Stripe. Set it up now, or later from the
+            studio's <b>Earnings</b> tab.
+          </p>
+          <PayoutsPanel client={api} from="app" />
+        </>
       ) : (
         <p className="text-zinc-300">
-          Local mode: paste your Streamlabs Socket API token in the router
-          page's <b>App credentials</b> panel. Real tips then drive hijacks
-          exactly like the hosted setup.
+          This is the offline demo, so there are no viewer payments — use the studio to try effects yourself.
         </p>
       )}
       <div className="flex items-center gap-4">
         <Primary onClick={next}>Continue</Primary>
-        <Skip next={next} />
+        <Skip next={next} label="Later" />
       </div>
     </Card>
   );
@@ -480,10 +484,9 @@ function SafetyStep({ state, next }: { state: SetupState; next: () => void }) {
   return (
     <Card>
       <p className="text-zinc-300">
-        Viewers' own words and photos are checked by AI moderators before
-        anything reaches the model, and an on-device safety guard watches the
-        output and cuts it if it turns explicit. Presets are always safe. A
-        few things are still on you:
+        Every viewer's typed idea and photo is screened automatically before
+        it reaches your stream, and nudity, minors, real public figures, hate
+        and gore are always blocked. A few things are still on you:
       </p>
       <div className="space-y-2">
         {SAFETY_CHECKS.map((c) => (
@@ -499,9 +502,8 @@ function SafetyStep({ state, next }: { state: SetupState; next: () => void }) {
         ))}
       </div>
       <p className="text-xs text-zinc-500">
-        {state.cloudMode
-          ? "New channels start presets-only. Open custom prompts and photos from the dashboard's Content policy when you're ready."
-          : "In local mode you supply the moderation keys (router page → App credentials). Without them, custom prompts and photos stay off."}
+        New channels start with everything on: gallery effects, typed ideas and face swaps. Tighten it anytime in the
+        studio's <b>Safety</b> tab — one click to Family-friendly.
       </p>
       <div className="flex items-center gap-4">
         <Primary onClick={next} disabled={!all}>
@@ -512,41 +514,7 @@ function SafetyStep({ state, next }: { state: SetupState; next: () => void }) {
   );
 }
 
-// ── Step 6: Test hijack ───────────────────────────────────────────────────
-
-function TestStep({ d, next }: { d: RhDesktopSetup; next: () => void }) {
-  const [outcome, setOutcome] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <Card>
-      <p className="text-zinc-300">
-        Send yourself a 10-second test hijack. Keep the router window armed
-        (camera on) and watch your OBS program output take over.
-      </p>
-      <Primary
-        onClick={() => {
-          setError(null);
-          d.testHijack(
-            "Retro 1980s anime cel-shaded style, bold ink outlines, neon sunset gradients",
-            10,
-          )
-            .then(setOutcome)
-            .catch((e) => setError((e as Error).message));
-        }}
-      >
-        Fire test hijack (10s)
-      </Primary>
-      {outcome && <p className="text-sm text-emerald-400">✓ {outcome}</p>}
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <div className="flex items-center gap-4">
-        {outcome && <Primary onClick={next}>It worked — finish</Primary>}
-        <Skip next={next} />
-      </div>
-    </Card>
-  );
-}
-
-// ── Step 7: Done ──────────────────────────────────────────────────────────
+// ── Step 6: Done ──────────────────────────────────────────────────────────
 
 function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
   const [auto, setAuto] = useState(state.autoLaunch);
@@ -590,7 +558,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
             void d.setAutoLaunch(e.target.checked);
           }}
         />
-        Start Reality Hijack when I log in
+        Start Stream Hijack when I log in
       </label>
       {/* Marks setup done and relaunches: from now on the app opens straight
           into the router, and any key pasted in step 1 is loaded. */}
@@ -601,7 +569,7 @@ function DoneStep({ d, state }: { d: RhDesktopSetup; state: SetupState }) {
           void d.setupComplete();
         }}
       >
-        {finishing ? "Restarting…" : "Open Reality Hijack →"}
+        {finishing ? "Restarting…" : "Open Stream Hijack →"}
       </Primary>
     </Card>
   );

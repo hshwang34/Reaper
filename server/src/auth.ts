@@ -14,7 +14,6 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { RequestHandler } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import { eq } from "drizzle-orm";
-import { DEFAULT_SETTINGS } from "@rh/shared";
 import { log, warn } from "@rh/core";
 import { db, channels, refreshTokens } from "./db.js";
 import { devAuthEnabled, env } from "./env.js";
@@ -199,7 +198,12 @@ export function upsertChannel(
         id,
         login,
         displayName,
-        settingsJson: JSON.stringify(DEFAULT_SETTINGS),
+        // Nothing persisted until the streamer changes something: the
+        // channel then reads as HOSTED_SETTINGS (channels.ts), and a later
+        // change to those defaults reaches it. Persisting DEFAULT_SETTINGS
+        // here used to override the hosted base wholesale — new channels got
+        // the local rig's lenient screening + sole-pending tip matching.
+        settingsJson: "{}",
         createdAt: Date.now(),
       })
       .run();

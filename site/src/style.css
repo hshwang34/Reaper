@@ -1,4 +1,4 @@
-/* Reality Hijack — marketing site (v3b)
+/* Stream Hijack — marketing site (v3b)
    Layout: a left-aligned product page whose one big object is the stream frame. Every
    product mock (portal, OBS, ledger) follows the same simulated hijack as the hero.
 
@@ -1369,13 +1369,16 @@ kbd {
   color: var(--app-muted);
   font-size: 12px;
 }
+/* The demo's Pay button (viewers pay by card on the hijack page). */
 .portal-code b {
-  font-family: var(--font-mono);
-  font-size: 30px;
+  display: block;
+  margin: 4px 0 2px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #bb321b;
+  color: #fff;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.3em;
-  color: var(--app-code);
-  margin-right: -0.3em;
 }
 .portal-code small {
   font-size: 11px;
@@ -2126,7 +2129,7 @@ kbd {
 }
 .footer-cols {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 20px;
 }
 .footer-cols div {
@@ -2140,6 +2143,7 @@ kbd {
 }
 .footer-cols a {
   text-decoration: none;
+  overflow-wrap: anywhere; /* the contact address is one long word */
 }
 .footer-cols a:hover {
   color: var(--ink);

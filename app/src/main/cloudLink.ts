@@ -72,6 +72,13 @@ export class CloudLink {
   private reconnectAttempt = 0;
   private refreshing: Promise<"ok" | "revoked" | "transient"> | null = null;
   /** job:done events that failed to send — redelivered on reconnect. */
+  /** The local router's latest state. Replayed on every (re)connect: the
+   *  cloud engine resets a channel to OFFLINE when the link drops, and a
+   *  state change sent while the link was down is gone — without the replay
+   *  the server believes an armed, idle router is offline (portal "not live",
+   *  checkout refused) until the next job, which then can never be paid for.
+   *  Every server deploy hit this for every connected streamer. */
+  private lastRouterState: AnyMsg | null = null;
   private pendingDone: AnyMsg[] = [];
   /** Latest status the cloud engine broadcast for this channel. */
   private lastStatus: StatusSnapshot = OFFLINE_STATUS;
@@ -170,7 +177,9 @@ export class CloudLink {
         }),
       );
       log("cloud", `linked to ${this.cfg.url} as ${this.cfg.login}`);
-      // Redeliver anything that raced a disconnect.
+      // Redeliver anything that raced a disconnect: first where the router
+      // is now, then the job results the cloud missed.
+      if (this.lastRouterState) ws.send(JSON.stringify(this.lastRouterState));
       for (const m of this.pendingDone.splice(0)) ws.send(JSON.stringify(m));
     });
 
@@ -202,7 +211,8 @@ export class CloudLink {
 
   /** Uplink hooks — wired as the local composition's observer. */
   onRouterState(state: RouterState, jobId?: string, remainingSec?: number): void {
-    this.send({ t: "router:state", state, jobId, remainingSec });
+    this.lastRouterState = { t: "router:state", state, jobId, remainingSec };
+    this.send(this.lastRouterState);
   }
 
   onJobDone(jobId: string, ok: boolean, reason?: string): void {
@@ -248,19 +258,25 @@ export class CloudLink {
     return `${this.cfg.url}/c/${encodeURIComponent(this.cfg.login)}`;
   }
 
-  /** POST to this channel's authed API, rotating the access token once on
-   *  401. Every control call shares this so the retry logic exists once. */
-  private async authedPost<T>(path: string, payload: unknown): Promise<T> {
+  /** Call this channel's authed API, rotating the access token once on
+   *  401. Every control call shares this so the retry logic exists once.
+   *  Returns the status + body as-is (the studio's cloud pass-through needs
+   *  the real status); `authedPost` is the throwing convenience. */
+  async request(
+    method: "GET" | "POST",
+    path: string,
+    payload?: unknown,
+  ): Promise<{ status: number; body: unknown }> {
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await fetch(
         `${this.cfg.url}/api/c/${encodeURIComponent(this.cfg.channelId)}/${path}`,
         {
-          method: "POST",
+          method,
           headers: {
-            "content-type": "application/json",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
             authorization: `Bearer ${this.access}`,
           },
-          body: JSON.stringify(payload),
+          body: method === "POST" ? JSON.stringify(payload ?? {}) : undefined,
         },
       );
       if (res.status === 401 && attempt === 0) {
@@ -268,11 +284,16 @@ export class CloudLink {
         continue;
       }
       // A proxy in front of the control plane can answer 502/504 with HTML.
-      const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      return body;
+      return { status: res.status, body: await res.json().catch(() => ({})) };
     }
-    throw new Error("cloud session expired — sign in again");
+    return { status: 401, body: { error: "cloud session expired — sign in again" } };
+  }
+
+  private async authedPost<T>(path: string, payload: unknown): Promise<T> {
+    const { status, body } = await this.request("POST", path, payload);
+    const b = body as T & { error?: string };
+    if (status < 200 || status >= 300) throw new Error(b.error ?? `HTTP ${status}`);
+    return b;
   }
 
   private send(m: AnyMsg): boolean {

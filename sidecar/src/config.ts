@@ -22,7 +22,8 @@ export const env = {
   streamlabsToken: process.env.STREAMLABS_SOCKET_TOKEN?.trim() || "",
   obsWsUrl: process.env.OBS_WS_URL?.trim() || "ws://127.0.0.1:4455",
   obsWsPassword: process.env.OBS_WS_PASSWORD ?? "",
-  obsScene: process.env.OBS_SCENE?.trim() || "Scene",
+  // Unset = auto: every scene that shows a webcam (see ObsController).
+  obsScene: process.env.OBS_SCENE?.trim() || "",
   obsSource: process.env.OBS_SOURCE?.trim() || "AI Hijack",
 };
 

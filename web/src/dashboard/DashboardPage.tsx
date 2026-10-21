@@ -19,7 +19,7 @@ import {
   type LedgerRow,
   type SessionTokens,
 } from "../lib/apiClient.js";
-import { GuardrailsEditor } from "../features/GuardrailsEditor.js";
+import { SafetyEditor } from "../features/SafetyEditor.js";
 import { ModerationPanel, ReviewPanel } from "../features/SafetyPanels.js";
 import { PayoutsPanel } from "./PayoutsPanel.js";
 
@@ -184,13 +184,11 @@ function Dashboard({
       <ReviewPanel client={client} />
 
       {settings && (
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
-            Guardrails
-          </h2>
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-zinc-100">Viewer rules</h2>
           {/* Hosted: every change autosaves — the channel row is the source
               of truth and the engine reads it fresh on the next tip. */}
-          <GuardrailsEditor settings={settings} onChange={(p) => void save(p)} columns={4} />
+          <SafetyEditor settings={settings} onChange={(p) => void save(p)} />
         </section>
       )}
 

@@ -1,4 +1,4 @@
-# Reality Hijack — MVP Feasibility Assessment & Implementation Plan
+# Stream Hijack — MVP Feasibility Assessment & Implementation Plan
 
 **Date:** 2026-07-20 · **Status:** Pre-build assessment (research-verified against live docs)
 
@@ -154,7 +154,7 @@ The policy friction lives specifically in the **Twitch Extension + Bits** path (
 **Recommended MVP pivot — Channel Points first:**
 
 - **The cloud EBS disappears entirely.** The local sidecar opens an outbound WebSocket to `wss://eventsub.wss.twitch.tv/ws` with the broadcaster's own token and subscribes to redemption events. Zero hosted infrastructure, zero review, works today. Phase 4 shrinks from 3–4 days to ~1 day.
-- **Free-text prompts become legal**, which means the guardrails feature — the AI-product-design centerpiece of the portfolio — becomes *demonstrable* instead of moot: viewer redeems "Reality Hijack" with typed input → blocklist → LLM moderation classifier scored against streamer's category/intensity settings → (optional) streamer approve queue → Decart. Keep the preset catalog as the default tier and free-text as the premium redemption.
+- **Free-text prompts become legal**, which means the guardrails feature — the AI-product-design centerpiece of the portfolio — becomes *demonstrable* instead of moot: viewer redeems "Stream Hijack" with typed input → blocklist → LLM moderation classifier scored against streamer's category/intensity settings → (optional) streamer approve queue → Decart. Keep the preset catalog as the default tier and free-text as the premium redemption.
 - **Monetization story stays intact for the portfolio:** channel points drive engagement (indirect revenue), Streamlabs/StreamElements tip triggers add a real-money path with ~2 hours of work (same event-driven sidecar, second socket), and the Bits extension remains documented as the platform-native monetization phase with its compliance-driven design differences (preset-only, EBS, review). Showing *why* each tier has a different guardrail model is stronger product-design evidence than the Bits path alone.
 
 **Policy notes:** Channel Points AUP only bans cash-value/gambling redemptions — local visual effects are normal engagement use. Google explicitly sanctions third-party tools that "offer fun interactions when your viewers buy Super Chats." These are supported integration paths, not workarounds.

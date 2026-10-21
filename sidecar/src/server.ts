@@ -36,6 +36,7 @@ import {
   type TriggerAdapter,
 } from "@rh/core";
 import { ObsController } from "./obs.js";
+export type { OverlayPlacement } from "./obs.js";
 import { createUploads } from "./uploads.js";
 import { isLoopbackRequest, loopbackGuard } from "./loopback.js";
 
@@ -47,6 +48,7 @@ export interface LocalServerHost {
   obsWsPassword: string;
   /** The OBS scene + Browser Source the hijack overlay lives in. Machine
    *  wiring, not streamer policy — so it's host config, not Settings. */
+  /** OBS scene to pin the overlay to; "" = every scene with a webcam. */
   obsScene: string;
   obsSource: string;
   /** Live settings access — host owns persistence. */
@@ -89,6 +91,15 @@ export interface LocalServerHost {
   moneyProxy?: {
     togglePause(): Promise<boolean>;
     status(): StatusSnapshot;
+  };
+  /** Cloud mode: the hosted channel owns settings, approvals, the safety
+   *  log, payouts and the test hijack — the studio's calls for those are
+   *  forwarded there (signed in as the streamer) instead of answered by the
+   *  idle local engine, whose copies the cloud never reads. */
+  cloudApi?: {
+    request(method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; body: unknown }>;
+    login: string;
+    portalUrl: string;
   };
 }
 
@@ -244,6 +255,9 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       obsScene: host.obsScene,
       obsSource: host.obsSource,
       obsConnected: obs.isConnected(),
+      // Where the overlay is installed, in the streamer's own words.
+      obsOverlay: obs.overlayPlacements()?.map((p) => ({ scene: p.scene, camera: p.camera })) ?? null,
+      cloud: host.cloudApi ? { login: host.cloudApi.login, portalUrl: host.cloudApi.portalUrl } : null,
     });
   });
 
@@ -257,6 +271,27 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       res.status(502).json({ ok: false, error: (e as Error).message });
     }
   });
+
+  // Cloud mode: the hosted channel's own settings, approvals, safety log,
+  // earnings and test hijack. Matched before the local channel API so the
+  // idle local engine never answers for them.
+  if (host.cloudApi) {
+    const cloud = host.cloudApi;
+    const FORWARD = /^\/(settings|review(\/[^/]+)?|moderation|ledger|payouts|payouts\/onboard|payments|test-hijack)$/;
+    app.use("/api", (req, res, next) => {
+      if (!FORWARD.test(req.path) || (req.method !== "GET" && req.method !== "POST")) return next();
+      requireAuth(req, res, () => {
+        // Forward an allowlist of query params only: the local install
+        // token can ride in ?auth=, and it must never leave this machine.
+        const limit = Number(req.query.limit);
+        const qs = Number.isFinite(limit) && limit > 0 ? `?limit=${Math.floor(limit)}` : "";
+        cloud
+          .request(req.method as "GET" | "POST", req.path.slice(1) + qs, req.body)
+          .then(({ status, body }) => res.status(status).json(body))
+          .catch((e) => res.status(502).json({ error: `cloud: ${(e as Error).message}` }));
+      });
+    });
+  }
 
   // config · presets · submissions · settings · token · panic · dev/* —
   // the channel API shared with the hosted plane.
@@ -310,29 +345,38 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
     togglePause,
     status,
     start(port: number) {
-      // Uploads from a previous run lost their registry entries with the
-      // process; anything past the TTL goes now (CONTENT-SAFETY S2 step 9).
-      sweepUploadDir(host.uploadsDir);
-      for (const t of triggers) {
-        t.start((tip) => {
-          const outcome = engine.onTip(tip);
-          log(t.name, `$${tip.amount} from ${tip.username} → ${outcome}`);
-        });
-      }
-      if (!host.streamlabsToken) {
-        warn("server", "no Streamlabs token — only fake-tip trigger active");
-      }
-      // Loopback-only: this server holds panic/OBS/token-mint endpoints and
-      // must never be reachable from the LAN. (Was previously an implicit
-      // all-interfaces bind — flagged by security review.)
-      server.listen(port, "127.0.0.1", () => {
+      // Everything below runs ONCE, on the bind that succeeds. A host may
+      // call start() again on EADDRINUSE (the app's port fallback); doing the
+      // side effects per attempt started every trigger twice (each tip
+      // counted twice) and logged the busy port as if it were ours.
+      const onListening = () => {
+        server.removeListener("error", onError);
+        // Uploads from a previous run lost their registry entries with the
+        // process; anything past the TTL goes now (CONTENT-SAFETY S2 step 9).
+        sweepUploadDir(host.uploadsDir);
+        for (const t of triggers) {
+          t.start((tip) => {
+            const outcome = engine.onTip(tip);
+            log(t.name, `$${tip.amount} from ${tip.username} → ${outcome}`);
+          });
+        }
+        if (!host.streamlabsToken) {
+          warn("server", "no Streamlabs token — only fake-tip trigger active");
+        }
         log("server", `local server on http://localhost:${port}`);
         log("server", `decart: ${decartEnabled ? "LIVE" : "MOCK (no key)"}`);
         // Best-effort OBS connect; fine if OBS isn't running yet.
         obs.ensureConnected().catch(() => {
           warn("server", "OBS not reachable yet — will retry on first toggle");
         });
-      });
+      };
+      const onError = () => server.removeListener("listening", onListening);
+      server.once("listening", onListening);
+      server.once("error", onError);
+      // Loopback-only: this server holds panic/OBS/token-mint endpoints and
+      // must never be reachable from the LAN. (Was previously an implicit
+      // all-interfaces bind — flagged by security review.)
+      server.listen(port, "127.0.0.1");
     },
     async stop() {
       for (const t of triggers) t.stop();

@@ -86,7 +86,17 @@ let client: StripeLike | null = null;
 
 /** The Stripe client, or null when payments aren't configured (dev). */
 export function stripe(): StripeLike | null {
-  if (!client && env.stripeSecretKey) client = new Stripe(env.stripeSecretKey) as unknown as StripeLike;
+  if (!client && env.stripeSecretKey) {
+    // STRIPE_API_BASE (dev/e2e only — the production boot gate refuses it)
+    // routes every SDK call, v1 and v2, to a local fake.
+    const base = env.stripeApiBase ? new URL(env.stripeApiBase) : null;
+    client = new Stripe(
+      env.stripeSecretKey,
+      base
+        ? { host: base.hostname, port: Number(base.port), protocol: base.protocol.replace(":", "") as "http" | "https" }
+        : undefined,
+    ) as unknown as StripeLike;
+  }
   return client;
 }
 
@@ -229,7 +239,7 @@ export async function createCheckout(channelId: string, input: CheckoutInput): P
   // with nowhere to run until something refunds it.
   const snap = rt.engine.snapshot();
   if (snap.routerState === "OFFLINE") {
-    throw new PaymentError(409, "the streamer's Reality Hijack app isn't running right now — try again when they're live");
+    throw new PaymentError(409, "the streamer's Stream Hijack app isn't running right now — try again when they're live");
   }
   if (snap.paused) {
     throw new PaymentError(409, "the streamer has paused hijacks right now — try again in a bit");
@@ -263,7 +273,7 @@ export async function createCheckout(channelId: string, input: CheckoutInput): P
           currency: "usd",
           unit_amount: amountCents,
           product_data: {
-            name: `${durationSec}s Reality Hijack on twitch.tv/${row.login}`,
+            name: `${durationSec}s Stream Hijack on twitch.tv/${row.login}`,
             description: sub.presetId ? `Effect: ${sub.presetId}` : "Custom effect",
           },
         },
@@ -511,7 +521,7 @@ export async function refund(paymentId: string, reason: string): Promise<void> {
 // settleJob then refunds it (no token was minted) — and removes it from the
 // queue first, so a refunded hijack can never play afterwards.
 
-export const OFFLINE_GRACE_MS = 2 * 60_000;
+export const OFFLINE_GRACE_MS = env.offlineGraceMs;
 export const START_DEADLINE_MS = 15 * 60_000;
 
 const isPaid = (job: HijackJob) => job.tip.source === "stripe";
