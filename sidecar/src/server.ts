@@ -212,6 +212,11 @@ export function createLocalServer(host: LocalServerHost): LocalServer {
       host.mintProxy
         ? host.mintProxy(durationSec) // the control plane gates it
         : gatedMint(engine, durationSec, (d) => mintClientToken(host.decartApiKey, d, origin), mintLedger),
+    // Recorder-only, ungated (the route itself is dev-only). Not in cloud mode:
+    // no key on this machine, and minting there is the control plane's job.
+    devMint: host.mintProxy
+      ? undefined
+      : (durationSec, origin) => mintClientToken(host.decartApiKey, durationSec, origin),
     togglePause,
     imageUrl: (f) => publicUploadUrl(f.filename),
     discardUpload: (f) => deleteUpload(publicUploadUrl(f.filename)),

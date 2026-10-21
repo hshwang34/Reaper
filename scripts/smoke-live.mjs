@@ -92,11 +92,11 @@ async function main() {
   const back = await waitFor(async () => new URL(page.url()).host === new URL(BASE).host, 60_000);
   check("payment succeeds and returns to the portal", back, `${((Date.now() - t0) / 1000).toFixed(1)}s`);
   const body = () => page.locator("body").innerText();
-  check("portal shows the paid status", await waitFor(async () => /Payment received|In queue|LIVE|Hijack complete/.test(await body()), 20_000));
+  check("portal shows the paid status", await waitFor(async () => /Payment received|in the queue|LIVE|Hijack complete/.test(await body()), 20_000));
   const live = await waitFor(async () => /LIVE/.test(await body()), 60_000);
-  check("hijack goes LIVE on stream", live, live ? `${((Date.now() - t0) / 1000).toFixed(1)}s after Pay` : (await body()).match(/Failed[^\n]*/)?.[0] ?? "");
+  check("hijack goes LIVE on stream", live, live ? `${((Date.now() - t0) / 1000).toFixed(1)}s after Pay` : (await body()).match(/It didn't play[^\n]*/)?.[0] ?? "");
   const done = await waitFor(async () => /Hijack complete/.test(await body()), amount * 1000 + 30_000);
-  check("hijack completes", done, done ? "" : (await body()).match(/Failed[^\n]*/)?.[0] ?? "");
+  check("hijack completes", done, done ? "" : (await body()).match(/It didn't play[^\n]*/)?.[0] ?? "");
 
   // ── optional ledger check, straight from Stripe ──
   const key = process.env.STRIPE_SECRET_KEY ?? "";

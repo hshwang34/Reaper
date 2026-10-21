@@ -4,6 +4,14 @@
 
 import type { SubmissionStatus } from "@rh/shared";
 import { channelSlug } from "../lib/channel.js";
+import { friendlyError } from "../lib/friendlyError.js";
+
+/** What the viewer paid (hosted), when we know it. */
+export interface Receipt {
+  amount: number;
+  seconds: number;
+  effect: string;
+}
 
 export function ClaimView(props: {
   /** Paid through Stripe: there's no code to copy, just the live status. */
@@ -15,6 +23,8 @@ export function ClaimView(props: {
   durationPreview: number;
   /** Safety checks this submission passed (0 for a plain preset). */
   passedChecks: number;
+  /** Hosted claims: the amount paid, remembered across the Stripe round trip. */
+  receipt?: Receipt | null;
   onSimulate: () => void;
   onReset: () => void;
 }) {
@@ -25,25 +35,38 @@ export function ClaimView(props: {
   // completed "done" into a false "expired" if the viewer lingers on the page).
   const stillWaiting = !status || status.state === "pending";
   const expired = status?.state === "expired" || (stillWaiting && secsLeft === 0);
+  const terminalState = status?.state === "done" || status?.state === "failed" || status?.state === "expired";
   const terminal = expired || status?.state === "done" || status?.state === "failed";
 
   if (props.paid) {
     return (
       <div className="mx-auto max-w-md space-y-5 text-center">
-        <StatusCard status={status} expired={false} paid />
-        {status?.state === "failed" && (
-          <p className="text-sm text-zinc-400">
-            If it never started, you're refunded automatically — it can take a
-            few days to show on your statement.
+        <StatusCard
+          status={status}
+          expired={false}
+          paid
+          refundNote={
+            status?.state === "failed"
+              ? "If it never started, you're refunded automatically. It can take a few days to show on your statement."
+              : undefined
+          }
+        />
+        {props.receipt && (
+          <p className="text-sm tabular-nums text-zinc-300">
+            You paid ${props.receipt.amount} for {props.receipt.seconds}s of {props.receipt.effect}.
           </p>
         )}
-        <button
-          type="button"
-          onClick={props.onReset}
-          className="min-h-12 w-full rounded-2xl border border-zinc-700 bg-zinc-900 px-5 font-semibold text-zinc-100 hover:border-zinc-500"
-        >
-          Hijack again
-        </button>
+        {/* Only once it's over: while a hijack is waiting or running, a second
+            button would invite a second purchase. */}
+        {terminalState && (
+          <button
+            type="button"
+            onClick={props.onReset}
+            className="min-h-12 w-full rounded-2xl border border-zinc-700 bg-zinc-900 px-5 font-semibold text-zinc-100 hover:border-zinc-500"
+          >
+            Hijack again
+          </button>
+        )}
       </div>
     );
   }
@@ -102,21 +125,29 @@ function StatusCard({
   status,
   expired,
   paid = false,
+  refundNote,
 }: {
   status: SubmissionStatus | null;
   expired: boolean;
   paid?: boolean;
+  /** Shown inside the card, under a failure (hosted: the refund promise). */
+  refundNote?: string;
 }) {
   const state = expired ? "expired" : (status?.state ?? "pending");
   const label: Record<string, string> = {
     pending: paid ? "Starting soon…" : "Waiting for your tip…",
-    review: "Tip received — waiting for the streamer to approve…",
-    matched: "Tip received — queued!",
+    review: paid
+      ? "Payment received. Waiting for the streamer to approve it…"
+      : "Tip received. Waiting for the streamer to approve it…",
+    matched: "You're in the queue",
     queued: `You're in line${status?.queuePosition ? ` · position ${status.queuePosition}` : ""}`,
-    live: "LIVE on stream now",
+    live: "Your effect is live on stream",
     done: "Hijack complete",
-    expired: "Expired — no tip arrived in time.",
-    failed: `Failed — ${status?.message ?? "error"}`,
+    // A late payment on an expired claim is refunded rather than run (see
+    // server/src/payments.ts), so "nothing was charged" isn't always true.
+    // Keep the original meaning.
+    expired: paid ? "Expired. No payment arrived in time." : "Expired. No tip arrived in time.",
+    failed: "It didn't play.",
   };
   const icon: Record<string, string> = {
     pending: "⏳",
@@ -126,7 +157,7 @@ function StatusCard({
     live: "🔴",
     done: "🎉",
     expired: "⌛",
-    failed: "⚠️",
+    failed: "",
   };
   const tone =
     state === "live"
@@ -143,15 +174,26 @@ function StatusCard({
         {icon[state]}
       </div>
       <p className="mt-3 text-lg font-bold text-zinc-50">{label[state]}</p>
+      {state === "live" && (
+        <p className="mt-1 inline-block rounded-full bg-brand-500/20 px-3 py-0.5 text-sm font-bold tracking-wide text-brand-200">
+          LIVE
+        </p>
+      )}
       {state === "live" && status?.remainingSec != null && (
         <p className="mt-1 font-mono text-4xl font-black tabular-nums text-brand-300">
           {status.remainingSec}s
           <span className="sr-only"> left</span>
         </p>
       )}
-      {status?.message && state !== "failed" && (
-        <p className="mt-2 text-sm text-zinc-400">{status.message}</p>
+      {state === "failed" && (
+        <>
+          <p className="mt-2 text-sm text-zinc-300">{friendlyError(status?.message)}</p>
+          {refundNote && <p className="mt-3 text-sm text-zinc-300">{refundNote}</p>}
+        </>
       )}
+      {/* Only the pending note is ours (approval / payment received); the
+          engine's other messages repeat the label in engine words. */}
+      {state === "pending" && status?.message && <p className="mt-2 text-sm text-zinc-400">{status.message}</p>}
     </div>
   );
 }

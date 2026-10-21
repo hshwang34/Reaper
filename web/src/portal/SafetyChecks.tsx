@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CheckResult, CheckState, SafetyFinding, SafetySubject } from "@rh/shared";
 
 const SUBJECT_TITLE: Record<SafetySubject, string> = {
-  prompt: "Your prompt",
+  prompt: "Your idea",
   photo: "Your photo",
 };
 
@@ -142,7 +142,7 @@ export function SafetyChecklist({
 
       {running && elapsed >= 5 && (
         <p className="mt-3 text-xs text-zinc-400">
-          Still checking — reading a request against the stream's rules can take a few seconds.
+          Still checking. Reading your idea against the streamer's rules can take a few seconds.
         </p>
       )}
     </section>
@@ -181,7 +181,7 @@ export function SafetyFindings({
       <h3 className="font-semibold text-red-300">
         Didn't pass — {findings.length} {findings.length === 1 ? "problem" : "problems"} found
       </h3>
-      {stale && <p className="mt-0.5 text-xs text-zinc-400">You've edited since — submit again to re-check.</p>}
+      {stale && <p className="mt-0.5 text-xs text-zinc-400">You've made changes. Check again to re-run the safety checks.</p>}
 
       {prompt && flagged.length > 0 && (
         <p className="mt-3 rounded-lg bg-zinc-950/60 px-3 py-2 text-sm leading-relaxed text-zinc-300">

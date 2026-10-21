@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../lib/api.js";
+import { friendlyError } from "../lib/friendlyError.js";
 
 /** Report + removal request (CONTENT-SAFETY S5). Both land in the streamer's
  *  moderation log; a removal request naming an image URL acts immediately,
@@ -17,7 +18,7 @@ export function SafetyFooter({ code }: { code: string | null }) {
     try {
       if (open === "report") {
         await api.report(text.trim(), code ? { code } : {});
-        setDone("Thanks — the streamer's moderation log has your report.");
+        setDone("Thanks. The streamer has your report.");
       } else {
         const r = await api.takedown({
           contact: contact.trim(),
@@ -25,13 +26,13 @@ export function SafetyFooter({ code }: { code: string | null }) {
           imageUrl: imageUrl.trim() || undefined,
         });
         setDone(
-          `Request ${r.ticket.slice(0, 8)} received${r.removed ? ` — ${r.removed} file(s) removed now` : ""}. We act on removal requests within 48 hours.`,
+          `Request ${r.ticket.slice(0, 8)} received${r.removed ? `. ${r.removed} file(s) removed now` : ""}. We act on removal requests within 48 hours.`,
         );
       }
       setOpen(null);
       setText("");
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(friendlyError(e));
     }
   }
 
@@ -81,7 +82,7 @@ export function SafetyFooter({ code }: { code: string | null }) {
             placeholder={open === "report" ? "What was wrong?" : "What should be removed, and when you saw it"}
             className={field}
           />
-          {err && <p className="text-red-400">{err}</p>}
+          {err && <p role="alert" className="text-red-300">{err}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" className="min-h-11 px-4 text-zinc-400 hover:text-zinc-100" onClick={() => setOpen(null)}>
               Cancel
@@ -92,7 +93,7 @@ export function SafetyFooter({ code }: { code: string | null }) {
               disabled={!text.trim() || (open === "takedown" && !contact.trim())}
               onClick={() => void send()}
             >
-              Send
+              {open === "report" ? "Send report" : "Send request"}
             </button>
           </div>
         </div>

@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import { createDecartClient, models } from "@decartai/sdk";
 import { PRESETS } from "@rh/shared";
 import { api } from "../lib/api.js";
-import { acquireCamera } from "../router/decartSession.js";
+import { acquireCamera, DecartSession } from "../router/decartSession.js";
+import { downscaleImage } from "../lib/image.js";
 
 const DEFAULT_PROMPT =
   "Transform the person into an ancient Egyptian mummy wrapped head to toe in tattered beige linen bandages, dusty and weathered, dim golden tomb lighting";
@@ -38,6 +39,50 @@ function recordFor(stream: MediaStream, sec: number): Promise<Blob> {
   });
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** Published per-second price used for the cost estimate. */
+const USD_PER_SEC = 0.02;
+
+/**
+ * Open a Decart session and resolve with the styled stream once it has
+ * really started: Decart reports `generating` AND the remote video track is
+ * flowing (RTP starts before generation does, so a track alone is not enough —
+ * the same rule as the router's buffering gate). Rejects after 20 s.
+ */
+function connectAndWait(session: DecartSession, args: Omit<Parameters<DecartSession["start"]>[0], "onRemoteStream" | "onGenerating">): Promise<MediaStream> {
+  return new Promise((resolve, reject) => {
+    let remote: MediaStream | null = null;
+    let generating = false;
+    const timer = setTimeout(() => reject(new Error("no styled frame within 20s")), 20_000);
+    const check = () => {
+      const t = remote?.getVideoTracks()[0];
+      if (!remote || !generating || !t) return;
+      const go = () => {
+        clearTimeout(timer);
+        resolve(remote!);
+      };
+      if (t.muted) t.onunmute = go;
+      else go();
+    };
+    session
+      .start({
+        ...args,
+        onRemoteStream: (s) => {
+          remote = s;
+          check();
+        },
+        onGenerating: () => {
+          generating = true;
+          check();
+        },
+      })
+      .catch((e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+  });
+}
+
 export default function DecartTestPage() {
   const inRef = useRef<HTMLVideoElement>(null);
   const outRef = useRef<HTMLVideoElement>(null);
@@ -50,6 +95,13 @@ export default function DecartTestPage() {
   const [clipPreset, setClipPreset] = useState(PRESETS[0]!.id);
   const [clipSec, setClipSec] = useState(10);
   const [recording, setRecording] = useState(false);
+  // Batch recorder ("Record all effects"): one camera grant, every effect in turn.
+  const [batching, setBatching] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [samplePhoto, setSamplePhoto] = useState<File | null>(null);
+  const stopRef = useRef(false);
+  const batchCamRef = useRef<MediaStream | null>(null);
+  const batchSessionRef = useRef<DecartSession | null>(null);
 
   // Leaving the page must release the camera and the (billed) Decart
   // session — previously only the Stop button did, so navigating away left
@@ -71,6 +123,95 @@ export default function DecartTestPage() {
     clientRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    stopRef.current = true;
+    batchSessionRef.current?.disconnect();
+    batchSessionRef.current = null;
+    batchCamRef.current?.getTracks().forEach((t) => t.stop());
+    batchCamRef.current = null;
+  }
+
+  /** Presets the batch will actually run (photo-swap needs the sample photo). */
+  const batchPresets = PRESETS.filter((p) => !p.needsImage || samplePhoto);
+  const batchCost = batchPresets.length * clipSec * USD_PER_SEC;
+
+  /**
+   * Record EVERY effect from one sitting (the PM's webcam is the demo streamer):
+   * one camera grant for the whole batch, then per preset — mint a capped dev
+   * token, connect, wait for the first real frame, let it settle 2 s, record
+   * before + after for `clipSec`, download both, disconnect. The camera is
+   * released only at the very end, so the lighting and framing stay identical
+   * across all 17 clips. Output feeds `site/tools/encode-clips.sh --app`.
+   */
+  async function recordAll() {
+    stopRef.current = false;
+    setBatching(true);
+    const notes: string[] = [];
+    try {
+      push("batch: acquiring camera…");
+      const { stream } = await acquireCamera();
+      batchCamRef.current = stream;
+      if (inRef.current) {
+        inRef.current.srcObject = stream;
+        await inRef.current.play().catch(() => {});
+      }
+      const image = samplePhoto ? await downscaleImage(samplePhoto) : null;
+      let n = 0;
+      for (const preset of PRESETS) {
+        if (stopRef.current) break;
+        if (preset.needsImage && !image) {
+          notes.push(`skipped ${preset.label} (no sample photo)`);
+          push(`batch: skipping ${preset.label} — pick a sample photo first`);
+          continue;
+        }
+        n += 1;
+        setProgress(`Recording ${n} of ${batchPresets.length} · ${preset.label}`);
+        const session = new DecartSession();
+        batchSessionRef.current = session;
+        try {
+          // Headroom for connect + settle on top of the clip; the server caps dev tokens at 60 s.
+          const { token } = await api.devToken(clipSec + 25);
+          const out = await connectAndWait(session, {
+            token,
+            prompt: preset.prompt,
+            enhance: true,
+            imageBlob: preset.needsImage ? image : null,
+            camera: stream,
+          });
+          push(`batch: ${preset.id} generating — settling 2s`);
+          await sleep(2000);
+          if (stopRef.current) break;
+          const [before, after] = await Promise.all([recordFor(stream, clipSec), recordFor(out, clipSec)]);
+          if (stopRef.current) break;
+          download(before, `${preset.id}-before.webm`);
+          await sleep(600); // browsers drop back-to-back programmatic downloads
+          download(after, `${preset.id}-after.webm`);
+          await sleep(600);
+          push(`batch: saved ${preset.id} (${(before.size / 1e6).toFixed(1)} + ${(after.size / 1e6).toFixed(1)} MB)`);
+        } catch (e) {
+          notes.push(`${preset.label} failed: ${(e as Error).message}`);
+          push(`batch: ${preset.id} FAILED — ${(e as Error).message}`);
+        } finally {
+          session.disconnect();
+          batchSessionRef.current = null;
+        }
+      }
+      push(stopRef.current ? "batch: stopped" : "batch: done — run site/tools/encode-clips.sh --app ~/Downloads/*-{before,after}.webm");
+    } catch (e) {
+      push("batch FAILED: " + (e as Error).message);
+    } finally {
+      batchSessionRef.current?.disconnect();
+      batchSessionRef.current = null;
+      batchCamRef.current?.getTracks().forEach((t) => t.stop());
+      batchCamRef.current = null;
+      setBatching(false);
+      setProgress(notes.length ? `Finished with notes: ${notes.join("; ")}` : "");
+    }
+  }
+
+  function stopBatch() {
+    stopRef.current = true;
+    batchSessionRef.current?.disconnect(); // stop billing right now
+    push("batch: stopping…");
   }
 
   const push = (s: string) => {
@@ -100,7 +241,8 @@ export default function DecartTestPage() {
         await inRef.current.play().catch(() => {});
       }
       push(`clip: minting ${clipSec}s token…`);
-      const { token } = await api.mintToken(clipSec);
+      // Dev token: ungated (no live job while recording) and capped server-side.
+      const { token } = await api.devToken(clipSec + 25);
       const client = createDecartClient({ apiKey: token });
 
       // Resolve once the styled stream has a live, unmuted video track: that is
@@ -273,7 +415,7 @@ export default function DecartTestPage() {
         <select
           value={clipPreset}
           onChange={(e) => setClipPreset(e.target.value)}
-          disabled={recording || running}
+          disabled={recording || running || batching}
           className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1"
         >
           {PRESETS.map((p) => (
@@ -289,14 +431,14 @@ export default function DecartTestPage() {
             max={20}
             value={clipSec}
             onChange={(e) => setClipSec(Math.max(3, Math.min(20, Number(e.target.value) || 10)))}
-            disabled={recording || running}
+            disabled={recording || running || batching}
             className="w-16 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono"
           />
           s
         </label>
         <button
           onClick={recordClip}
-          disabled={recording || running}
+          disabled={recording || running || batching}
           className="rounded-md bg-fuchsia-600 px-3 py-1 font-semibold hover:bg-fuchsia-500 disabled:opacity-50"
         >
           {recording ? "Recording…" : "Record"}
@@ -304,6 +446,39 @@ export default function DecartTestPage() {
         <span className="text-xs text-zinc-500">
           ≈ ${(clipSec * 0.02).toFixed(2)} of compute · downloads before/after .webm
         </span>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-sm">
+        <span className="text-zinc-400">Record all effects ({PRESETS.length}):</span>
+        <label className="flex items-center gap-2 text-zinc-400">
+          Sample photo (for Photo swap)
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            disabled={batching}
+            onChange={(e) => setSamplePhoto(e.target.files?.[0] ?? null)}
+            className="max-w-48 text-xs"
+          />
+        </label>
+        <button
+          onClick={recordAll}
+          disabled={recording || running || batching}
+          className="rounded-md bg-fuchsia-600 px-3 py-1 font-semibold hover:bg-fuchsia-500 disabled:opacity-50"
+        >
+          {batching ? "Recording…" : "Record all effects"}
+        </button>
+        <button
+          onClick={stopBatch}
+          disabled={!batching}
+          className="rounded-md bg-red-600 px-3 py-1 font-semibold hover:bg-red-500 disabled:opacity-50"
+        >
+          Stop
+        </button>
+        <span className="text-xs text-zinc-500">
+          ≈ ${batchCost.toFixed(2)} ({batchPresets.length} × {clipSec}s × ${USD_PER_SEC}) · uses the clip length above
+          {!samplePhoto && " · Photo swap is skipped without a sample photo"}
+        </span>
+        {progress && <p className="w-full text-sm text-fuchsia-300" role="status">{progress}</p>}
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3">

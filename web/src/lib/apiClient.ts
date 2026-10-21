@@ -274,6 +274,9 @@ export function createApiClient(opts: ApiClientOptions) {
       ),
     mintToken: (durationSec: number) =>
       request<{ token: string }>("/token", json("POST", { durationSec, origin: location.origin })),
+    /** Dev-only, ungated, capped at 60 s — for the preview batch recorder. */
+    devToken: (durationSec: number) =>
+      request<{ token: string }>("/dev/token", json("POST", { durationSec, origin: location.origin })),
     obsToggle: (visible: boolean) =>
       request<{ ok: boolean; visible?: boolean; error?: string }>("/obs/toggle", json("POST", { visible })),
     panic: () => request<{ paused: boolean }>("/panic", { method: "POST" }),

@@ -267,11 +267,11 @@ async function main() {
     final?.error,
   );
 
-  // …and what the viewer actually sees: pick "Write your own", type, press
+  // …and what the viewer actually sees: pick "Your own idea", type, press
   // Enter, read the findings.
   const portal = await ctx.newPage();
   await portal.goto(`${base}/portal`);
-  const writeOwn = portal.getByRole("button", { name: /write your own/i });
+  const writeOwn = portal.getByRole("button", { name: /your own idea/i });
   const promptBox = portal.getByRole("textbox", { name: /describe your effect/i });
   // The tile renders only after the portal fetches its config — isVisible()
   // doesn't wait, so on a slow CI runner it raced the first render.

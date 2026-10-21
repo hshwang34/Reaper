@@ -1,15 +1,19 @@
 // Effect thumbnails, shared by the studio gallery and the viewer portal.
 //
-// We can't show Decart's own sample media (their site terms), and we haven't
-// recorded our own clips yet (site/CLIPS.md), so each effect gets a small
-// CSS illustration instead: the effect's palette as a gradient, a texture
-// motif for its kind of edit, and its emoji as the subject. When a recorded
-// clip exists for a preset, drop it in CLIPS below and the card plays it.
+// Every effect gets a small CSS illustration (palette gradient + texture motif
+// + emoji) so the card is never empty. When a real recorded preview exists it
+// is layered on top: `/previews/<id>.jpg` (the AFTER frame) as the still and
+// `/previews/<id>.webm` (<= 6 s loop) played on hover / focus / tap.
+//
+// The files are found by convention, not a registry, via ONE fetch of
+// `/previews/manifest.json` ({ "ids": [...] }, written by
+// site/tools/encode-clips.sh --app). We do not probe per-id URLs: the hosted
+// and Electron servers answer a missing file with index.html and a 200, so a
+// probe can't tell "absent" from "present". No manifest (or not JSON) means an
+// empty set, and the component renders exactly the CSS art as before.
 
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Preset } from "@rh/shared";
-
-/** Recorded before/after loops, by preset id — empty until we record them. */
-const CLIPS: Record<string, string> = {};
 
 /** Per-effect palette: [from, via, to]. Falls back by category. */
 const PALETTE: Record<string, [string, string, string]> = {
@@ -57,30 +61,206 @@ export function effectGradient(p: Pick<Preset, "id" | "category">): string {
   return `linear-gradient(135deg, ${a} 0%, ${b} 55%, ${c} 100%)`;
 }
 
+// ── Preview manifest + one-at-a-time playback ────────────────────────────
+
+let manifestIds: ReadonlySet<string> = new Set();
+let manifestPromise: Promise<void> | null = null;
+const manifestSubs = new Set<() => void>();
+
+/** Fetch the manifest once per page load. Any failure = empty set. */
+function loadManifest(): void {
+  if (manifestPromise || typeof fetch === "undefined") return;
+  manifestPromise = fetch("/previews/manifest.json", { cache: "no-cache" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j: { ids?: unknown } | null) => {
+      if (Array.isArray(j?.ids)) manifestIds = new Set(j.ids.filter((x): x is string => typeof x === "string"));
+    })
+    .catch(() => {})
+    .then(() => manifestSubs.forEach((f) => f()));
+}
+
+export function useHasPreview(id: string): boolean {
+  useEffect(loadManifest, []);
+  return useSyncExternalStore(
+    (f) => (manifestSubs.add(f), () => void manifestSubs.delete(f)),
+    () => manifestIds.has(id),
+    () => false,
+  );
+}
+
+let playingId: string | null = null;
+const playSubs = new Set<() => void>();
+/** Start `id`'s loop (stopping any other), or stop playback with null. */
+function setPlaying(id: string | null) {
+  if (playingId === id) return;
+  playingId = id;
+  playSubs.forEach((f) => f());
+}
+function usePlaying(id: string): boolean {
+  return useSyncExternalStore(
+    (f) => (playSubs.add(f), () => void playSubs.delete(f)),
+    () => playingId === id,
+    () => false,
+  );
+}
+
+const media = (q: string) => typeof matchMedia !== "undefined" && matchMedia(q).matches;
+/** Hover/focus may start a loop only on a hover-capable device that hasn't asked for less motion. */
+const canHoverPlay = () => media("(hover: hover)") && !media("(prefers-reduced-motion: reduce)");
+
+/**
+ * Hover/focus handlers for whatever wraps a card: start this effect's loop on
+ * enter/focus, stop it on leave/blur. A no-op when there is no preview, on
+ * touch, or under reduced motion (those get the play button instead).
+ */
+export function previewHandlers(id: string) {
+  const on = () => {
+    if (manifestIds.has(id) && canHoverPlay()) setPlaying(id);
+  };
+  const off = () => {
+    if (playingId === id) setPlaying(null);
+  };
+  return { onPointerEnter: on, onPointerLeave: off, onFocus: on, onBlur: off };
+}
+
+/**
+ * The 44px play control for touch / reduced-motion. It must be rendered as a
+ * SIBLING of a card <button>, never inside it (a button in a button is invalid
+ * HTML and would pollute the card's accessible name).
+ */
+export function PreviewPlayButton({
+  id,
+  label,
+  className = "",
+  reducedMotionOnly = false,
+}: {
+  id: string;
+  label: string;
+  className?: string;
+  /** For a loop that already autoplays: offer the button only when reduced motion stopped it. */
+  reducedMotionOnly?: boolean;
+}) {
+  const has = useHasPreview(id);
+  const playing = usePlaying(id);
+  const [needsButton, setNeedsButton] = useState(false);
+  useEffect(
+    () => setNeedsButton(reducedMotionOnly ? media("(prefers-reduced-motion: reduce)") : !canHoverPlay()),
+    [reducedMotionOnly],
+  );
+  if (!has || !needsButton) return null;
+  return (
+    <button
+      type="button"
+      aria-label={playing ? `Stop preview of ${label}` : `Play preview of ${label}`}
+      aria-pressed={playing}
+      onClick={() => setPlaying(playing ? null : id)}
+      className={`pointer-events-auto absolute bottom-1 right-1 z-10 grid h-11 w-11 place-items-center rounded-full bg-black/60 text-white backdrop-blur hover:bg-black/80 ${className}`}
+    >
+      <span aria-hidden>{playing ? "❚❚" : "▶"}</span>
+    </button>
+  );
+}
+
 /** 16:9 thumbnail for an effect. Decorative — the card's label names it. */
 export function EffectArt({
   preset,
   className = "",
   size = "md",
+  autoPlay = false,
 }: {
   preset: Pick<Preset, "id" | "category" | "editType" | "emoji">;
   className?: string;
   size?: "sm" | "md" | "lg";
+  /** Loop as soon as it is on screen (the large Customize panel); still
+   *  honours reduced motion. Cards instead play on hover/focus/tap. */
+  autoPlay?: boolean;
 }) {
-  const clip = CLIPS[preset.id];
   const emoji = size === "lg" ? "text-6xl" : size === "sm" ? "text-2xl" : "text-4xl";
+  const has = useHasPreview(preset.id);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [stillFailed, setStillFailed] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const [everPlayed, setEverPlayed] = useState(false);
+  const storePlaying = usePlaying(preset.id);
+  // One loop at a time: an autoplaying hero yields while a card is hovered/tapped.
+  const otherPlaying = useSyncExternalStore(
+    (f) => (playSubs.add(f), () => void playSubs.delete(f)),
+    () => playingId !== null && playingId !== preset.id,
+    () => false,
+  );
+  const playing = (autoPlay && visible && !otherPlaying && !media("(prefers-reduced-motion: reduce)")) || storePlaying;
+
+  // Lazy: nothing is requested until the card scrolls near the viewport.
+  useEffect(() => {
+    if (!has || visible) return;
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return setVisible(true);
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e?.isIntersecting) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [has, visible]);
+
+  useEffect(() => {
+    if (playing) setEverPlayed(true);
+  }, [playing]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (playing) void v.play().catch(() => {});
+    else {
+      v.pause();
+      v.currentTime = 0;
+      setVideoReady(false);
+    }
+  }, [playing, everPlayed]);
+
+  const showStill = has && visible && !stillFailed;
+  const showVideo = has && !videoFailed && everPlayed;
   return (
     <div
+      ref={rootRef}
       aria-hidden
       className={`relative aspect-video overflow-hidden ${className}`}
       style={{ background: `${MOTIF[preset.editType]}, ${effectGradient(preset)}` }}
     >
-      {clip ? (
-        <video src={clip} muted loop autoPlay playsInline className="h-full w-full object-cover" />
-      ) : (
-        <span className={`absolute inset-0 grid place-items-center drop-shadow-[0_4px_12px_rgba(0,0,0,.45)] ${emoji}`}>
-          {preset.emoji}
-        </span>
+      <span className={`absolute inset-0 grid place-items-center drop-shadow-[0_4px_12px_rgba(0,0,0,.45)] ${emoji}`}>
+        {preset.emoji}
+      </span>
+      {showStill && (
+        <img
+          src={`/previews/${preset.id}.jpg`}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          onError={() => setStillFailed(true)}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+      {showVideo && (
+        <video
+          ref={videoRef}
+          src={`/previews/${preset.id}.webm`}
+          muted
+          loop
+          playsInline
+          preload="none"
+          onPlaying={() => setVideoReady(true)}
+          onError={() => setVideoFailed(true)}
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${videoReady ? "opacity-100" : "opacity-0"}`}
+        />
       )}
     </div>
   );
