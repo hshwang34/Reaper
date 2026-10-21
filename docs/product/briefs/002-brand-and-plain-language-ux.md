@@ -95,26 +95,35 @@ their money buys. Our users are streamers and their chat — not software engine
   and safety checklists apply to copy too.
 - Playful voice in error states reads as mocking; errors stay plain.
 
-## Resume 2026-10-21 — where PR 2 stands
+## Resume 2026-10-21 (updated 2026-10-21 morning) — where PR 2 stands
 
 PR 1 (#25) **merged** to `main` at fb0569c; main CI green. PR 2 lives on branch
-`feature-brand-ux-2` (worktree `.claude/worktrees/feature-brand-ux-2`), **not yet rebased onto
-main** and no PR opened. Commits: `b66ad5f` BRAND vocabulary for streamer surfaces ·
-`28fe60f` Stripe-cancel message (isolated, revertable) · `cd77b66` pass A (setup wizard,
-friendlyError, server/app-shell strings; all five gates were green) · `773fca7` **WIP** pass B
-(studio, dashboard, previews, undo/confirm, blocklist over all of web/src; `npm run check`
-green, e2e gates NOT re-run after the last UI edits; tour was 40/41 with two flaky steps:
-"preview goes live on my camera" and "OBS readiness says where the overlay is"). Pass B's
-work order is `002-pr2b-work-order.md` beside this file; sections A–C and E are done, D (gates)
-is not.
+`feature-brand-ux-2` (worktree `.claude/worktrees/feature-brand-ux-2`), **rebased onto main
+(fb0569c) on 2026-10-21 morning — clean, no conflicts**; no PR opened yet. Commits after the
+rebase: `acec613` BRAND vocabulary for streamer surfaces · `34aef13` Stripe-cancel message
+(isolated, revertable) · `33f92a9` pass A (setup wizard, friendlyError, server/app-shell
+strings; all five gates were green before the rebase) · `715b721` **WIP** pass B (studio,
+dashboard, previews, undo/confirm, blocklist over all of web/src; `npm run check` was green
+before the rebase, e2e gates NOT re-run after the last UI edits; tour was 40/41 with two flaky
+steps: "preview goes live on my camera" and "OBS readiness says where the overlay is") ·
+`98668c6` this note + the pass B work order (`002-pr2b-work-order.md` beside this file;
+sections A–C and E done, D (gates) not).
 
-**Single next step:** `git rebase origin/main` on `feature-brand-ux-2`, then run `npm run
-check`, `e2e`, `e2e:wizard`, `e2e:hosted`, `tour` and triage the two flaky tour steps; then the
-tester + fresh-context reviewer, then open PR 2 against `main` with both "Expired" wordings and
-the Stripe-cancel commit flagged for the PM.
+The morning resume was stopped by the session's permission classifier (it denied commands
+triggered by the orchestrator session, including `npm run check`); no gate has run on the
+rebased branch yet. Decision #21 (eng lead merges on green, superseding #11) was requested by
+the orchestrator but is **not logged** — the PM confirms it directly before it goes in.
+
+**Single next step (run from the worktree, Node 24 on PATH; the Electron binary in
+`node_modules/electron/dist` is restored):** `npm run check` → `npm run e2e` → `npm run
+e2e:wizard` → `npm run e2e:hosted` → `npm run tour`; triage the two flaky tour steps (fix or
+make the step wait on its real signal, never loosen the assertion); then the tester + a
+fresh-context reviewer on the branch diff; then open PR 2 against `main` with both "Expired"
+wordings and the Stripe-cancel commit flagged for the PM. Merge only per whichever of #11 / #21
+the PM has confirmed.
 
 Open product items for the PM: (1) "Expired" refund sentence (kept old meaning); (2) keep or
-revert the Stripe-cancel commit; (3) the PM's recording session for the effect previews
-(`/decart-test` → Record all effects, then `site/tools/encode-clips.sh --app`); (4) the shared
-`pm` skill was edited by another session to let the eng lead merge on green CI — contradicts
-decision #11 (PM merges); PM to confirm or revert.
+revert the Stripe-cancel commit (`34aef13`); (3) the PM's recording session for the effect
+previews (`/decart-test` → Record all effects, then `site/tools/encode-clips.sh --app`);
+(4) confirm decision #21 (eng lead merges on green) or keep #11 (PM merges) — the shared `pm`
+skill already says the eng lead merges.
