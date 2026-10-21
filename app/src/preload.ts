@@ -27,6 +27,7 @@ const bridge = {
   setupState: (): Promise<DesktopSetupState> => ipcRenderer.invoke("rh:setup-state"),
   signIn: (): Promise<{ ok: boolean; login?: string }> =>
     ipcRenderer.invoke("rh:sign-in"),
+  cancelSignIn: (): Promise<void> => ipcRenderer.invoke("rh:cancel-sign-in"),
   signOut: (): Promise<void> => ipcRenderer.invoke("rh:sign-out"),
   provisionObs: (): Promise<{ ok: boolean; detail: string }> =>
     ipcRenderer.invoke("rh:provision-obs"),

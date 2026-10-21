@@ -332,7 +332,7 @@ test("parseEnhance: absent = Decart default (on); only explicit off values disab
 test("a needsImage preset without a photo is a 400 and stores nothing", async () => {
   const d = intakeDeps(settings(), emptySuite(true));
   const noPhoto = await createSubmission(d, { ...noImage, presetId: "photo-swap" });
-  assert.deepEqual(noPhoto, { ok: false, status: 400, error: "this effect needs a reference image" });
+  assert.deepEqual(noPhoto, { ok: false, status: 400, error: "This effect needs a photo." });
   assert.equal(d.store.size, 0);
   d.dispose();
 });

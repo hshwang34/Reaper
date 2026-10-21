@@ -431,7 +431,7 @@ async function main() {
   // hijack is over, so look for the "Payment received" status instead.
   check(
     "Pay → Checkout → back on the portal, showing the paid status",
-    await waitFor(async () => /payment received|in the queue|live on stream|hijack complete/i.test(await portal.locator("body").innerText()), 20_000),
+    await waitFor(async () => /payment received|in line|live on stream|hijack complete/i.test(await portal.locator("body").innerText()), 20_000),
     portal.url().replace(serverBase, ""),
   );
   check("signed webhook accepted (200)", stripeState.webhooks.at(-1)?.status === 200, JSON.stringify(stripeState.webhooks.at(-1)));

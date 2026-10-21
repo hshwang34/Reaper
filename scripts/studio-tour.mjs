@@ -190,8 +190,8 @@ async function main() {
   await button(win, /^continue$/i).click();
 
   // OBS first: the overlay is installed before the camera is chosen.
-  await waitFor(async () => /add the ai hijack source/i.test(await text(win)), 15_000);
-  await button(win, /add the ai hijack source/i).click();
+  await waitFor(async () => /add the overlay/i.test(await text(win)), 15_000);
+  await button(win, /add the overlay/i).click();
   check(
     "OBS step installs into every webcam scene, in plain words",
     await waitFor(async () => /Installed in "Just Chatting" over "Facecam", "Gaming" over "Facecam"/.test(await text(win)), 10_000),

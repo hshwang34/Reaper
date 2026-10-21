@@ -140,7 +140,7 @@ function StatusCard({
     review: paid
       ? "Payment received. Waiting for the streamer to approve it…"
       : "Tip received. Waiting for the streamer to approve it…",
-    matched: "You're in the queue",
+    matched: "You're in line",
     queued: `You're in line${status?.queuePosition ? ` · position ${status.queuePosition}` : ""}`,
     live: "Your effect is live on stream",
     done: "Hijack complete",

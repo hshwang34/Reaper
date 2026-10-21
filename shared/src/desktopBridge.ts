@@ -52,6 +52,8 @@ export interface DesktopBridge {
   setupState(): Promise<DesktopSetupState>;
   /** Loopback OAuth via the system browser; resolves once signed in. */
   signIn(): Promise<{ ok: boolean; login?: string }>;
+  /** Stop waiting for the browser: frees the loopback listener so the next attempt can bind. */
+  cancelSignIn(): Promise<void>;
   signOut(): Promise<void>;
   /** Create/repair the hidden OBS Browser Source now. */
   provisionObs(): Promise<{ ok: boolean; detail: string }>;

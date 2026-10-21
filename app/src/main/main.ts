@@ -27,6 +27,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  dialog,
   powerSaveBlocker,
   session,
   shell,
@@ -62,7 +63,8 @@ import {
   isObsRunning,
   launchObs,
 } from "./obsDiscovery.js";
-import { signInWithBrowser } from "./signIn.js";
+import { cancelSignIn, signInWithBrowser } from "./signIn.js";
+import { effectIsLive, trayMenuLabel, trayTooltip } from "./trayCopy.js";
 import { startAutoUpdate } from "./updater.js";
 
 /** The hosted control plane baked in at build time (scripts/build-main.mjs,
@@ -170,7 +172,7 @@ async function boot(): Promise<void> {
     moneyProxy: cloudMode
       ? {
           togglePause: () => {
-            if (!link) return Promise.reject(new Error("cloud link not up"));
+            if (!link) return Promise.reject(new Error("Still connecting…"));
             return link.togglePause();
           },
           status: () =>
@@ -191,7 +193,7 @@ async function boot(): Promise<void> {
             request: (method, path, body) =>
               link
                 ? link.request(method, path, body)
-                : Promise.resolve({ status: 503, body: { error: "still connecting to Stream Hijack" } }),
+                : Promise.resolve({ status: 503, body: { error: "Still connecting…" } }),
             login: cloudCfg.login,
             portalUrl: `${cloudCfg.url}/c/${encodeURIComponent(cloudCfg.login)}`,
           }
@@ -304,6 +306,7 @@ async function boot(): Promise<void> {
     app.exit(0);
     return { ok: true, login: cfg.login };
   });
+  ipcMain.handle("rh:cancel-sign-in", () => cancelSignIn());
   ipcMain.handle("rh:sign-out", () => {
     saveCloudConfig(null);
     app.relaunch();
@@ -352,7 +355,7 @@ async function boot(): Promise<void> {
   // and the browser does the Stripe part (returns to /payouts-done).
   ipcMain.handle("rh:payouts", () => (link ? link.payouts() : null));
   ipcMain.handle("rh:start-payouts", async (_e, country: string) => {
-    if (!link) throw new Error("payouts need the hosted sign-in");
+    if (!link) throw new Error("Sign in with Twitch to set up payouts.");
     const url = await link.payoutsOnboardUrl(String(country || "US"));
     if (/^https:\/\//.test(url)) await shell.openExternal(url);
   });
@@ -566,14 +569,11 @@ function refreshTray(): void {
   // macOS shows a status glyph beside the icon; Windows has no tray title,
   // so the state goes in the hover tooltip instead.
   if (process.platform === "darwin") tray.setTitle(` ${stateGlyph}`);
-  tray.setToolTip(
-    `Stream Hijack — ${snap.paused ? "PAUSED" : snap.routerState}` +
-      (snap.queueLength ? ` · ${snap.queueLength} queued` : ""),
-  );
+  tray.setToolTip(trayTooltip(snap));
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: `Router: ${snap.routerState}${snap.paused ? " (PAUSED)" : ""} · queue ${snap.queueLength}`,
+        label: trayMenuLabel(snap),
         enabled: false,
       },
       {
@@ -582,28 +582,42 @@ function refreshTray(): void {
       },
       { type: "separator" },
       {
-        label: snap.paused ? "Resume hijacks" : "Panic (pause + kill live)",
+        label: snap.paused ? "Resume hijacks" : "Stop and pause hijacks",
         accelerator: "CommandOrControl+Shift+H",
         click: () => {
           void local?.togglePause().catch(() => {}).then(refreshTray);
         },
       },
       {
-        label: "Re-provision OBS source",
+        label: "Add the overlay again",
         click: () => void provisionObs(viewerUrlGlobal),
       },
       {
         label: "Run setup again…",
         click: () => {
           if (!win || !local) return;
-          void win.loadURL(`${ownOriginGlobal}/setup`);
-          win.show();
-          win.focus();
+          const w = win;
+          // Navigating the window to /setup tears down the router page, which
+          // ends a live effect (teardown hides OBS first). Never do that
+          // mid-stream without asking.
+          if (effectIsLive(local.status())) {
+            const choice = dialog.showMessageBoxSync(w, {
+              type: "question",
+              message: "An effect is playing. Stop it and open setup?",
+              buttons: ["Stop and open", "Keep streaming"],
+              defaultId: 1,
+              cancelId: 1,
+            });
+            if (choice !== 0) return;
+          }
+          void w.loadURL(`${ownOriginGlobal}/setup`);
+          w.show();
+          w.focus();
         },
       },
       { type: "separator" },
       {
-        label: "Open router window",
+        label: "Open the studio",
         click: () => {
           if (win) {
             win.show();
