@@ -1,12 +1,58 @@
 # Recording the real effect for the site
 
-The hero monitor and the looks grid play **recorded clips of the actual
-`lucy-2.5` output** when they exist, and fall back to a CSS simulation
+The hero monitor plays **recorded clips of the actual
+`lucy-2.5` output** when they exist, and falls back to a CSS simulation
 (labelled as such) when they don't. Nothing on the public site calls the
 model; the only compute spent is the one-off recording session below.
 
 Cost of a full set: six presets × ~10 s ≈ 60 s of model time ≈ **$1.20** at
 the published $0.02/s.
+
+## "What's possible": one base clip, one render per edit
+
+The **What's possible** section (`src/possible.ts`) lets a reader pick a kind of
+edit, watch its prompt type into the hijack page, and pay $5; the stream then cuts to
+the real `lucy-2.5` render of that prompt for 5 seconds. It needs one recorded
+base clip plus one render per entry in `src/capabilities.json`, all the same
+length and frame-aligned, so a payment can land at any moment.
+
+The footage is of us, not a borrowed stream: restyling someone else's face on
+the product's own site is a rights problem and reads as shady.
+
+### Record the base clip (≈ 2 minutes)
+
+Webcam or phone on a tripod, 16:9, 720p or better, **camera locked off**.
+
+- Chest-up framing, centred, desk and **microphone in shot**, a lamp or LED
+  strip behind for the "stream" look.
+- **Wear headphones** (the *Remove an object* render takes them off).
+- Talk to camera for **30 s** as if to chat: react, laugh, gesture. Keep hands
+  off your face and stay in frame.
+- **End in the pose you started in** — the clip loops.
+- Front light on your face; no window behind you.
+
+### Render (≈ $4–5 of model time for 7 edits × 30 s)
+
+```bash
+# dry run: prints the cost and the hard ceiling, spends nothing
+node scripts/render-lucy.mjs ~/Movies/base.mov
+# the real thing
+node scripts/render-lucy.mjs ~/Movies/base.mov --yes
+# redo one or two after changing their prompt
+node scripts/render-lucy.mjs ~/Movies/base.mov --yes --only vfx,attribute
+```
+
+Writes `public/clips/possible/{base,<id>}.{mp4,jpg}` and `manifest.json`. Each
+render mints its own `ek_` token capped at clip length + 15 s, and the prompt is
+sent with Decart's rewriter **off**, so the prompt the site types out is exactly
+what the model received. The manifest records the prompt each clip was made
+from; if `capabilities.json` changes, that edit falls back to a labelled
+stand-in until it is re-rendered. `--mock` runs the whole pipeline with no
+Decart calls (the site flags a mock manifest in red; never ship one).
+
+Watch every clip before committing. If an edit doesn't hold up (object removal
+and character swaps are the hardest for a realtime model), tune its prompt and
+re-render, or drop it from `capabilities.json`, rather than ship a weak one.
 
 ## 1. Record at the rig (about five minutes)
 
