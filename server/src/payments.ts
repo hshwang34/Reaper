@@ -286,7 +286,9 @@ export async function createCheckout(channelId: string, input: CheckoutInput): P
     metadata: { paymentId, channelId, code },
     expires_at: Math.floor(expiresAt / 1000),
     success_url: `${input.returnUrl}${input.returnUrl.includes("?") ? "&" : "?"}paid=${encodeURIComponent(code)}`,
-    cancel_url: input.returnUrl,
+    // Backing out of Stripe lands on ?cancelled=1 so the page can say nothing was
+    // charged. NOT via returnUrl itself: that also feeds success_url (paid=…).
+    cancel_url: `${input.returnUrl}${input.returnUrl.includes("?") ? "&" : "?"}cancelled=1`,
   },
   // Direct charge: the session (and the payment) live on the streamer's account.
   { stripeAccount: row.stripeAccountId },
