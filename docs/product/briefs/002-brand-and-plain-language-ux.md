@@ -94,3 +94,27 @@ their money buys. Our users are streamers and their chat — not software engine
 - Rewriting copy can silently change meaning on money/safety screens — the reviewer's money
   and safety checklists apply to copy too.
 - Playful voice in error states reads as mocking; errors stay plain.
+
+## Resume 2026-10-21 — where PR 2 stands
+
+PR 1 (#25) **merged** to `main` at fb0569c; main CI green. PR 2 lives on branch
+`feature-brand-ux-2` (worktree `.claude/worktrees/feature-brand-ux-2`), **not yet rebased onto
+main** and no PR opened. Commits: `b66ad5f` BRAND vocabulary for streamer surfaces ·
+`28fe60f` Stripe-cancel message (isolated, revertable) · `cd77b66` pass A (setup wizard,
+friendlyError, server/app-shell strings; all five gates were green) · `773fca7` **WIP** pass B
+(studio, dashboard, previews, undo/confirm, blocklist over all of web/src; `npm run check`
+green, e2e gates NOT re-run after the last UI edits; tour was 40/41 with two flaky steps:
+"preview goes live on my camera" and "OBS readiness says where the overlay is"). Pass B's
+work order is `002-pr2b-work-order.md` beside this file; sections A–C and E are done, D (gates)
+is not.
+
+**Single next step:** `git rebase origin/main` on `feature-brand-ux-2`, then run `npm run
+check`, `e2e`, `e2e:wizard`, `e2e:hosted`, `tour` and triage the two flaky tour steps; then the
+tester + fresh-context reviewer, then open PR 2 against `main` with both "Expired" wordings and
+the Stripe-cancel commit flagged for the PM.
+
+Open product items for the PM: (1) "Expired" refund sentence (kept old meaning); (2) keep or
+revert the Stripe-cancel commit; (3) the PM's recording session for the effect previews
+(`/decart-test` → Record all effects, then `site/tools/encode-clips.sh --app`); (4) the shared
+`pm` skill was edited by another session to let the eng lead merge on green CI — contradicts
+decision #11 (PM merges); PM to confirm or revert.
