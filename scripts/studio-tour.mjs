@@ -210,7 +210,7 @@ async function main() {
   await button(win, /i understand/i).click();
   await sleep(500);
   await snap(win, "setup-6-done");
-  await button(win, /open reality hijack/i).click();
+  await button(win, /open stream hijack/i).click();
   // The app marks setup done and relaunches ITSELF (same argv, so same debug
   // port) — a process we didn't spawn, holding the single-instance lock.
   // Wait for the flag, then stop that copy so the next launch is ours.
@@ -272,7 +272,7 @@ async function main() {
   browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ["--autoplay-policy=no-user-gesture-required"] });
   const obsSource = await (await browser.newContext()).newPage();
   await obsSource.goto(obs.provisionedUrl());
-  await button(win, /turn on reality hijack/i).click();
+  await button(win, /turn on stream hijack/i).click();
   check("turn on → ready", await waitFor(async () => /Ready · waiting for a viewer/.test(await text(win)), 15_000));
   await snap(win, "live-ready", { fullPage: false });
   await button(win, /try an effect on me/i).click();

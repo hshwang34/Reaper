@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Reality Hijack: viewers pay a live streamer, type a prompt (or pick a preset) + optional
+Stream Hijack: viewers pay a live streamer, type a prompt (or pick a preset) + optional
 reference image, and the streamer's webcam is restyled in real time by Decart's `lucy-2.5`
-video model for a duration proportional to the payment (**$1 = 1s**), then reverts. It is both a
+video model for a duration proportional to the payment (**$1 = 1s**), then reverts. (Formerly "Reality Hijack" — renamed 2026-10; infra slugs like
+`reality-hijack.fly.dev` are intentionally unchanged, see `docs/DOMAIN-AND-EMAIL.md`.) It is both a
 working product and a portfolio case study in AI product design under real constraints
 (per-second GPU billing, monetization policy, live-video latency, content safety).
 

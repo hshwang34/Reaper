@@ -35,7 +35,7 @@ const STEPS: { title: string; body: string; art: Preset[]; caption?: string }[] 
   },
   {
     title: "Your stream transforms, live",
-    body: "Reality Hijack restyles your webcam in real time and puts it on stream in OBS, exactly over your camera. Chat sees it the moment it starts.",
+    body: "Stream Hijack restyles your webcam in real time and puts it on stream in OBS, exactly over your camera. Chat sees it the moment it starts.",
     art: [p("lava-room")],
     caption: "Lava Room · 15 seconds · paid by a viewer",
   },

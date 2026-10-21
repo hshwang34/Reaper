@@ -8,9 +8,9 @@ export default function BrandShell() {
   return (
     <div className="brand-app">
       <header className="brand-bar">
-        <div className="brand-identity" aria-label="Reality Hijack">
+        <div className="brand-identity" aria-label="Stream Hijack">
           <img src="/brand/icon-180.png" width="52" height="52" alt="" />
-          <span>Reality <strong>Hijack</strong></span>
+          <span>Stream <strong>Hijack</strong></span>
         </div>
         <span className="brand-context">
           {creator ? "CREATOR STUDIO" : "CHAT TAKES OVER"}

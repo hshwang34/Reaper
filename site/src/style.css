@@ -1,4 +1,4 @@
-/* Reality Hijack — marketing site (v3b)
+/* Stream Hijack — marketing site (v3b)
    Layout: a left-aligned product page whose one big object is the stream frame. Every
    product mock (portal, OBS, ledger) follows the same simulated hijack as the hero.
 
@@ -2129,7 +2129,7 @@ kbd {
 }
 .footer-cols {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 20px;
 }
 .footer-cols div {
@@ -2143,6 +2143,7 @@ kbd {
 }
 .footer-cols a {
   text-decoration: none;
+  overflow-wrap: anywhere; /* the contact address is one long word */
 }
 .footer-cols a:hover {
   color: var(--ink);

@@ -350,7 +350,7 @@ export default function PortalPage() {
     if (!code) return;
     // Real viewers tip via Streamlabs with the code in the message; this is the
     // demo shortcut that drives the identical server-side path.
-    await api.fakeTip(tipAmount, `Reality hijack ${code}`, tipperName || undefined);
+    await api.fakeTip(tipAmount, `Stream hijack ${code}`, tipperName || undefined);
   }
 
   function reset() {
@@ -764,7 +764,7 @@ export default function PortalPage() {
                     <div className="mx-auto max-w-xl lg:max-w-none">
                       {paid && !pay!.live && (
                         <p className="mb-2 rounded-xl bg-zinc-800 px-3 py-2 text-sm text-zinc-200">
-                          Paused — {channel}'s Reality Hijack app isn't live. Check back when they're streaming.
+                          Paused — {channel}'s Stream Hijack app isn't live. Check back when they're streaming.
                         </p>
                       )}
                       {error && (
