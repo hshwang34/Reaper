@@ -1,6 +1,6 @@
 # 002 — One brand, real previews, plain-language UX everywhere
 
-**Status:** building · **Owner:** PM · **PR:** — · **Updated:** 2026-10-20
+**Status:** in review (PR 1 of 3) · PR 2 studio + wizard and PR 3 website not started · **Owner:** PM · **PR:** — · **Updated:** 2026-10-20
 
 ## Problem
 The product was built surface by surface (wizard, studio, viewer portal, OBS overlay, website)
@@ -72,6 +72,15 @@ their money buys. Our users are streamers and their chat — not software engine
    the CSS art as fallback, so the files drop in without code changes.
 
 ## Engineering decisions (filled in by the lead while building)
+- PR 1 (portal): `EffectArt` reads one `/previews/manifest.json` (the hosted and Electron
+  servers' SPA fallback returns HTML with 200 for missing files, so per-file probing is useless);
+  no manifest → identical CSS art. `friendlyError()` is the only path from server/engine text to
+  the viewer. Paid state comes from a `?paid=` flag + a sessionStorage receipt, never from copy.
+  `POST /api/dev/token` (dev routes only, auth, ≤60 s, 501 on the hosted server) unblocks the
+  batch recorder; `encode-clips.sh --app` writes the previews + manifest.
+- Expired-claim copy keeps "No payment arrived in time." — a late payment is refunded, not
+  dropped, so "nothing was charged" would be false. Cancelled-Stripe state needs a one-line
+  server flag (`?cancelled=1` on `cancel_url`); deferred to PR 2 pending the PM.
 - The base clip is the PM's own webcam. The recorder batches all 17 effects from one sitting
   so it's a single ~5-minute session, re-runnable when presets change.
 - Previews are produced once, offline, with the existing `/decart-test` recorder
