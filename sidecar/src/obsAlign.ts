@@ -133,3 +133,69 @@ export const CAMERA_INPUT_KINDS: ReadonlySet<string> = new Set([
   "dshow_input", // Windows
   "v4l2_input", // Linux
 ]);
+
+// ── Placement: which scenes get the overlay, and where in the layer stack ──
+
+/** One scene as obs-websocket lists it (items bottom → top, index 0 first). */
+export interface SceneSnapshot {
+  scene: string;
+  items: {
+    id: number;
+    /** OBS stacking index: 0 is the bottom layer. */
+    index: number;
+    name: string;
+    kind: string;
+    enabled: boolean;
+    isOurs: boolean;
+  }[];
+}
+
+export interface OverlayPlacement {
+  scene: string;
+  itemId: number;
+  /** The webcam source it covers in this scene (null: none found). */
+  camera: string | null;
+  cameraItemId: number | null;
+  /** Stacking index that puts the overlay directly above the camera, when
+   *  it isn't there already. */
+  reorderTo?: number | null;
+}
+
+/**
+ * Decide where the overlay belongs, from a snapshot of every scene.
+ *
+ *   targets  — scenes that show a webcam (where a hijack must be visible)
+ *   existing — scenes our overlay is already in, with the camera it covers
+ *              and, if needed, the index that puts it directly above that
+ *              camera: above it so it covers the webcam, and directly above
+ *              so a frame, alert or chat box the streamer layered over their
+ *              webcam stays on top of the AI feed too.
+ */
+export function planOverlay(
+  scenes: SceneSnapshot[],
+  source: string,
+  cameraKinds: ReadonlySet<string>,
+): { targets: string[]; existing: OverlayPlacement[] } {
+  const targets: string[] = [];
+  const existing: OverlayPlacement[] = [];
+  for (const sc of scenes) {
+    const cam = sc.items.find((i) => !i.isOurs && i.name !== source && i.enabled && cameraKinds.has(i.kind));
+    if (cam) targets.push(sc.scene);
+    const ours = sc.items.find((i) => i.isOurs);
+    if (!ours) continue;
+    let reorderTo: number | null = null;
+    if (cam) {
+      // Moving an item out of the stack shifts everything above it down one.
+      const want = ours.index < cam.index ? cam.index : cam.index + 1;
+      if (ours.index !== want) reorderTo = want;
+    }
+    existing.push({
+      scene: sc.scene,
+      itemId: ours.id,
+      camera: cam?.name ?? null,
+      cameraItemId: cam?.id ?? null,
+      reorderTo,
+    });
+  }
+  return { targets, existing };
+}

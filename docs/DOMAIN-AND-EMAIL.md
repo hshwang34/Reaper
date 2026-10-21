@@ -17,12 +17,14 @@ Workspace mailbox, and pointing the live services at it. Every account here is a
   (`reality-hijack`) keep their names; the domain is pointed *at* them. Renaming a
   Fly app means a new app + volume migration for zero user-visible gain.
 
-## 1. Buy the domain (~$11/yr)
+## 1. The domain — done (2026-10-20)
 
-1. Register **streamhijack.com** at Porkbun or Cloudflare Registrar (both sell at
-   cost; WHOIS privacy is free). Optional: **streamhijack.stream** ($4.61, renews
-   $5.64) and **realityhijack.com**, both redirected to the .com.
-2. Turn on auto-renew. Keep DNS at the registrar unless moving to Cloudflare.
+**streamhijack.com** is registered at Porkbun (account `hshwang34`, ~$11/yr,
+WHOIS privacy on, auto-renew on). DNS stays at Porkbun. API access is enabled for
+the domain; the key lives in the project `.env` as `PORKBUN_API_KEY` /
+`PORKBUN_SECRET_KEY` (gitignored) so DNS changes can be scripted. Porkbun's
+default parking records (apex `ALIAS` + `*` `CNAME` → `uixie.porkbun.com`) were
+deleted — they shadow every record below.
 
 ## 2. Google Workspace (Business Starter, one seat)
 
@@ -47,9 +49,13 @@ Workspace mailbox, and pointing the live services at it. Every account here is a
 | SPF | TXT | `@` | `v=spf1 include:_spf.google.com ~all` |
 | DKIM | TXT | `google._domainkey` | generated in Admin → Gmail → *Authenticate email* (2048-bit), then click **Start authentication** |
 | DMARC | TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:dmarc@streamhijack.com` — tighten to `p=quarantine` after ~2 clean weeks |
-| Marketing site | A | `@` | `76.76.21.21` (Vercel) |
-| Marketing site | CNAME | `www` | `cname.vercel-dns.com` |
-| Control plane | CNAME | `app` | whatever `fly certs add` prints (normally `reality-hijack.fly.dev`) |
+| Marketing site ✅ | A | `@` | `216.198.79.1` and `64.29.17.1` (Vercel's current recommendation) |
+| Marketing site ✅ | CNAME | `www` | `61c8695760e14eef.vercel-dns-017.com` (project-specific, from `vercel domains verify`) |
+| Control plane ✅ | A / AAAA | `app` | `66.241.124.68` / `2a09:8280:1::1c0:fd56:0` (from `fly certs add`; cert issued) |
+
+✅ = live since 2026-10-20. The mail rows wait on the Workspace signup; until
+then Porkbun's own forwarding MX/SPF records are still in place — replace them,
+don't add alongside.
 
 Check with Google's [Check MX](https://toolbox.googleapps.com/apps/checkmx/) and by
 sending a test to a Gmail address → *Show original* → SPF/DKIM/DMARC all `PASS`.

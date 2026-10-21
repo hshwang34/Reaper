@@ -25,7 +25,8 @@
     "e2e": "node scripts/e2e.mjs",
     "e2e:hosted": "node scripts/e2e-hosted.mjs",
     "smoke:prod": "node scripts/smoke-prod.mjs",
-    "smoke:live": "node scripts/smoke-live.mjs"
+    "smoke:live": "node scripts/smoke-live.mjs",
+    "tour": "node scripts/studio-tour.mjs"
   },
   "devDependencies": {
     "@msgpack/msgpack": "^3.1.3",
