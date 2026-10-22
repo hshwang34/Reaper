@@ -1,0 +1,47 @@
+{
+  "model": "lucy-2.5",
+  "enhance": false,
+  "rendered": "2026-10-21",
+  "mock": true,
+  "duration": 12,
+  "leadSec": 0.15,
+  "base": "/clips/possible/base.mp4",
+  "poster": "/clips/possible/base.jpg",
+  "clips": {
+    "character-swap": {
+      "src": "/clips/possible/character-swap.mp4",
+      "poster": "/clips/possible/character-swap.jpg",
+      "prompt": "Replace the person with a medieval knight in polished silver plate armor and a red cloak, helmet visor up, same pose and movements, sitting at the same desk in front of the microphone"
+    },
+    "add-object": {
+      "src": "/clips/possible/add-object.mp4",
+      "poster": "/clips/possible/add-object.jpg",
+      "prompt": "Add a bright green parrot perched on the person's right shoulder, turning its head and ruffling its feathers, everything else in the scene unchanged"
+    },
+    "background": {
+      "src": "/clips/possible/background.mp4",
+      "poster": "/clips/possible/background.jpg",
+      "prompt": "Replace the room behind the person with a tropical beach at sunset, palm trees and golden light on the ocean, the person, desk and microphone unchanged"
+    },
+    "style": {
+      "src": "/clips/possible/style.mp4",
+      "poster": "/clips/possible/style.jpg",
+      "prompt": "Redraw the entire scene as a 1980s cel-shaded anime with bold black ink outlines, flat colors, soft film grain and a neon pink and teal sunset palette"
+    },
+    "vfx": {
+      "src": "/clips/possible/vfx.mp4",
+      "poster": "/clips/possible/vfx.jpg",
+      "prompt": "The room is flooded with molten lava, glowing orange cracks across the floor and walls, embers floating in the air, intense volcanic lighting on the person's face"
+    },
+    "remove-object": {
+      "src": "/clips/possible/remove-object.mp4",
+      "poster": "/clips/possible/remove-object.jpg",
+      "prompt": "Remove the headphones from the person's head so their hair and ears are visible, everything else in the scene unchanged"
+    },
+    "attribute": {
+      "src": "/clips/possible/attribute.mp4",
+      "poster": "/clips/possible/attribute.jpg",
+      "prompt": "Change the person's hair to bright electric blue, same hairstyle and lighting, everything else in the scene unchanged"
+    }
+  }
+}

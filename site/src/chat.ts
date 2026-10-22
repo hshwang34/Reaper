@@ -25,13 +25,13 @@ export const IDLE_LINES = [
   "LOL",
   "hi chat",
   "anyone else here from the clip",
-  "what look is next",
+  "what effect is next",
   "do the underwater one again",
   "first time here, what is the hijack thing",
   "the countdown is so good",
   "opening the link rn",
   "W stream",
-  "wait so you pick the look and pay? sick",
+  "wait so you pick the effect and pay? sick",
   "haunted one tonight pls",
 ];
 
