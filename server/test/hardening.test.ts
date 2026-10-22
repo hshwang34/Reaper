@@ -4,6 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { upsertChannel } from "../src/auth.js";
 import { getRuntime, TEST_HIJACK_SEC } from "../src/channels.js";
@@ -91,7 +92,7 @@ test("dev routes (incl. the ungated /dev/token) are off under RH_ENV=production"
     execFileSync(
       process.execPath,
       ["--import", "tsx", "--input-type=module", "-e", "import('./src/env.ts').then(m=>console.log(m.devRoutesEnabled))"],
-      { env: { ...process.env, ...FULL, RH_ENV: envName }, cwd: new URL("..", import.meta.url).pathname },
+      { env: { ...process.env, ...FULL, RH_ENV: envName }, cwd: fileURLToPath(new URL("..", import.meta.url)) },
     )
       .toString()
       .trim();
