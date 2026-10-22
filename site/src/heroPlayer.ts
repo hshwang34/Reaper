@@ -296,7 +296,9 @@ export class HeroPlayer {
           fx.playbackRate = 1;
           fx.currentTime = this.target();
         } else if (Math.abs(d) > SOFT_DRIFT) {
-          fx.playbackRate = d > 0 ? 0.96 : 1.04;
+          // proportional: ~0.1 s off closes in about a second, a few ms off barely nudges
+          const k = Math.min(0.12, Math.max(0.03, Math.abs(d)));
+          fx.playbackRate = d > 0 ? 1 - k : 1 + k;
         } else if (fx.playbackRate !== 1) {
           fx.playbackRate = 1;
         }
