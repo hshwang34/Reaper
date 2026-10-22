@@ -1,0 +1,11 @@
+# The opening demo's footage (tools/encode-hero.sh). Columns are TAB-separated:
+# id	source	emoji	label	description
+base	BaseTwitchStreamExample.mp4	🎥	Original	The stream as chat sees it, before anyone pays.
+statue	decart-1792691941321.mp4	🗽	Statue of Liberty	The streamer turns to oxidised copper, crown and all, and keeps talking.
+anime	decart-1792692211808.mp4	📼	Anime	The whole room is redrawn as a hand-drawn anime, sunset in the window.
+ghost	decart-1792692721374.mp4	👻	Ghost	Something pale climbs up behind the chair and holds on.
+fire	decart-1792693044472.mp4	🔥	Hair on fire	Flames on the streamer's head, lit and moving with every turn.
+slime	decart-1792693336413.mp4	🟢	Slime	Green slime pours out with every word.
+mummy	decart-1792693589938.mp4	🧟	Mummy	Wrapped head to toe in bandages, headphones still on.
+blonde	decart-1792693742731.mp4	💇	Platinum bob	One detail changed: a sharp platinum bob, everything else untouched.
+polar-bear	decart-1792694366792.mp4	🐻‍❄️	Polar bear	A polar bear takes the chair, scarf, headphones and a cold drink.
