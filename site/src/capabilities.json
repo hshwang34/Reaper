@@ -1,0 +1,62 @@
+{
+  "_comment": "The 'What's possible' section's catalog, and the renderer's input (scripts/render-lucy.mjs). `prompt` is sent to lucy-2.5 verbatim with Decart's prompt rewriter OFF, so the text the site types out is exactly what the model received. Change a prompt → re-render that clip.",
+  "amount": 5,
+  "capabilities": [
+    {
+      "id": "character-swap",
+      "label": "Character swap",
+      "blurb": "Recast the streamer as someone, or something, else.",
+      "who": "sir_lagalot",
+      "prompt": "Replace the person with a medieval knight in polished silver plate armor and a red cloak, helmet visor up, same pose and movements, sitting at the same desk in front of the microphone",
+      "reactions": ["SIR??", "the armor actually moves", "knight stream lets go", "kept the mic too lol"]
+    },
+    {
+      "id": "add-object",
+      "label": "Add an object",
+      "blurb": "Drop something into the shot that tracks with the scene.",
+      "who": "polly_wants",
+      "prompt": "Add a bright green parrot perched on the person's right shoulder, turning its head and ruffling its feathers, everything else in the scene unchanged",
+      "reactions": ["BIRD", "the parrot is vibing", "name him chat", "it's looking at chat lol"]
+    },
+    {
+      "id": "background",
+      "label": "Background edit",
+      "blurb": "Move the whole stream somewhere else. The streamer stays put.",
+      "who": "beach_mode",
+      "prompt": "Replace the room behind the person with a tropical beach at sunset, palm trees and golden light on the ocean, the person, desk and microphone unchanged",
+      "reactions": ["vacation stream", "wait where did the room go", "sunset arc", "beach episode"]
+    },
+    {
+      "id": "style",
+      "label": "Style change",
+      "blurb": "Redraw the stream in a different medium, frame by frame.",
+      "who": "vhs_ghost",
+      "prompt": "Redraw the entire scene as a 1980s cel-shaded anime with bold black ink outlines, flat colors, soft film grain and a neon pink and teal sunset palette",
+      "reactions": ["opening theme plays", "ANIME ARC", "the outlines are clean", "80s OVA vibes"]
+    },
+    {
+      "id": "vfx",
+      "label": "VFX",
+      "blurb": "Weather, fire, magic: effects that light the room.",
+      "who": "quartz_ok",
+      "prompt": "The room is flooded with molten lava, glowing orange cracks across the floor and walls, embers floating in the air, intense volcanic lighting on the person's face",
+      "reactions": ["THE FLOOR IS LAVA", "not even sweating", "embers lmao", "clip it"]
+    },
+    {
+      "id": "remove-object",
+      "label": "Remove an object",
+      "blurb": "Erase something from the shot and fill in what was behind it.",
+      "who": "where_r_they",
+      "prompt": "Remove the headphones from the person's head so their hair and ears are visible, everything else in the scene unchanged",
+      "reactions": ["where did the headphones go", "can't hear us now", "wait that's clean", "magic trick"]
+    },
+    {
+      "id": "attribute",
+      "label": "Change an attribute",
+      "blurb": "Tweak one detail: hair, clothes, colour, age.",
+      "who": "blue_steel",
+      "prompt": "Change the person's hair to bright electric blue, same hairstyle and lighting, everything else in the scene unchanged",
+      "reactions": ["blue hair era", "it suits you ngl", "keep it", "dye it for real"]
+    }
+  ]
+}

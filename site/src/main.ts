@@ -10,7 +10,10 @@
 
 import "./style.css";
 import "./product.css";
+import "./possible.css";
 import { Particles, type ParticleMode } from "./particles";
+import { Chat, IDLE_LINES, esc, sleep } from "./chat";
+import { initPossible } from "./possible";
 
 /* ---------- theme hook for screenshots (?theme=dark|light) ---------- */
 
@@ -47,37 +50,6 @@ const PARTICLES: Record<string, ParticleMode> = {
   "winter-wonderland": "snow",
 };
 
-// Chat: a small cast with the usual badge mix, and lines for idle time, the
-// moment a hijack lands, and the afterglow. All generic; no real handles.
-interface Chatter {
-  n: string;
-  c: string;
-  b?: "mod" | "sub" | "vip";
-}
-const CHATTERS: Chatter[] = [
-  { n: "pixel_pat", c: "#ff7a59" },
-  { n: "kay_io", c: "#5ec5ff" },
-  { n: "marz", c: "#b685ff", b: "sub" },
-  { n: "deadl1ne", c: "#59ff9a", b: "mod" },
-  { n: "tofu_tv", c: "#ffd166" },
-  { n: "nia_exe", c: "#ff5ca8", b: "vip" },
-  { n: "borkbork", c: "#8ad7ff" },
-  { n: "sunny_d", c: "#ffb86b", b: "sub" },
-  { n: "lowpoly", c: "#9ef0e0" },
-];
-const IDLE_LINES = [
-  "LOL",
-  "hi chat",
-  "anyone else here from the clip",
-  "what look is next",
-  "do the underwater one again",
-  "first time here, what is the hijack thing",
-  "the countdown is so good",
-  "opening the link rn",
-  "W stream",
-  "wait so you pick the look and pay? sick",
-  "haunted one tonight pls",
-];
 const BURST_LINES = (c: Cycle): string[] => [
   `${c.who} W`,
   "LETS GOOO",
@@ -92,6 +64,12 @@ const BURST_LINES = (c: Cycle): string[] => [
   "run it back",
   "mine next",
 ];
+
+const paidAlert = (c: Cycle) => ({
+  who: c.who,
+  amount: c.amount,
+  detail: `${c.label}, ${c.amount} seconds`,
+});
 
 interface ClipEntry {
   preset: string;
@@ -108,7 +86,6 @@ const IDLE_MS = 2200;
 const TIP_MS = 1100;
 const WIPE_MS = 420;
 const DONE_MS = 800;
-const CHAT_MAX = 18;
 const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ---------- helpers ---------- */
@@ -118,10 +95,7 @@ const $ = <T extends HTMLElement>(id: string): T => {
   if (!el) throw new Error(`missing #${id}`);
   return el as T;
 };
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.ceil(sec) % 60).padStart(2, "0")}`;
-const pick = <T>(xs: T[]): T => xs[Math.floor(Math.random() * xs.length)]!;
-const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]!);
 
 async function loadManifest(): Promise<Map<string, ClipEntry>> {
   const map = new Map<string, ClipEntry>();
@@ -134,84 +108,6 @@ async function loadManifest(): Promise<Map<string, ClipEntry>> {
     /* no clips */
   }
   return map;
-}
-
-/* ---------- chat ---------- */
-
-class Chat {
-  private list = $("chatList");
-  private timer = 0;
-  private gen = 0;
-  private lastChatter: Chatter | null = null;
-
-  /** Ambient chatter at a human-looking cadence. */
-  startIdle(): void {
-    this.stop();
-    const gen = ++this.gen;
-    const loop = () => {
-      if (gen !== this.gen) return;
-      this.say(pick(IDLE_LINES));
-      this.timer = window.setTimeout(loop, 1300 + Math.random() * 1500);
-    };
-    this.timer = window.setTimeout(loop, 600);
-  }
-
-  /** The room reacts: a quick burst, then it settles. */
-  async burst(c: Cycle): Promise<void> {
-    this.stop();
-    const gen = ++this.gen;
-    const lines = BURST_LINES(c).sort(() => Math.random() - 0.5).slice(0, 7);
-    for (const line of lines) {
-      if (gen !== this.gen) return;
-      this.say(line);
-      await sleep(260 + Math.random() * 320);
-    }
-    if (gen !== this.gen) return;
-    // keep a slower trickle going for the rest of the hijack
-    const loop = () => {
-      if (gen !== this.gen) return;
-      this.say(pick([...IDLE_LINES, ...BURST_LINES(c)]));
-      this.timer = window.setTimeout(loop, 900 + Math.random() * 900);
-    };
-    this.timer = window.setTimeout(loop, 700);
-  }
-
-  stop(): void {
-    clearTimeout(this.timer);
-    this.gen++;
-  }
-
-  say(text: string): void {
-    let who = pick(CHATTERS);
-    if (who === this.lastChatter) who = pick(CHATTERS);
-    this.lastChatter = who;
-    this.push(
-      `<li>${who.b ? `<i class="badge ${who.b}"></i>` : ""}<span class="chat-user" style="color:${who.c}">${esc(who.n)}</span>: ${esc(text)}</li>`,
-    );
-  }
-
-  alert(c: Cycle): void {
-    this.push(
-      `<li class="chat-alert"><b>${esc(c.who)}</b> paid <b>$${c.amount}.00</b> to hijack<small>${esc(c.label)}, ${c.amount} seconds</small></li>`,
-    );
-  }
-
-  system(text: string): void {
-    this.push(`<li class="chat-sys">${esc(text)}</li>`);
-  }
-
-  private push(html: string): void {
-    this.list.insertAdjacentHTML("beforeend", html);
-    while (this.list.children.length > CHAT_MAX) this.list.firstElementChild?.remove();
-  }
-
-  /** A believable still for reduced motion: some chatter, an alert, reactions. */
-  renderStatic(c: Cycle): void {
-    this.list.innerHTML = "";
-    for (const line of IDLE_LINES.slice(0, 5)) this.say(line);
-    this.alert(c);
-    for (const line of BURST_LINES(c).slice(0, 5)) this.say(line);
-  }
 }
 
 /* ---------- the demo ---------- */
@@ -239,7 +135,7 @@ class Demo {
   private ledgerBody = $<HTMLTableSectionElement>("ledgerBody");
   private queueList = $("queueList");
   private particles = new Particles($<HTMLCanvasElement>("particles"));
-  private chat = new Chat();
+  private chat = new Chat($("chatList"));
 
   private clips = new Map<string, ClipEntry>();
   private i = 0;
@@ -354,7 +250,7 @@ class Demo {
     const live = () => gen === this.gen;
 
     this.render("tip", 0);
-    this.chat.alert(c);
+    this.chat.alert(paidAlert(c));
     await sleep(TIP_MS);
     if (!live()) return;
 
@@ -364,7 +260,7 @@ class Demo {
 
     if (clip) this.playClip(clip);
     this.render("live", c.amount);
-    void this.chat.burst(c);
+    void this.chat.burst(BURST_LINES(c));
 
     let skipped = false;
     this.skip = () => {
@@ -530,7 +426,10 @@ class Demo {
     const c = this.cycle();
     this.render("live", Math.max(1, c.amount - 3));
     this.alert.classList.add("show");
-    this.chat.renderStatic(c);
+    this.chat.clear();
+    for (const line of IDLE_LINES.slice(0, 5)) this.chat.say(line);
+    this.chat.alert(paidAlert(c));
+    for (const line of BURST_LINES(c).slice(0, 5)) this.chat.say(line);
   }
 }
 
@@ -540,6 +439,7 @@ const demo = new Demo();
 loadManifest()
   .then((clips) => demo.setClips(clips))
   .finally(() => demo.start());
+initPossible();
 
 const menuToggle = document.querySelector<HTMLButtonElement>(".mobile-menu-toggle")!;
 const navigation = $("main-navigation");

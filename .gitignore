@@ -12,3 +12,6 @@ server/safety/
 server/data.sqlite*
 server/uploads/
 tour/
+
+# render-lucy raw captures (scripts/render-lucy.mjs); the encoded clips in site/public/clips are committed
+.render-lucy/

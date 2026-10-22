@@ -107,7 +107,7 @@
         <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="main-navigation">Menu <span aria-hidden="true">+</span></button>
         <nav class="nav-links" id="main-navigation" aria-label="Sections">
           <a href="#how">How it works</a>
-          <a href="#looks">Looks</a>
+          <a href="#possible">What’s possible</a>
           <a href="#control">Control</a>
           <a href="#obs">OBS</a>
           <a href="#faq">FAQ</a>
@@ -346,60 +346,68 @@
         </ol>
       </section>
 
-      <!-- ============ The looks ============ -->
-      <section class="section wrap" id="looks" aria-labelledby="looks-h">
+      <!-- ============ What's possible ============
+        The reader plays the viewer who pays: pick an edit, the prompt types itself into the
+        hijack page, pay $5, and the stream cuts to the real lucy-2.5 render of that prompt for
+        5 seconds. One recorded base clip + one render per edit (site/CLIPS.md); the tabs
+        and prompts come from src/capabilities.json, the same file the renderer reads. -->
+      <section class="section wrap" id="possible" aria-labelledby="possible-h" data-phase="ready">
         <div class="section-head">
-          <div><p class="brand-eyebrow">SAME STREAMER. DIFFERENT UNIVERSE.</p><h2 id="looks-h">What kind of chaos<br />is your chat?</h2></div>
-          <p class="lead">Start with a menu of built-in looks, or allow custom ideas. You choose what’s available. These illustrations show the direction of each effect, not recorded AI output.</p>
+          <div><p class="brand-eyebrow">ONE MODEL. EVERY KIND OF EDIT.</p><h2 id="possible-h">What’s possible</h2></div>
+          <p class="lead">Swap the streamer, add a parrot, move the room to a beach. Pick an edit, watch the prompt go in, and pay. Every effect is the real model running on the same 30 seconds of stream.</p>
         </div>
-        <ul class="looks-grid">
-          <li class="look">
-            <div class="look-art scene" data-look="lava-room" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
-            <h3>Lava Room</h3>
-            <p>The room floods with molten lava, cracks glowing in the floor.</p>
-          </li>
-          <li class="look">
-            <div class="look-art scene" data-look="underwater" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
-            <h3>Underwater</h3>
-            <p>Deep blue light from above, drifting bubbles, everything submerged.</p>
-          </li>
-          <li class="look">
-            <div class="look-art scene" data-look="80s-anime" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
-            <h3>80s Anime</h3>
-            <p>Cel-shaded with bold ink lines, neon sunset and VHS color.</p>
-          </li>
-          <li class="look">
-            <div class="look-art scene" data-look="cyberpunk" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
-            <h3>Cyberpunk City</h3>
-            <p>Neon signs and rain-slicked streets behind you, teal and magenta light.</p>
-          </li>
-          <li class="look">
-            <div class="look-art scene" data-look="haunted" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
-            <h3>Haunted</h3>
-            <p>Cold, drained color, creeping mist and a flickering candle.</p>
-          </li>
-          <li class="look">
-            <div class="look-art scene" data-look="winter-wonderland" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><svg class="fx"><use href="#rh-fx"/></svg></div>
-            <h3>Winter Wonderland</h3>
-            <p>Soft snow, frost on every surface, warm fairy lights.</p>
-          </li>
-          <li class="look">
-            <div class="look-art scene look-photo" data-look="raw" aria-hidden="true"><img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" /><div class="tint"></div><div class="photo-chip"><i></i><span>reference photo</span></div></div>
-            <h3>Become the Photo</h3>
-            <p>A viewer submits a reference image to inspire a transformation, subject to your settings and safety checks.</p>
-          </li>
-          <li class="look look-custom">
-            <div class="look-art custom-art ui" aria-hidden="true">
-              <div class="custom-label">…or write your own</div>
-              <div class="custom-field">turn the room into a snow globe</div>
-              <div class="custom-switch"><span class="switch" data-on="false"><i></i></span>Off until you turn it on</div>
-            </div>
-            <h3>Custom prompts</h3>
-            <p>Viewers can type their own idea. Off by default; when you allow it, every prompt is checked against your guardrails first.</p>
-          </li>
-        </ul>
-      </section>
 
+        <div class="poss">
+          <div class="poss-tabs" role="tablist" aria-label="Kinds of edit" aria-orientation="vertical"></div>
+
+          <div class="poss-portal ui" id="poss-panel" role="tabpanel">
+            <div class="poss-portal-head">
+              <span class="poss-avatar" aria-hidden="true">N</span>
+              <span><b>Hijack nova_streams</b><small>$1 = 1 second on stream</small></span>
+            </div>
+            <label class="poss-label" for="poss-prompt">Your prompt</label>
+            <div class="poss-prompt" id="poss-prompt" data-typing="false" role="textbox" aria-readonly="true" aria-multiline="true">
+              <span class="poss-typed"></span><i class="poss-caret" aria-hidden="true"></i>
+            </div>
+            <div class="poss-meta">
+              <span class="poss-exact" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.4 11.6 2.8 8l1.1-1.1 2.5 2.5 5.7-5.7L13.2 4.8z"/></svg>Sent exactly as written</span>
+              <span class="poss-count mono">0 / 500</span>
+            </div>
+            <button class="btn btn-primary poss-pay" type="button">Pay $5</button>
+            <p class="poss-status" aria-live="polite">$5 buys 5 seconds on stream.</p>
+          </div>
+
+          <div class="poss-stage watch ui">
+            <div class="frame player poss-frame" data-phase="idle" data-fx="off" data-base="photo" data-clip="none" role="img" aria-label="The stream. When you pay, the picture switches to your edit for five seconds, then cuts back.">
+              <img class="cam" src="/img/streamer.jpg" alt="" width="1280" height="720" loading="lazy" />
+              <video class="clip poss-base" muted playsinline loop preload="metadata"></video>
+              <video class="clip poss-fx" muted playsinline loop preload="auto"></video>
+              <div class="hud hud-top">
+                <span class="live-pill">LIVE</span>
+                <span class="viewers"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3C4.5 3 2.1 5.7 1.3 8c.8 2.3 3.2 5 6.7 5s5.9-2.7 6.7-5C13.9 5.7 11.5 3 8 3zm0 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg><b>1,284</b></span>
+              </div>
+              <div class="alert" aria-hidden="true">
+                <span class="alert-avatar">y</span>
+                <span class="alert-text"><span><b>you</b> paid <b>$5</b></span><small>Character swap · 5 seconds</small></span>
+              </div>
+              <div class="overlay" aria-hidden="true">
+                <div class="overlay-name">you</div>
+                <div class="overlay-row">
+                  <span class="overlay-look">Character swap</span>
+                  <span class="overlay-time">0:05</span>
+                </div>
+                <div class="overlay-bar"><i></i></div>
+              </div>
+              <div class="wipe" aria-hidden="true"></div>
+            </div>
+            <aside class="chat" aria-label="Stream chat">
+              <div class="chat-head"><span>Stream chat</span></div>
+              <ol class="chat-list"></ol>
+            </aside>
+          </div>
+        </div>
+        <p class="poss-source" data-kind="pending">Loading…</p>
+      </section>
       <!-- ============ Control ============ -->
       <section class="section wrap" id="control" aria-labelledby="control-h">
         <div class="split">
@@ -574,7 +582,7 @@
           <div>
             <h4>Product</h4>
             <a href="#how">How it works</a>
-            <a href="#looks">Looks</a>
+            <a href="#possible">What’s possible</a>
             <a href="#control">Control</a>
             <a href="#alpha">Join the alpha</a>
           </div>
