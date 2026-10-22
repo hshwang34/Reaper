@@ -17,7 +17,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
 const main = join(here, "..", "src", "main");
 
-function blocklist(md: string): string[] {
+function blocklist(raw: string): string[] {
+  // Windows CI checks files out with CRLF line endings; parse one shape.
+  const md = raw.replace(/\r\n/g, "\n");
   const section = md.slice(md.indexOf("## 8. Jargon blocklist"));
   const m = section.match(/```\n([\s\S]*?)\n```/);
   assert.ok(m, "BRAND.md §8 must contain a fenced blocklist");

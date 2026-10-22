@@ -20,7 +20,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const webSrc = join(root, "web", "src");
 
 /** BRAND.md §8: the first fenced block under the "Jargon blocklist" heading. */
-export function blocklist(md: string): string[] {
+export function blocklist(raw: string): string[] {
+  // Windows CI checks files out with CRLF line endings; parse one shape.
+  const md = raw.replace(/\r\n/g, "\n");
   const section = md.slice(md.indexOf("## 8. Jargon blocklist"));
   const m = section.match(/```\n([\s\S]*?)\n```/);
   assert.ok(m, "BRAND.md §8 must contain a fenced blocklist");
