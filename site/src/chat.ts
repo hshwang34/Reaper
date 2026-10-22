@@ -1,5 +1,5 @@
 // A stream chat column: ambient chatter, payment alerts, and the room reacting.
-// Shared by the hero replay and the "What's possible" section; each owns one
+// Shared by the opening demo and the product mocks; each owns one
 // instance bound to its own <ol>.
 
 export interface Chatter {
@@ -26,13 +26,13 @@ export const IDLE_LINES = [
   "hi chat",
   "anyone else here from the clip",
   "what effect is next",
-  "do the underwater one again",
+  "do the ghost one again",
   "first time here, what is the hijack thing",
   "the countdown is so good",
   "opening the link rn",
   "W stream",
   "wait so you pick the effect and pay? sick",
-  "haunted one tonight pls",
+  "hair on fire one tonight pls",
 ];
 
 const CHAT_MAX = 18;

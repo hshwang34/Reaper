@@ -6,7 +6,7 @@
     <title>Stream Hijack</title>
     <meta
       name="description"
-      content="Let viewers pay to take over your camera. Every dollar buys a second on your stream: your webcam is redrawn live in the look they picked, with their name on it. A companion app for OBS Studio."
+      content="Let viewers pay to take over your camera. Every dollar buys a second on your stream: your webcam is redrawn live in the effect they picked, with their name on it. A companion app for OBS Studio."
     />
     <meta property="og:title" content="Stream Hijack" />
     <meta property="og:description" content="Let viewers pay to take over your camera. Every dollar buys a second on your stream, with their name on it. One source in OBS." />
@@ -21,7 +21,6 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&family=IBM+Plex+Mono:wght@400;500&display=swap"
     />
-    <link rel="preload" as="image" href="/img/streamer.jpg" />
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
@@ -29,72 +28,11 @@
       Shared SVG.
       #rh-mark      the logo: a camera frame with a diagonal cut. Left of the cut is the real
                     camera (outline); right of it is the hijacked feed (solid).
-      #rh-fx        per-look effect layers drawn over the camera photo. Each group's opacity is a
-                    CSS custom property set by .scene[data-look] (see style.css), so one symbol
-                    serves every look. Inline style="…var()" is required: presentation attributes
-                    can't take var(), and <use> instances inherit custom properties.
-      #rh-posterize a filter that quantises tones for the 80s Anime look.
     -->
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
       <symbol id="rh-mark" viewBox="0 0 32 32">
         <path d="M6 3h20a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z" fill="none" stroke="currentColor" stroke-width="2.4"/>
         <path d="M29 6v20a3 3 0 0 1-3 3H11.5L29 6z" fill="currentColor"/>
-      </symbol>
-      <defs>
-        <filter id="rh-posterize" color-interpolation-filters="sRGB">
-          <feComponentTransfer>
-            <feFuncR type="discrete" tableValues="0.08 0.3 0.55 0.8 1"/>
-            <feFuncG type="discrete" tableValues="0.05 0.25 0.5 0.78 1"/>
-            <feFuncB type="discrete" tableValues="0.15 0.35 0.6 0.85 1"/>
-          </feComponentTransfer>
-        </filter>
-      </defs>
-      <symbol id="rh-fx" viewBox="0 0 960 540" preserveAspectRatio="xMidYMid slice">
-        <defs>
-          <radialGradient id="rh-g-lava" cx=".5" cy="1.15" r=".95"><stop offset="0" stop-color="#ff7a00" stop-opacity=".9"/><stop offset=".5" stop-color="#ff3d00" stop-opacity=".3"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
-          <linearGradient id="rh-g-water" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fe0ff" stop-opacity=".3"/><stop offset="1" stop-color="#021a30" stop-opacity=".55"/></linearGradient>
-          <radialGradient id="rh-g-candle" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffb347" stop-opacity=".85"/><stop offset="1" stop-color="#ffb347" stop-opacity="0"/></radialGradient>
-          <radialGradient id="rh-g-frost" cx=".5" cy=".5" r=".72"><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#eaf6ff" stop-opacity=".92"/></radialGradient>
-          <filter id="rh-f-blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
-        </defs>
-        <!-- lava -->
-        <g style="opacity:var(--ov-lava,0)">
-          <rect width="960" height="540" fill="url(#rh-g-lava)"/>
-          <g fill="none" stroke="#ffd166" stroke-width="8" stroke-linecap="round" filter="url(#rh-f-blur)" opacity=".9">
-            <path d="M0 470l90-14 60 30 74-20 60 36 70-10"/><path d="M640 450l60 26 70-18 60 30 70-8 60 20"/>
-          </g>
-          <g fill="none" stroke="#fff1b8" stroke-width="3" stroke-linecap="round">
-            <path d="M0 470l90-14 60 30 74-20 60 36 70-10"/><path d="M640 450l60 26 70-18 60 30 70-8 60 20"/><path d="M190 500l30-8 20 22"/>
-          </g>
-        </g>
-        <!-- underwater -->
-        <g style="opacity:var(--ov-water,0)">
-          <rect width="960" height="540" fill="url(#rh-g-water)"/>
-          <g fill="#dff6ff" opacity=".16"><path d="M120 0l140 0-60 540-120 0z"/><path d="M560 0l100 0 40 540-120 0z"/></g>
-          <g fill="none" stroke="#bfefff" stroke-width="3" opacity=".3"><path d="M60 120q40-20 80 0t80 0t80 0"/><path d="M620 90q40-20 80 0t80 0t80 0"/><path d="M80 360q40-20 80 0t80 0"/><path d="M660 330q40-20 80 0t80 0t80 0"/></g>
-        </g>
-        <!-- cyberpunk: neon signage at the edges -->
-        <g style="opacity:var(--ov-cyber,0)">
-          <rect x="40" y="36" width="150" height="46" rx="4" fill="none" stroke="#ff2bd6" stroke-width="4" opacity=".9"/>
-          <rect x="40" y="36" width="150" height="46" rx="4" fill="#ff2bd6" opacity=".2" filter="url(#rh-f-blur)"/>
-          <rect x="800" y="60" width="110" height="26" rx="3" fill="#19e6ff" opacity=".85"/>
-          <rect x="800" y="60" width="110" height="26" fill="#19e6ff" opacity=".35" filter="url(#rh-f-blur)"/>
-          <rect x="830" y="100" width="40" height="120" rx="3" fill="none" stroke="#19e6ff" stroke-width="3" opacity=".7"/>
-          <rect x="0" y="480" width="960" height="60" fill="#19e6ff" opacity=".08"/>
-        </g>
-        <!-- haunted -->
-        <g style="opacity:var(--ov-haunt,0)">
-          <circle cx="800" cy="430" r="100" fill="url(#rh-g-candle)"/>
-          <rect x="792" y="410" width="16" height="36" rx="4" fill="#efe6d6"/>
-          <ellipse cx="800" cy="402" rx="7" ry="13" fill="#ffd166"/>
-          <g fill="#cfd5dc" opacity=".3" filter="url(#rh-f-blur)"><ellipse cx="180" cy="490" rx="280" ry="50"/><ellipse cx="760" cy="510" rx="320" ry="60"/><ellipse cx="500" cy="50" rx="340" ry="40"/></g>
-        </g>
-        <!-- winter -->
-        <g style="opacity:var(--ov-frost,0)">
-          <rect width="960" height="540" fill="url(#rh-g-frost)"/>
-          <g fill="#ffd9a0" opacity=".9"><circle cx="704" cy="48" r="5"/><circle cx="740" cy="54" r="5"/><circle cx="776" cy="46" r="5"/><circle cx="812" cy="56" r="5"/><circle cx="848" cy="48" r="5"/><circle cx="884" cy="54" r="5"/><circle cx="920" cy="46" r="5"/></g>
-          <path d="M700 48q18 14 36 6t36 8t36-8t36 10t36-8t36 8t36-6" fill="none" stroke="#c9d6e2" stroke-width="2"/>
-        </g>
       </symbol>
     </svg>
 
@@ -107,7 +45,6 @@
         <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="main-navigation">Menu <span aria-hidden="true">+</span></button>
         <nav class="nav-links" id="main-navigation" aria-label="Sections">
           <a href="#how">How it works</a>
-          <a href="#possible">What’s possible</a>
           <a href="#control">Control</a>
           <a href="#obs">OBS</a>
           <a href="#faq">FAQ</a>
@@ -141,16 +78,10 @@
 
         <div class="demo-heading" id="demo">
           <div><p class="brand-eyebrow">DON’T JUST WATCH. TAKE OVER.</p><h2>Go on. Pick your chaos.</h2></div>
-          <p>An interactive preview of a hijack.<br />Choose a look and watch the takeover.</p>
+          <p>A real stream, redrawn live by the AI.<br />Pick an effect: it switches on the spot.</p>
         </div>
-        <div class="demo-picker" role="group" aria-label="Choose a demo effect">
-          <button type="button" data-demo-preset="lava-room" aria-pressed="true">🌋 <span>Lava Room</span></button>
-          <button type="button" data-demo-preset="underwater" aria-pressed="false">🌊 <span>Underwater</span></button>
-          <button type="button" data-demo-preset="80s-anime" aria-pressed="false">📼 <span>80s Anime</span></button>
-          <button type="button" data-demo-preset="cyberpunk" aria-pressed="false">🌃 <span>Cyberpunk</span></button>
-          <button type="button" data-demo-preset="haunted" aria-pressed="false">👻 <span>Haunted</span></button>
-          <button type="button" data-demo-preset="winter-wonderland" aria-pressed="false">❄️ <span>Winter</span></button>
-        </div>
+        <div class="demo-picker" role="group" aria-label="Choose an effect"></div>
+        <p class="sr-only" id="heroNow" aria-live="polite"></p>
         <!--
           The hero is a live-stream watch page the way a viewer sees one: player, channel row,
           chat. Platform conventions only (dark chrome, player left / chat right, badges, a
@@ -159,13 +90,7 @@
         <figure class="stage" id="stage">
           <div class="watch ui" role="group" aria-label="A live stream page: the player, the channel row and chat">
             <div class="watch-main">
-              <div class="frame player scene" id="heroFrame" data-look="raw" data-phase="idle" role="img" aria-label="A live stream player. A viewer pays, the picture is restyled into the look they picked with their name and a countdown on screen, then it cuts back to the normal camera.">
-                <img class="cam" src="/img/streamer.jpg" alt="" width="1280" height="720" />
-                <div class="tint" aria-hidden="true"></div>
-                <svg class="fx" aria-hidden="true"><use href="#rh-fx"/></svg>
-                <canvas class="particles" id="particles" aria-hidden="true"></canvas>
-                <video class="clip clip-before" id="clipBefore" muted playsinline loop preload="none" hidden></video>
-                <video class="clip clip-after" id="clipAfter" muted playsinline loop preload="none" hidden></video>
+              <div class="frame player" id="heroFrame" data-phase="idle" data-fx="off" role="img" aria-label="A recorded live stream. Picking an effect switches the picture to the real AI render of that effect at the same moment.">
                 <div class="grain" aria-hidden="true"></div>
 
                 <div class="hud hud-top">
@@ -174,13 +99,13 @@
                   <span class="uptime" id="uptime">1:12:46</span>
                 </div>
                 <div class="alert" id="alert" aria-hidden="true">
-                  <span class="alert-avatar" id="alertAvatar">q</span>
-                  <span class="alert-text"><span><b id="alertWho">quartz_ok</b> paid <b id="alertAmt">$7</b></span><small id="alertLook">Lava Room</small></span>
+                  <span class="alert-avatar" id="alertAvatar">y</span>
+                  <span class="alert-text"><span><b id="alertWho">you</b> paid <b id="alertAmt">$5</b></span><small id="alertLook">Ghost</small></span>
                 </div>
                 <div class="overlay" id="overlay" aria-hidden="true">
-                  <div class="overlay-name" id="overlayWho">quartz_ok</div>
+                  <div class="overlay-name" id="overlayWho">you</div>
                   <div class="overlay-row">
-                    <span class="overlay-look" id="overlayLook">Lava Room</span>
+                    <span class="overlay-look" id="overlayLook">Ghost</span>
                     <span class="overlay-time" id="overlayTime">0:07</span>
                   </div>
                   <div class="overlay-bar"><i id="overlayBar"></i></div>
@@ -231,12 +156,12 @@
             </aside>
           </div>
           <figcaption class="stage-caption">
-            <span class="stage-source" id="stageSource">Simulated on a stock photo. Recordings of the real model are coming.</span>
+            <span class="stage-source" id="stageSource">Loading the stream…</span>
             <span class="stage-controls">
-              <button class="icon-btn" type="button" id="playBtn" aria-label="Pause the replay">
+              <button class="icon-btn" type="button" id="playBtn" aria-label="Pause the video">
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path class="ic-pause" d="M3 2h3.5v12H3zM9.5 2H13v12H9.5z"/><path class="ic-play" d="M4 2l10 6-10 6z"/></svg>
               </button>
-              <button class="icon-btn" type="button" id="nextBtn" aria-label="Next hijack">
+              <button class="icon-btn" type="button" id="nextBtn" aria-label="Next effect">
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2l8 6-8 6zM12 2h2v12h-2z"/></svg>
               </button>
             </span>
@@ -265,7 +190,7 @@
             <div class="beat-text">
               <span class="beat-n">1</span>
               <h3>Pick it. Pay for it.</h3>
-              <p>Your hijack page lists the looks you allow. The viewer picks one, or types their own idea, and pays by card. Every dollar buys a second. You get paid through Stripe.</p>
+              <p>Your hijack page lists the effects you allow. The viewer picks one, or types their own idea, and pays by card. Every dollar buys a second. You get paid through Stripe.</p>
             </div>
             <div class="shot">
               <div class="app portal ui" aria-label="The viewer portal" role="img">
@@ -274,20 +199,13 @@
                   <span class="portal-sub">Transform the streamer's room in real time. $1 = 1 second.</span>
                 </div>
                 <div class="portal-label">Choose an effect</div>
-                <div class="portal-grid" id="portalGrid">
-                  <button type="button" tabindex="-1" data-preset="lava-room"><span>🌋</span><b>Lava Room</b></button>
-                  <button type="button" tabindex="-1" data-preset="underwater"><span>🌊</span><b>Underwater</b></button>
-                  <button type="button" tabindex="-1" data-preset="80s-anime"><span>📼</span><b>80s Anime</b></button>
-                  <button type="button" tabindex="-1" data-preset="cyberpunk"><span>🌃</span><b>Cyberpunk City</b></button>
-                  <button type="button" tabindex="-1" data-preset="haunted"><span>👻</span><b>Haunted</b></button>
-                  <button type="button" tabindex="-1" data-preset="winter-wonderland"><span>❄️</span><b>Winter Wonderland</b></button>
-                </div>
+                <div class="portal-grid" id="portalGrid"></div>
                 <div class="portal-code">
-                  <span id="portalAmount">$7 → 7 seconds of Lava Room</span>
-                  <b id="portalCode">Pay $7</b>
+                  <span id="portalAmount">$5 → 5 seconds of an effect</span>
+                  <b id="portalCode">Pay $5</b>
                   <small>Card payment, secured by Stripe</small>
                 </div>
-                <div class="portal-status" id="portalStatus" data-state="pending">Pick a look, then pay</div>
+                <div class="portal-status" id="portalStatus" data-state="pending">Pick an effect, then pay</div>
               </div>
               <span class="shot-caption">Your hijack page · what viewers see</span>
             </div>
@@ -297,17 +215,15 @@
             <div class="beat-text">
               <span class="beat-n">2</span>
               <h3>Watch reality switch.</h3>
-              <p>The payment lands and your webcam is redrawn in that look for as many seconds as they paid. Their name and the countdown sit on the picture, so everyone watching knows who did it and what it cost.</p>
+              <p>The payment lands and your webcam is redrawn with that effect for as many seconds as they paid. Their name and the countdown sit on the picture, so everyone watching knows who did it and what it cost.</p>
             </div>
             <div class="shot">
-              <div class="frame frame-mini player scene" id="miniFrame" data-look="raw" data-phase="idle" role="img" aria-label="The stream player during a hijack, with the viewer's name and a countdown.">
-                <img class="cam" src="/img/streamer.jpg" alt="" width="1280" height="720" loading="lazy" />
-                <div class="tint" aria-hidden="true"></div>
-                <svg class="fx" aria-hidden="true"><use href="#rh-fx"/></svg>
+              <div class="frame frame-mini player" id="miniFrame" data-phase="idle" role="img" aria-label="The stream player during a hijack, with the viewer's name and a countdown.">
+                <img class="cam" alt="" width="960" height="540" loading="lazy" />
                 <div class="hud hud-top"><span class="live-pill">LIVE</span><span class="viewers"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3C4.5 3 2.1 5.7 1.3 8c.8 2.3 3.2 5 6.7 5s5.9-2.7 6.7-5C13.9 5.7 11.5 3 8 3zm0 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg><b>1,284</b></span></div>
                 <div class="overlay overlay-mini" id="miniOverlay">
-                  <div class="overlay-name" id="miniWho">quartz_ok</div>
-                  <div class="overlay-row"><span class="overlay-look" id="miniLook">Lava Room</span><span class="overlay-time" id="miniTime">0:07</span></div>
+                  <div class="overlay-name" id="miniWho">you</div>
+                  <div class="overlay-row"><span class="overlay-look" id="miniLook">Ghost</span><span class="overlay-time" id="miniTime">0:05</span></div>
                   <div class="overlay-bar"><i id="miniBar"></i></div>
                 </div>
                 <div class="player-bar" aria-hidden="true">
@@ -324,97 +240,35 @@
             <div class="beat-text">
               <span class="beat-n">3</span>
               <h3>Back to you. Just like that.</h3>
-              <p>When the seconds run out, your normal camera returns and the hijack is written to your ledger. You get a clear record of what ran, who triggered it, and how long it lasted.</p>
+              <p>When the seconds run out, your normal camera returns and the hijack is listed in your recent hijacks. You get a clear record of what ran, who triggered it, and how long it lasted.</p>
             </div>
             <div class="shot">
-              <div class="app ledger ui" role="img" aria-label="The streamer dashboard's hijack ledger">
-                <div class="app-label">Hijack ledger</div>
+              <div class="app ledger ui" role="img" aria-label="The streamer dashboard's recent hijacks">
+                <div class="app-label">Recent hijacks</div>
                 <div class="table-scroll">
                   <table>
                     <thead><tr><th>When</th><th>From</th><th>Paid</th><th>Secs</th><th>Outcome</th><th class="col-prompt">Prompt</th></tr></thead>
                     <tbody id="ledgerBody">
-                      <tr><td class="mono">21:14:08</td><td>mossy_pond</td><td class="mono">$6</td><td class="mono">6</td><td class="ok">completed</td><td class="col-prompt">Underwater</td></tr>
-                      <tr><td class="mono">21:11:52</td><td>vhs_ghost</td><td class="mono">$5</td><td class="mono">5</td><td class="ok">completed</td><td class="col-prompt">80s Anime</td></tr>
-                      <tr><td class="mono">21:09:30</td><td>neon_rat</td><td class="mono">$7</td><td class="mono">7</td><td class="ok">completed</td><td class="col-prompt">Cyberpunk City</td></tr>
+                      <tr><td class="mono">21:14:08</td><td>mossy_pond</td><td class="mono">$6</td><td class="mono">6</td><td class="ok">Played</td><td class="col-prompt">Hair on fire</td></tr>
+                      <tr><td class="mono">21:11:52</td><td>vhs_ghost</td><td class="mono">$5</td><td class="mono">5</td><td class="ok">Played</td><td class="col-prompt">Anime</td></tr>
+                      <tr><td class="mono">21:09:30</td><td>neon_rat</td><td class="mono">$7</td><td class="mono">7</td><td class="ok">Played</td><td class="col-prompt">Mummy</td></tr>
                     </tbody>
                   </table>
                 </div>
               </div>
-              <span class="shot-caption">Streamer dashboard · ledger</span>
+              <span class="shot-caption">Streamer dashboard · recent hijacks</span>
             </div>
           </li>
         </ol>
       </section>
 
-      <!-- ============ What's possible ============
-        The reader plays the viewer who pays: pick an edit, the prompt types itself into the
-        hijack page, pay $5, and the stream cuts to the real lucy-2.5 render of that prompt for
-        5 seconds. One recorded base clip + one render per edit (site/CLIPS.md); the tabs
-        and prompts come from src/capabilities.json, the same file the renderer reads. -->
-      <section class="section wrap" id="possible" aria-labelledby="possible-h" data-phase="ready">
-        <div class="section-head">
-          <div><p class="brand-eyebrow">ONE MODEL. EVERY KIND OF EDIT.</p><h2 id="possible-h">What’s possible</h2></div>
-          <p class="lead">Swap the streamer, add a parrot, move the room to a beach. Pick an edit, watch the prompt go in, and pay. Every effect is the real model running on the same 30 seconds of stream.</p>
-        </div>
-
-        <div class="poss">
-          <div class="poss-tabs" role="tablist" aria-label="Kinds of edit" aria-orientation="vertical"></div>
-
-          <div class="poss-portal ui" id="poss-panel" role="tabpanel">
-            <div class="poss-portal-head">
-              <span class="poss-avatar" aria-hidden="true">N</span>
-              <span><b>Hijack nova_streams</b><small>$1 = 1 second on stream</small></span>
-            </div>
-            <label class="poss-label" for="poss-prompt">Your prompt</label>
-            <div class="poss-prompt" id="poss-prompt" data-typing="false" role="textbox" aria-readonly="true" aria-multiline="true">
-              <span class="poss-typed"></span><i class="poss-caret" aria-hidden="true"></i>
-            </div>
-            <div class="poss-meta">
-              <span class="poss-exact" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.4 11.6 2.8 8l1.1-1.1 2.5 2.5 5.7-5.7L13.2 4.8z"/></svg>Sent exactly as written</span>
-              <span class="poss-count mono">0 / 500</span>
-            </div>
-            <button class="btn btn-primary poss-pay" type="button">Pay $5</button>
-            <p class="poss-status" aria-live="polite">$5 buys 5 seconds on stream.</p>
-          </div>
-
-          <div class="poss-stage watch ui">
-            <div class="frame player poss-frame" data-phase="idle" data-fx="off" data-base="photo" data-clip="none" role="img" aria-label="The stream. When you pay, the picture switches to your edit for five seconds, then cuts back.">
-              <img class="cam" src="/img/streamer.jpg" alt="" width="1280" height="720" loading="lazy" />
-              <video class="clip poss-base" muted playsinline loop preload="metadata"></video>
-              <video class="clip poss-fx" muted playsinline loop preload="auto"></video>
-              <div class="hud hud-top">
-                <span class="live-pill">LIVE</span>
-                <span class="viewers"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3C4.5 3 2.1 5.7 1.3 8c.8 2.3 3.2 5 6.7 5s5.9-2.7 6.7-5C13.9 5.7 11.5 3 8 3zm0 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg><b>1,284</b></span>
-              </div>
-              <div class="alert" aria-hidden="true">
-                <span class="alert-avatar">y</span>
-                <span class="alert-text"><span><b>you</b> paid <b>$5</b></span><small>Character swap · 5 seconds</small></span>
-              </div>
-              <div class="overlay" aria-hidden="true">
-                <div class="overlay-name">you</div>
-                <div class="overlay-row">
-                  <span class="overlay-look">Character swap</span>
-                  <span class="overlay-time">0:05</span>
-                </div>
-                <div class="overlay-bar"><i></i></div>
-              </div>
-              <div class="wipe" aria-hidden="true"></div>
-            </div>
-            <aside class="chat" aria-label="Stream chat">
-              <div class="chat-head"><span>Stream chat</span></div>
-              <ol class="chat-list"></ol>
-            </aside>
-          </div>
-        </div>
-        <p class="poss-source" data-kind="pending">Loading…</p>
-      </section>
       <!-- ============ Control ============ -->
       <section class="section wrap" id="control" aria-labelledby="control-h">
         <div class="split">
           <div class="split-text">
             <p class="brand-eyebrow">YOU’RE STILL THE BOSS</p><h2 id="control-h">Unleash chat.<br /><em>Keep the off switch.</em></h2>
             <ul class="facts">
-              <li><b>You build the menu.</b> Turn looks on or off, set the lowest price and the longest a hijack can run.</li>
+              <li><b>You build the menu.</b> Turn effects on or off, set the lowest price and the longest a hijack can run.</li>
               <li><b>Viewers' own ideas are screened first.</b> Typed prompts and photos pass automatic screening before anything reaches your camera, and you can switch them off in one click.</li>
               <li><b>One key ends it.</b> <kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd> from anywhere cuts back to your camera and pauses the queue.</li>
               <li><b>Every hijack ends on time.</b> Automatic time limits bring your normal camera back. You set the maximum length before anyone pays.</li>
@@ -481,11 +335,9 @@
               <div class="obs-title"><span class="obs-lights"><i></i><i></i><i></i></span><b>OBS 32.2.2 - Profile: Untitled - Scenes: Untitled</b></div>
               <div class="obs-menu"><span>File</span><span>Edit</span><span>View</span><span>Docks</span><span>Profile</span><span>Scene Collection</span><span>Tools</span><span>Help</span></div>
               <div class="obs-program">
-                <div class="frame frame-obs scene" id="obsFrame" data-look="raw" data-phase="idle">
-                  <img class="cam" src="/img/streamer.jpg" alt="" loading="lazy" />
-                  <div class="tint" aria-hidden="true"></div>
-                  <svg class="fx" aria-hidden="true"><use href="#rh-fx"/></svg>
-                  <div class="obs-overlay-tag" id="obsTag">quartz_ok · Lava Room</div>
+                <div class="frame frame-obs" id="obsFrame" data-phase="idle">
+                  <img class="cam" alt="" width="960" height="540" loading="lazy" />
+                  <div class="obs-overlay-tag" id="obsTag">you · Ghost</div>
                 </div>
               </div>
               <div class="obs-docks">
@@ -563,7 +415,7 @@
           <details class="faq-item"><summary>Where does the money go?</summary><p>Viewers pay by card on your hijack page, through Stripe. Each payment first covers the AI video time it buys and a small platform fee, plus Stripe's card fee; the rest goes to your Stripe account. On a $10 hijack you keep about $8.70. If a paid hijack never plays, the viewer is refunded automatically.</p></details>
           <details class="faq-item"><summary>How long does a hijack last?</summary><p>As many seconds as they paid for, up to the maximum you set. A short wipe covers the cut in and the cut out.</p></details>
           <details class="faq-item"><summary>Is there a delay?</summary><p>The restyled picture runs a little behind your camera, as any live AI video does. The wipe hides the jump at both ends, and the countdown is on screen so viewers know what is happening.</p></details>
-          <details class="faq-item"><summary>What can a viewer make it do?</summary><p>A look you have turned on, or their own idea if you allow typed prompts. Every typed idea and photo is screened against your rules before it runs, and nudity, minors and real people are always blocked.</p></details>
+          <details class="faq-item"><summary>What can a viewer make it do?</summary><p>An effect you have turned on, or their own idea if you allow typed prompts. Every typed idea and photo is screened against your rules before it runs, and nudity, minors and real people are always blocked.</p></details>
           <details class="faq-item"><summary>Does it cost me anything?</summary><p>Nothing up front. Each viewer payment covers its own AI video time plus a small platform fee, so you never pay for a hijack yourself.</p></details>
         </div>
       </section>
@@ -582,8 +434,7 @@
           <div>
             <h4>Product</h4>
             <a href="#how">How it works</a>
-            <a href="#possible">What’s possible</a>
-            <a href="#control">Control</a>
+              <a href="#control">Control</a>
             <a href="#alpha">Join the alpha</a>
           </div>
           <div>
