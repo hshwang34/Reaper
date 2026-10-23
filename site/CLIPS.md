@@ -54,3 +54,19 @@ clip files forever and always revalidates the manifest.
 
 `tools/encode-clips.sh --app` is a separate pipeline: it turns `/decart-test` recordings
 into the desktop app's and hijack page's effect previews (`web/public/previews/`).
+
+## Setup guide screenshots
+
+`setup.html` uses real app screens from the studio tour, cropped to the setup card
+(`public/setup/*.webp`). Re-shoot after UI changes, with the base clip as the camera so the
+pictures show a real stream instead of a test pattern:
+
+```bash
+mkdir -p "/tmp/shots/OBS Virtual Camera"   # the folder name makes it count as OBS's camera
+ffmpeg -i BaseTwitchStreamExample.mp4 -vf scale=1280:720,fps=30 -q:v 5 -f mjpeg "/tmp/shots/OBS Virtual Camera/cam.mjpeg"
+TOUR_CAMERA="/tmp/shots/OBS Virtual Camera/cam.mjpeg" TOUR_LINK_HOST=reality-hijack.fly.dev \
+  TOUR_LOGIN=yourchannel TOUR_OUT=/tmp/shots/tour npm run tour
+```
+
+The tour runs the AI in test mode, so the free-test picture has the real 80s-anime render
+of the same clip pasted into the effect frame.

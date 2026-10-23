@@ -57,6 +57,7 @@
           <a href="#pricing">Pricing</a>
           <a href="#control">Control</a>
           <a href="#obs">OBS</a>
+          <a href="/setup">Setup</a>
           <a href="#faq">FAQ</a>
         </nav>
         <a class="nav-discord" data-discord hidden href="#" aria-label="Join the Stream Hijack Discord" title="Discord"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#ic-discord"/></svg></a>
@@ -312,7 +313,7 @@
         <ul class="trust" aria-label="Why you can trust it">
           <li><span class="ic" aria-hidden="true">💳</span><b>Payments by Stripe</b><span>Cards are handled by Stripe. We never see or store card numbers.</span></li>
           <li><span class="ic" aria-hidden="true">↩️</span><b>Automatic refunds</b><span>A paid hijack that never plays is refunded to the viewer without anyone asking.</span></li>
-          <li><span class="ic" aria-hidden="true">🛡️</span><b>Screened before it runs</b><span>Typed ideas and photos are checked first. Nudity, minors and real people are always blocked.</span></li>
+          <li><span class="ic" aria-hidden="true">🛡️</span><b>Checked before it runs</b><span>Viewers’ own ideas and photos pass safety checks first. Nudity, minors and real people are always blocked.</span></li>
           <li><span class="ic" aria-hidden="true">📜</span><b>Clear rules</b><span>Read our <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>. Viewers must be 18 or older.</span></li>
         </ul>
       </section>
@@ -340,9 +341,9 @@
             </div>
             <div class="gr-aud" role="group" aria-label="Start from a setup for your audience">
               <span class="gr-cap">Who’s watching?</span>
-              <button type="button" data-audience="family"><b>👪 Family-friendly</b><small>Short, gentle, you approve ideas</small></button>
-              <button type="button" data-audience="chill"><b>☕ Chill hangout</b><small>A bit spooky, ideas screened</small></button>
-              <button type="button" data-audience="wild"><b>🔥 Anything goes</b><small>Every effect, up to a minute</small></button>
+              <button type="button" data-audience="family"><b>👪 Family-friendly</b><small>Only effects from your list. No photos, nothing intense.</small></button>
+              <button type="button" data-audience="balanced"><b>⚖️ Balanced</b><small>Their own ideas too. Photos of places, no faces.</small></button>
+              <button type="button" data-audience="anything"><b>🔥 Anything goes</b><small>Everything on, including the wildest effects.</small></button>
             </div>
 
             <div class="gr-ranges">
@@ -369,8 +370,8 @@
               <label><input type="checkbox" name="cat" value="chaotic" /><span>🌀 Chaos</span></label>
             </div></fieldset>
 
-            <fieldset class="gr-seg"><legend>Viewers’ own ideas</legend><div><label><input type="radio" name="ideas" value="off" /><span>Off</span></label><label><input type="radio" name="ideas" value="classified" /><span>Screened</span></label><label><input type="radio" name="ideas" value="classified+approval" /><span>I approve each</span></label></div></fieldset>
-            <fieldset class="gr-seg"><legend>Photo uploads</legend><div><label><input type="radio" name="photos" value="off" /><span>Off</span></label><label><input type="radio" name="photos" value="scenes" /><span>Places &amp; styles</span></label><label><input type="radio" name="photos" value="likeness" /><span>Faces, with consent</span></label></div></fieldset>
+            <fieldset class="gr-seg"><legend>Custom effects (chat’s own ideas)</legend><div><label><input type="radio" name="ideas" value="off" /><span>Off</span></label><label><input type="radio" name="ideas" value="classified" /><span>On</span></label><label><input type="radio" name="ideas" value="classified+approval" /><span>I approve each</span></label></div></fieldset>
+            <fieldset class="gr-seg"><legend>Photo uploads</legend><div><label><input type="radio" name="photos" value="off" /><span>Off</span></label><label><input type="radio" name="photos" value="scenes" /><span>Scenes &amp; objects</span></label><label><input type="radio" name="photos" value="likeness" /><span>Faces too</span></label></div></fieldset>
 
             <label class="gr-switch"><input type="checkbox" name="aiLabel" /><span class="switch-ui" aria-hidden="true"><i></i></span>Show an “AI effect” label on stream</label>
           </form>
@@ -382,7 +383,7 @@
             <div class="gr-fx-head"><span class="gr-cap">Effects on the menu</span><span data-g="count"></span></div>
             <ul class="gr-fx" id="grEffects"></ul>
             <ul class="gr-facts">
-              <li data-g="ideas">Their own ideas too, screened first</li>
+              <li data-g="ideas">Their own ideas too, after safety checks</li>
               <li data-g="photos">Photos with faces, only with the person’s consent</li>
               <li data-g="aiLabel">“AI effect” label shows on stream</li>
             </ul>
@@ -393,7 +394,7 @@
 
         <ul class="control-facts">
           <li><b>Change it any time.</b> Settings apply to the next hijack, even mid-stream.</li>
-          <li><b>Screened before it reaches you.</b> Typed ideas and photos are checked before anyone can pay.</li>
+          <li><b>Checked before it reaches you.</b> Viewers’ own ideas and photos pass safety checks before anyone can pay.</li>
           <li><b>Every hijack ends on time.</b> Three separate timers bring your camera back, even if your computer freezes.</li>
           <li><b>Block a viewer.</b> Ban names and words from your dashboard.</li>
         </ul>
@@ -499,7 +500,7 @@
           <details class="faq-item"><summary>Where does the money go?</summary><p>Viewers pay by card on your hijack page, through Stripe. Every dollar buys one second. Each payment first covers the AI video time it uses (2¢ a second), a 5% platform fee and Stripe's card fee; the rest goes to your Stripe account. On a $10 hijack you keep about $8.71. See the <a href="#pricing">pricing breakdown</a>. If a paid hijack never plays, the viewer is refunded automatically.</p></details>
           <details class="faq-item"><summary>How long does a hijack last?</summary><p>As many seconds as they paid for, up to the maximum you set. A short wipe covers the cut in and the cut out.</p></details>
           <details class="faq-item"><summary>Is there a delay?</summary><p>The restyled picture runs a little behind your camera, as any live AI video does. The wipe hides the jump at both ends, and the countdown is on screen so viewers know what is happening.</p></details>
-          <details class="faq-item"><summary>What can a viewer make it do?</summary><p>An effect you have turned on, or their own idea if you allow typed prompts. Every typed idea and photo is screened against your rules before it runs, and nudity, minors and real people are always blocked.</p></details>
+          <details class="faq-item"><summary>What can a viewer make it do?</summary><p>An effect you have turned on, or their own idea if you allow it. Every idea and photo goes through safety checks against your rules before it runs, and nudity, minors and real people are always blocked.</p></details>
           <details class="faq-item"><summary>Who runs Stream Hijack?</summary><p>Stream Hijack is an independent product built by <a href="https://github.com/hshwang34">Hyunseok Hwang</a>. You can reach a real person at <a href="mailto:support@streamhijack.com">support@streamhijack.com</a><span data-discord hidden> or in our <a data-discord href="#">Discord</a></span>. The rules are in our <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p></details>
             <details class="faq-item"><summary>Does it cost me anything?</summary><p>Nothing up front. Each viewer payment covers its own AI video time plus a small platform fee, so you never pay for a hijack yourself.</p></details>
         </div>
@@ -519,6 +520,7 @@
           <div>
             <h4>Product</h4>
             <a href="/#how">How it works</a>
+            <a href="/setup">Setup guide</a>
             <a href="/#pricing">Pricing</a>
             <a href="/#control">Control</a>
             <a href="/#faq">FAQ</a>

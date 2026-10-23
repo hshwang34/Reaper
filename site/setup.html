@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Setup guide · Stream Hijack</title>
+    <meta name="description" content="Set up Stream Hijack in about 10 minutes: download the app, connect OBS, set up payouts, run a free test and share your hijack page." />
+    <link rel="canonical" href="https://streamhijack.com/setup" />
+    <meta property="og:title" content="Set up Stream Hijack in 10 minutes" />
+    <meta property="og:description" content="Download, connect OBS, set up payouts, run a free test, share your hijack page." />
+    <meta property="og:image" content="https://streamhijack.com/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f2ec" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121112" />
+    <link rel="icon" href="/brand/icon-32.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/brand/icon-180.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+    <script type="module" src="/src/setup.ts"></script>
+  </head>
+  <body>
+    <!-- The setup guide. It follows the app's own setup (web/src/setup/SetupPage.tsx) step for
+         step; the pictures are real app screens from `npm run tour` (see site/CLIPS.md). -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+      <symbol id="ic-discord" viewBox="0 0 24 24"><path d="M20.32 4.37a19.8 19.8 0 0 0-4.89-1.52.07.07 0 0 0-.08.04c-.21.38-.44.86-.61 1.25a18.27 18.27 0 0 0-5.49 0 12.64 12.64 0 0 0-.62-1.25.08.08 0 0 0-.08-.04 19.74 19.74 0 0 0-4.88 1.52.07.07 0 0 0-.03.03C.53 9.05-.32 13.58.1 18.06a.08.08 0 0 0 .03.06 19.9 19.9 0 0 0 5.99 3.03.08.08 0 0 0 .09-.03c.46-.63.87-1.3 1.22-1.99a.08.08 0 0 0-.04-.11 13.1 13.1 0 0 1-1.87-.89.08.08 0 0 1 0-.13l.37-.29a.07.07 0 0 1 .08-.01c3.93 1.79 8.18 1.79 12.06 0a.07.07 0 0 1 .08.01l.37.29a.08.08 0 0 1 0 .13c-.6.35-1.22.65-1.87.89a.08.08 0 0 0-.04.11c.36.7.77 1.36 1.22 1.99a.08.08 0 0 0 .09.03 19.84 19.84 0 0 0 6-3.03.08.08 0 0 0 .03-.06c.5-5.18-.84-9.67-3.55-13.66a.06.06 0 0 0-.03-.03zM8.02 15.33c-1.18 0-2.16-1.09-2.16-2.42s.96-2.42 2.16-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.33-.96 2.42-2.16 2.42zm7.97 0c-1.18 0-2.15-1.09-2.15-2.42s.95-2.42 2.15-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.33-.95 2.42-2.16 2.42z"/></symbol>
+    </svg>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="/" aria-label="Stream Hijack, home">
+          <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
+          <span class="wordmark">Stream <strong>Hijack</strong></span>
+        </a>
+        <nav class="legal-nav" aria-label="Site">
+          <a href="/">Home</a>
+          <a href="/setup" aria-current="page">Setup</a>
+          <a href="/#pricing">Pricing</a>
+        </nav>
+        <a class="btn btn-primary btn-sm" href="/#alpha">Join the alpha</a>
+      </div>
+    </header>
+
+    <main class="wrap su">
+      <section class="su-hero" aria-labelledby="su-h">
+        <div>
+          <p class="brand-eyebrow">SETUP GUIDE</p>
+          <h1 id="su-h">From download to your first hijack in about 10 minutes.</h1>
+          <p class="lead">The app walks you through each step, and does most of it for you. Here’s what to expect, with the real screens.</p>
+        </div>
+        <div class="su-controls">
+          <div class="su-os" role="radiogroup" aria-label="Your computer">
+            <label><input type="radio" name="os" value="mac" /><span>Mac</span></label>
+            <label><input type="radio" name="os" value="win" /><span>Windows</span></label>
+          </div>
+          <div class="su-progress">
+            <div class="su-meter" aria-hidden="true"><i id="suMeter"></i></div>
+            <p><b id="suCount">0 of 9</b> steps done <button type="button" class="su-reset" id="suReset" hidden>Start over</button></p>
+          </div>
+        </div>
+      </section>
+
+      <div class="su-layout">
+        <nav class="su-rail" aria-label="Steps">
+          <ol><li><a href="#download" data-rail="download"><span class="su-dot" aria-hidden="true"></span>Download the app</a></li><li><a href="#sign-in" data-rail="sign-in"><span class="su-dot" aria-hidden="true"></span>Sign in with Twitch</a></li><li><a href="#obs" data-rail="obs"><span class="su-dot" aria-hidden="true"></span>Connect OBS</a></li><li><a href="#camera" data-rail="camera"><span class="su-dot" aria-hidden="true"></span>Pick your camera</a></li><li><a href="#payouts" data-rail="payouts"><span class="su-dot" aria-hidden="true"></span>Set up payouts</a></li><li><a href="#safety" data-rail="safety"><span class="su-dot" aria-hidden="true"></span>Read the safety basics</a></li><li><a href="#free-test" data-rail="free-test"><span class="su-dot" aria-hidden="true"></span>Run a free test</a></li><li><a href="#share" data-rail="share"><span class="su-dot" aria-hidden="true"></span>Share your hijack page</a></li><li><a href="#rules" data-rail="rules"><span class="su-dot" aria-hidden="true"></span>Set your rules</a></li></ol>
+        </nav>
+        <div class="su-steps">
+        <section class="su-step" id="download" aria-labelledby="download-h">
+          <div class="su-text">
+            <p class="su-n">STEP 1 · 2 min</p>
+            <h2 id="download-h">Download the app</h2>
+            <p>Stream Hijack is a small app that sits next to OBS. Join the alpha and we’ll email you the download.</p>
+            <ul class="su-list">
+              <li data-os="mac">Open <b>Stream-Hijack-mac.dmg</b> and drag Stream Hijack into Applications. One download works on Apple silicon and Intel Macs.</li>
+              <li data-os="win">Run <b>Stream-Hijack-Setup.exe</b>. It installs just for you, so it won’t ask for an admin password.</li>
+            </ul>
+            <div class="su-note" data-os="mac"><b>Mac says it “could not verify” the app?</b> That’s normal during the alpha. Open <b>System Settings → Privacy &amp; Security</b>, scroll down, and click <b>Open Anyway</b>.</div>
+            <div class="su-note" data-os="win"><b>Windows says it “protected your PC”?</b> That’s normal during the alpha. Click <b>More info</b>, then <b>Run anyway</b>.</div>
+            <p class="su-actions"><a class="btn btn-primary" href="/#alpha">Join the alpha to get it</a></p>
+            <label class="su-done"><input type="checkbox" data-step="download" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div><div class="su-req"><span class="gr-cap">You’ll need</span>
+              <ul>
+                <li><span data-os="mac">macOS 13 or newer</span><span data-os="win">Windows 10 or 11 (64-bit)</span></li>
+                <li>OBS Studio 30 or newer</li>
+                <li>A Twitch account</li>
+                <li>A webcam</li>
+                <li>About 10 minutes</li>
+              </ul></div>
+        </section>
+        <section class="su-step" id="sign-in" aria-labelledby="sign-in-h">
+          <div class="su-text">
+            <p class="su-n">STEP 2 · 1 min</p>
+            <h2 id="sign-in-h">Sign in with Twitch</h2>
+            <p>Open Stream Hijack and click <b>Sign in with Twitch</b>. Your browser opens; approve it there and come back.</p>
+            <p>That’s it. Your hijack page, payments and the AI are all handled for you. Nothing to install or paste.</p>
+            <details class="su-help"><summary>Not working?</summary><p>If the app still says “Waiting for your browser…” after a minute, click the button again. Make sure you finished signing in on the Twitch page.</p></details>
+            <label class="su-done"><input type="checkbox" data-step="sign-in" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div>
+            <figure class="su-shot"><img src="/setup/sign-in.webp" alt="Setup, step 1: signed in" loading="lazy" decoding="async" /><figcaption>Setup, step 1: signed in</figcaption></figure>
+        </section>
+        <section class="su-step" id="obs" aria-labelledby="obs-h">
+          <div class="su-text">
+            <p class="su-n">STEP 3 · 2 min</p>
+            <h2 id="obs-h">Connect OBS</h2>
+            <p>The app finds OBS for you. If OBS needs permission to be controlled, the app asks you to close OBS and clicks <b>Switch it on</b> for you.</p>
+            <p>Then click <b>Add the overlay</b>. The app adds one hidden <b>AI Hijack</b> overlay to your scenes. It only shows while a hijack is playing. Nothing else in your scenes changes.</p>
+            <details class="su-help"><summary>Not working?</summary><ul><li><b>“OBS is still open”:</b> close OBS completely (check the <span data-os="mac">menu bar</span><span data-os="win">system tray</span>), then try again.</li>
+              <li><b>Never connects:</b> update OBS to version 30 or newer. You can also turn it on yourself in OBS under “Tools → WebSocket Server Settings → Enable WebSocket server”.</li>
+              <li><b>Overlay in the wrong place:</b> in OBS, drag <b>AI Hijack</b> to the top of your Sources, above your camera.</li></ul></details>
+            <label class="su-done"><input type="checkbox" data-step="obs" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div>
+            <figure class="su-shot"><img src="/setup/obs.webp" alt="Setup, step 2: OBS connected and the overlay added" loading="lazy" decoding="async" /><figcaption>Setup, step 2: OBS connected and the overlay added</figcaption></figure>
+        </section>
+        <section class="su-step" id="camera" aria-labelledby="camera-h">
+          <div class="su-text">
+            <p class="su-n">STEP 4 · 2 min</p>
+            <h2 id="camera-h">Pick your camera</h2>
+            <p>Stream Hijack uses OBS’s Virtual Camera, so effects cover exactly what chat sees: your framing, filters and all.</p>
+            <ol class="su-list">
+              <li>In OBS, click the gear next to <b>Start Virtual Camera</b> and set the output type to <b>Source</b>, then pick your webcam. Not <b>Program</b>: that would show your stream inside itself.</li>
+              <li>Click <b>Start Virtual Camera</b> in the app (or in OBS).</li>
+              <li>When you see yourself and a green check, click <b>Looks good, continue</b>.</li>
+            </ol>
+            <div class="su-note" data-os="mac"><b>First time on a Mac?</b> macOS asks you to allow the OBS Virtual Camera once, under <b>System Settings → Privacy &amp; Security</b>. Allow camera access for Stream Hijack too.</div>
+            <details class="su-help"><summary>Not working?</summary><ul><li><b>Black or frozen picture:</b> make sure nothing else is using the camera, and that you allowed camera access.</li>
+              <li><b>“This is not the OBS Virtual Camera”:</b> start the Virtual Camera in OBS, then pick it in the app.</li></ul></details>
+            <label class="su-done"><input type="checkbox" data-step="camera" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div>
+            <figure class="su-shot"><img src="/setup/camera.webp" alt="Setup, step 3: the OBS Virtual Camera picked" loading="lazy" decoding="async" /><figcaption>Setup, step 3: the OBS Virtual Camera picked</figcaption></figure>
+        </section>
+        <section class="su-step" id="payouts" aria-labelledby="payouts-h">
+          <div class="su-text">
+            <p class="su-n">STEP 5 · 3 min</p>
+            <h2 id="payouts-h">Set up payouts</h2>
+            <p>Chat pays by card on your hijack page, and Stripe sends your share to your bank. Click <b>Set up payouts with Stripe</b>. Stripe asks for your ID and bank details; we never see them.</p>
+            <p>Every dollar buys one second. Out of each payment, Stripe takes its card fee and we take the AI time plus 5%. You keep the rest.</p>
+            <p class="su-actions"><a class="btn btn-quiet" href="/#pricing">See the full pricing</a></p>
+            <label class="su-done"><input type="checkbox" data-step="payouts" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div>
+            <div class="su-split" aria-label="On a $10 hijack, you get $8.71">
+              <p class="gr-cap">ON A $10 HIJACK</p>
+              <div class="su-split-row"><span>You get</span><b>$8.71</b></div>
+              <div class="split-bar" aria-hidden="true"><i data-k="streamer" style="--w:87.1%"></i><i data-k="ai" style="--w:2%"></i><i data-k="platform" style="--w:5%"></i><i data-k="stripe" style="--w:5.9%"></i></div>
+              <dl class="su-split-legend">
+                <div><dt><span class="sw sw-ai"></span>AI time</dt><dd>$0.20</dd></div>
+                <div><dt><span class="sw sw-platform"></span>Our 5%</dt><dd>$0.50</dd></div>
+                <div><dt><span class="sw sw-stripe"></span>Stripe</dt><dd>$0.59</dd></div>
+              </dl>
+              <p class="su-small">The app checks with Stripe on its own and moves on when you’re ready. You can skip this and finish later, but chat can’t pay you until it’s done.</p>
+            </div>
+        </section>
+        <section class="su-step" id="safety" aria-labelledby="safety-h">
+          <div class="su-text">
+            <p class="su-n">STEP 6 · 1 min</p>
+            <h2 id="safety-h">Read the safety basics</h2>
+            <p>Tick four boxes so you know how it works: you own what’s on your stream, you know the panic key, you tell viewers it’s AI, and photos of people need their consent.</p>
+            <p>Nudity, anyone who may be under 18, real public figures, hate, gore and self-harm are always blocked, whatever you choose later.</p>
+            <label class="su-done"><input type="checkbox" data-step="safety" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div>
+            <figure class="su-shot"><img src="/setup/safety.webp" alt="Setup, step 5: the four safety basics" loading="lazy" decoding="async" /><figcaption>Setup, step 5: the four safety basics</figcaption></figure>
+        </section>
+        <section class="su-step" id="free-test" aria-labelledby="free-test-h">
+          <div class="su-text">
+            <p class="su-n">STEP 7 · 1 min</p>
+            <h2 id="free-test-h">Run a free test</h2>
+            <p>Click <b>Run the 10-second test</b> and watch OBS’s <b>Program</b> view, not the Preview.</p>
+            <ol class="su-list">
+              <li>For 2–5 seconds nothing changes while the AI warms up.</li>
+              <li>Then, for about 10 seconds, your camera turns into 80s anime on stream.</li>
+              <li>Then it snaps back on its own. Nobody is charged.</li>
+            </ol>
+            <p class="su-small">You get one free test a day.</p>
+            <details class="su-help"><summary>Not working?</summary><ul><li><b>The app showed the effect but OBS didn’t:</b> the overlay is in another scene or under your camera. Click <b>Add the overlay again</b>, or drag <b>AI Hijack</b> to the top of your Sources.</li>
+              <li><b>Nothing happened at all:</b> go back to Connect OBS and check it says connected.</li></ul></details>
+            <label class="su-done"><input type="checkbox" data-step="free-test" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div>
+            <figure class="su-shot"><img src="/setup/free-test.webp" alt="Setup, step 6: the free test playing on your camera" loading="lazy" decoding="async" /><figcaption>Setup, step 6: the free test playing on your camera</figcaption></figure>
+        </section>
+        <section class="su-step" id="share" aria-labelledby="share-h">
+          <div class="su-text">
+            <p class="su-n">STEP 8 · 1 min</p>
+            <h2 id="share-h">Share your hijack page</h2>
+            <p>Your hijack page is where chat picks an effect and pays. Copy the link from the <b>Live</b> tab and put it where chat will see it:</p>
+            <ul class="su-list">
+              <li>a <b>!hijack</b> chat command</li>
+              <li>a panel under your stream</li>
+              <li>your stream title, for example “hijacks are ON (link in chat)”</li>
+            </ul>
+            <label class="su-done"><input type="checkbox" data-step="share" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div>
+            <figure class="su-shot"><img src="/setup/share-link.webp" alt="The Live tab, with your hijack link and a Copy link button" loading="lazy" decoding="async" /><figcaption>The Live tab, with your hijack link and a Copy link button</figcaption></figure>
+        </section>
+        <section class="su-step" id="rules" aria-labelledby="rules-h">
+          <div class="su-text">
+            <p class="su-n">STEP 9 · 2 min</p>
+            <h2 id="rules-h">Set your rules</h2>
+            <p>Open the <b>Rules</b> tab to choose what chat can do: <b>Family-friendly</b>, <b>Balanced</b> or <b>Anything goes</b>, then fine-tune custom effects, photos, how wild it gets, and the price and length. Changes save instantly.</p>
+            <p class="su-actions"><a class="btn btn-quiet" href="/#control">Try the rules on our homepage</a></p>
+            <label class="su-done"><input type="checkbox" data-step="rules" /><span class="su-box" aria-hidden="true"></span>Done</label>
+          </div>
+            <figure class="su-shot"><img src="/setup/rules.webp" alt="The Rules tab: custom effects, photos and on-stream labels" loading="lazy" decoding="async" /><figcaption>The Rules tab: custom effects, photos and on-stream labels</figcaption></figure>
+        </section>
+
+          <section class="su-live" id="live" aria-labelledby="live-h">
+            <p class="brand-eyebrow">YOU’RE READY</p>
+            <h2 id="live-h">Go live. Two things to remember.</h2>
+            <div class="su-live-grid">
+              <div><b>Keep the app open.</b><p>Stream Hijack runs each hijack, so keep its window open while you stream. It can sit behind OBS.</p></div>
+              <div><b>Know your panic key.</b><p>Press <span data-os="mac"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd></span><span data-os="win"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>H</kbd></span> from any app. The effect disappears at once and new hijacks wait in line until you press it again or click <b>Resume hijacks</b>.</p></div>
+            </div>
+          </section>
+
+          <section class="su-stuck" aria-labelledby="stuck-h">
+            <h2 id="stuck-h">Still stuck?</h2>
+            <p>A real person will help. Email <a href="mailto:support@streamhijack.com">support@streamhijack.com</a><span data-discord hidden> or ask in our <a data-discord href="#">Discord</a></span>. You can run setup again any time from the Stream Hijack icon in your <span data-os="mac">menu bar</span><span data-os="win">system tray</span>: <b>Run setup again…</b></p>
+          </section>
+        </div>
+      </div>
+    </main>
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <a class="brand" href="/#top" aria-label="Stream Hijack, home">
+            <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
+            <span class="wordmark">Stream <strong>Hijack</strong></span>
+          </a>
+          <p>A little mischief.<br />A whole new stream.</p>
+        </div>
+        <nav class="footer-cols" aria-label="Footer">
+          <div>
+            <h4>Product</h4>
+            <a href="/#how">How it works</a>
+            <a href="/setup">Setup guide</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#control">Control</a>
+            <a href="/#faq">FAQ</a>
+          </div>
+          <div>
+            <h4>Community</h4>
+            <a data-discord hidden href="#">Discord</a>
+            <a href="/#alpha">Join the free alpha</a>
+          </div>
+          <div>
+            <h4>Legal</h4>
+            <a href="/terms">Terms of Service</a>
+            <a href="/privacy">Privacy Policy</a>
+          </div>
+          <div>
+            <h4>Contact</h4>
+            <a href="mailto:hello@streamhijack.com">General: hello@</a>
+            <a href="mailto:support@streamhijack.com">Help: support@</a>
+            <a href="mailto:info@streamhijack.com">Press &amp; business: info@</a>
+          </div>
+        </nav>
+        <p class="footer-legal">
+          © 2026 Stream Hijack. Built by <a href="https://github.com/hshwang34">Hyunseok Hwang</a>.
+          OBS and OBS Studio are trademarks of Wizards of OBS, LLC. Stripe, Twitch, Kick, YouTube and
+          Discord are trademarks of their respective owners; none of them endorse this app.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

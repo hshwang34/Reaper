@@ -24,12 +24,17 @@ interface Rules {
 
 const ALL_CATS: Category[] = ["environment", "character", "horror", "chaotic"];
 
-/** Example setups. "Anything goes" is the product's default (DEFAULT_SETTINGS). */
-const AUDIENCES: Record<string, Rules> = {
-  family: { minUsd: 3, maxSec: 20, cooldown: 10, queue: 3, wild: 2, cats: ["environment", "character"], ideas: "classified+approval", photos: "off", aiLabel: true },
-  chill: { minUsd: 2, maxSec: 30, cooldown: 5, queue: 5, wild: 3, cats: ["environment", "character", "horror"], ideas: "classified", photos: "scenes", aiLabel: true },
-  wild: { minUsd: 2, maxSec: 60, cooldown: 3, queue: 5, wild: 5, cats: [...ALL_CATS], ideas: "classified", photos: "likeness", aiLabel: true },
+/** The Rules tab's three levels, as the app defines them (web/src/features/SafetyEditor.tsx
+ *  LEVELS): they set what chat can do; price, length and the line stay as the streamer set them. */
+type Level = Pick<Rules, "wild" | "cats" | "ideas" | "photos">;
+const AUDIENCES: Record<string, Level> = {
+  family: { wild: 3, cats: [...ALL_CATS], ideas: "off", photos: "off" },
+  balanced: { wild: 4, cats: [...ALL_CATS], ideas: "classified", photos: "scenes" },
+  anything: { wild: 5, cats: [...ALL_CATS], ideas: "classified", photos: "likeness" },
 };
+
+/** The product defaults (DEFAULT_SETTINGS) the panel starts from. */
+const DEFAULTS: Rules = { minUsd: 2, maxSec: 60, cooldown: 3, queue: 5, ...AUDIENCES.anything!, aiLabel: true };
 
 /** How each demo effect is filed in the catalog (category + how intense it is, 1-5). */
 const EFFECT_RULES: Record<string, { cat: Category; level: number }> = {
@@ -46,13 +51,13 @@ const EFFECT_RULES: Record<string, { cat: Category; level: number }> = {
 const WILD_NAMES = ["", "Mild", "Silly", "Spooky", "Wild", "Unhinged"];
 const IDEAS_TEXT: Record<Ideas, string> = {
   off: "Effects from your list only",
-  classified: "Their own ideas too, screened first",
-  "classified+approval": "Their own ideas too, screened, then you approve each one",
+  classified: "Their own ideas too, after safety checks",
+  "classified+approval": "Their own ideas too, after safety checks and your approval",
 };
 const PHOTOS_TEXT: Record<Photos, string> = {
   off: "No photo uploads",
-  scenes: "Photos of places and styles, no faces",
-  likeness: "Photos with faces, only with the person's consent",
+  scenes: "Photos of scenes and objects, no faces",
+  likeness: "Photos with faces too, with the person’s consent",
 };
 
 const secs = (n: number) => `${n} second${n === 1 ? "" : "s"}`;
@@ -104,7 +109,8 @@ export function initGuardrails(clips: HeroClip[]): void {
     q<HTMLInputElement>("input[name=aiLabel]").checked = r.aiLabel;
   };
 
-  const same = (a: Rules, b: Rules) => JSON.stringify(a) === JSON.stringify(b);
+  const same = (a: Level, r: Rules) =>
+    a.wild === r.wild && a.ideas === r.ideas && a.photos === r.photos && a.cats.join() === r.cats.join();
 
   const render = () => {
     const r = read();
@@ -139,7 +145,7 @@ export function initGuardrails(clips: HeroClip[]): void {
     for (const b of form.querySelectorAll<HTMLButtonElement>("[data-audience]")) {
       b.setAttribute("aria-pressed", String(b.dataset.audience === match));
     }
-    out("audience", match ? "" : "Custom setup");
+    out("audience", match ? "" : "Your own mix");
   };
 
   form.addEventListener("input", (e) => {
@@ -152,10 +158,10 @@ export function initGuardrails(clips: HeroClip[]): void {
   form.addEventListener("submit", (e) => e.preventDefault());
   for (const b of form.querySelectorAll<HTMLButtonElement>("[data-audience]")) {
     b.addEventListener("click", () => {
-      write(AUDIENCES[b.dataset.audience!]!);
+      write({ ...read(), ...AUDIENCES[b.dataset.audience!]! });
       render();
     });
   }
-  write(AUDIENCES.wild!);
+  write(DEFAULTS);
   render();
 }
