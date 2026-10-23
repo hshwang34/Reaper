@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Terms of Service · Stream Hijack</title>
+    <meta name="description" content="The rules for using Stream Hijack: payments, refunds, what you may ask for, and streamer responsibilities." />
+    <link rel="canonical" href="https://streamhijack.com/terms" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f2ec" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121112" />
+    <link rel="icon" href="/brand/icon-32.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/brand/icon-180.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+    <script type="module" src="/src/legal.ts"></script>
+  </head>
+  <body>
+    <!-- Draft written for the alpha; have it reviewed before relying on it. Keep the facts in
+         step with the product (docs/CONTENT-SAFETY.md, server/src/fees.ts, server/src/db.ts). -->
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="/" aria-label="Stream Hijack, home">
+          <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
+          <span class="wordmark">Stream <strong>Hijack</strong></span>
+        </a>
+        <nav class="legal-nav" aria-label="Legal">
+          <a href="/terms" aria-current="page">Terms</a>
+          <a href="/privacy">Privacy</a>
+        </nav>
+      </div>
+    </header>
+    <main class="wrap legal">
+      <h1>Terms of Service</h1>
+      <p class="updated">LAST UPDATED 22 OCTOBER 2026</p>
+      <section class="summary" aria-labelledby="sum-h">
+        <h2 id="sum-h">The short version</h2>
+        <ul>
+          <li>You must be 18 or older to use Stream Hijack, as a viewer or a streamer.</li>
+          <li>Viewers pay $1 for each second of hijack. Payments run through Stripe to the streamer.</li>
+          <li>If a paid hijack never plays, the viewer is refunded automatically.</li>
+          <li>No nudity, no minors, no real people's faces without consent, nothing hateful or illegal.</li>
+          <li>Streamers stay in charge of their own stream and their platform's rules.</li>
+        </ul>
+      </section>
+
+      <h2>1. Who we are</h2>
+      <p>Stream Hijack (“we”, “us”) is an independent product built and run by Hyunseok Hwang. It lets viewers pay to restyle a live streamer's camera with AI video effects for a set number of seconds. These terms cover the website, the hijack pages viewers pay on, the streamer dashboard and the Stream Hijack desktop app (together, the “service”). Questions: <a href="mailto:support@streamhijack.com">support@streamhijack.com</a>.</p>
+
+      <h2>2. Who can use it</h2>
+      <p>You must be at least 18 years old and able to make a binding agreement. By using the service you agree to these terms and to our <a href="/privacy">Privacy Policy</a>. Stream Hijack is in early access (alpha): features may change, and parts of it may not work as described.</p>
+
+      <h2>3. How payments work</h2>
+      <ul>
+        <li><b>Price.</b> Every dollar buys one second of hijack, up to the maximum length the streamer sets. Streamers also set the lowest price.</li>
+        <li><b>Who you pay.</b> Viewers pay the streamer by card through Stripe. The streamer is the seller; Stripe processes the card and pays the streamer out.</li>
+        <li><b>Fees.</b> From each payment, Stream Hijack keeps the cost of the AI video time it uses (2¢ a second) plus a 5% platform fee, and Stripe deducts its card processing fee. The rest goes to the streamer. Streamers pay nothing up front and no monthly fee.</li>
+        <li><b>Refunds.</b> If a paid hijack never plays (for example, the stream is offline, the streamer turns it down, or something fails before it starts), the payment is refunded to the viewer automatically, including our fee. Once a hijack has started playing it is not refunded, even if the streamer ends it early. If something went wrong after it started, write to support and we will look at it.</li>
+        <li><b>Chargebacks.</b> Disputes go through Stripe. Filing a dispute for a hijack that played may get you blocked from the service.</li>
+      </ul>
+
+      <h2>4. What you may not ask for</h2>
+      <p>Every typed idea and photo is screened before it can run, and anything that breaks these rules is refused. You may not submit, or try to get around screening to produce:</p>
+      <ul>
+        <li>nudity or sexual content, or anything involving minors;</li>
+        <li>a real person's face or likeness, including celebrities, unless it is your own and you consent;</li>
+        <li>hate, harassment, threats, or content targeting someone for who they are;</li>
+        <li>graphic violence, self-harm, or anything illegal;</li>
+        <li>other people's trademarks or copyrighted characters in a way that misleads or infringes;</li>
+        <li>anything that breaks the rules of the platform the streamer is live on.</li>
+      </ul>
+      <p>Suspected child sexual abuse material is never shown, is preserved, and is reported to the authorities as the law requires. Screening is automatic and not perfect; the streamer can end any hijack instantly.</p>
+
+      <h2>5. Streamers</h2>
+      <ul>
+        <li>You are responsible for your stream, including following your streaming platform's rules and telling viewers that hijacks are AI-generated.</li>
+        <li>You need your own Stripe account to get paid, and you are responsible for any taxes on what you earn.</li>
+        <li>You choose which effects are allowed, whether viewers can type their own ideas or upload photos, the price floor and the maximum length.</li>
+        <li>Only use your own camera feed and people who have agreed to appear on it.</li>
+        <li>Your camera feed is sent to our AI video provider only while a hijack is playing.</li>
+      </ul>
+
+      <h2>6. Your content</h2>
+      <p>You keep any rights you have in the prompts and photos you submit. You give us permission to use them only to screen and run the hijack you paid for, and to keep the records described in our Privacy Policy. Uploaded photos are deleted when the hijack ends or expires, and within one hour at the latest.</p>
+
+      <h2>7. Suspension</h2>
+      <p>We may refuse a submission, block a viewer, or suspend a streamer's channel that breaks these terms, puts others at risk, or creates legal risk for the service. Streamers can stop using the service at any time.</p>
+
+      <h2>8. No warranty</h2>
+      <p>The service is provided “as is” during early access. AI video output can be unexpected, and live video can be delayed or interrupted. To the extent the law allows, we are not liable for indirect or consequential losses, and our total liability for any claim is limited to the amount you paid through the service in the 30 days before the claim.</p>
+
+      <h2>9. Changes</h2>
+      <p>We may update these terms as the product changes. We will change the date at the top, and for significant changes to fees or refunds we will tell streamers before they take effect. Continuing to use the service means you accept the updated terms.</p>
+
+      <h2>10. Contact</h2>
+      <p>Help with a payment or a hijack: <a href="mailto:support@streamhijack.com">support@streamhijack.com</a>. Everything else: <a href="mailto:hello@streamhijack.com">hello@streamhijack.com</a>.</p>
+    </main>
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <a class="brand" href="/#top" aria-label="Stream Hijack, home">
+            <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
+            <span class="wordmark">Stream <strong>Hijack</strong></span>
+          </a>
+          <p>A little mischief.<br />A whole new stream.</p>
+        </div>
+        <nav class="footer-cols" aria-label="Footer">
+          <div>
+            <h4>Product</h4>
+            <a href="/#how">How it works</a>
+            <a href="/setup">Setup guide</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#control">Control</a>
+            <a href="/#faq">FAQ</a>
+          </div>
+          <div>
+            <h4>Community</h4>
+            <a data-discord hidden href="#">Discord</a>
+            <a href="/#alpha">Join the free alpha</a>
+          </div>
+          <div>
+            <h4>Legal</h4>
+            <a href="/terms">Terms of Service</a>
+            <a href="/privacy">Privacy Policy</a>
+          </div>
+          <div>
+            <h4>Contact</h4>
+            <a href="mailto:hello@streamhijack.com">General: hello@</a>
+            <a href="mailto:support@streamhijack.com">Help: support@</a>
+            <a href="mailto:info@streamhijack.com">Press &amp; business: info@</a>
+          </div>
+        </nav>
+        <p class="footer-legal">
+          © 2026 Stream Hijack. Built by <a href="https://github.com/hshwang34">Hyunseok Hwang</a>.
+          OBS and OBS Studio are trademarks of Wizards of OBS, LLC. Stripe, Twitch, Kick, YouTube and
+          Discord are trademarks of their respective owners; none of them endorse this app.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

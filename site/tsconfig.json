@@ -12,5 +12,5 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["src", "api"]
+  "include": ["src", "api", "vite.config.ts"]
 }

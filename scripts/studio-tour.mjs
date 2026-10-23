@@ -26,7 +26,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const CHROME =
   process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const LOGIN = "tourstreamer";
+const LOGIN = process.env.TOUR_LOGIN ?? "tourstreamer";
+// Screenshots for the public setup guide (site/setup.html):
+//   TOUR_CAMERA=<…/OBS Virtual Camera/file.mjpeg>  a recorded clip as the camera instead of
+//                                  Chrome's test pattern (the folder name makes it count as OBS's)
+//   TOUR_LINK_HOST=<host>          shows hijack links with the production host, not 127.0.0.1:<port>
+const CAMERA = process.env.TOUR_CAMERA;
+const LINK_HOST = process.env.TOUR_LINK_HOST;
 const OUT = resolve(process.env.TOUR_OUT ?? join(root, "tour", new Date().toISOString().replace(/[:.]/g, "-")));
 mkdirSync(OUT, { recursive: true });
 
@@ -57,6 +63,21 @@ function freePort() {
 }
 let shot = 0;
 async function snap(page, name, opts = {}) {
+  if (LINK_HOST || CAMERA) {
+    await page
+      .evaluate(([host, cam]) => {
+        const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+          let t = n.textContent ?? "";
+          if (host) t = t.replace(/(https?:\/\/)?127\.0\.0\.1:\d+/g, host);
+          // the fake camera's label is its file path; put the file in a folder named
+          // "OBS Virtual Camera" so the app treats it as one, and show just the name
+          if (cam) t = t.split(cam).join("OBS Virtual Camera");
+          if (t !== n.textContent) n.textContent = t;
+        }
+      }, [LINK_HOST ?? "", CAMERA ?? ""])
+      .catch(() => {});
+  }
   const file = join(OUT, `${String(++shot).padStart(2, "0")}-${name}.png`);
   await page.screenshot({ path: file, fullPage: true, ...opts });
   console.log(`    📸 ${file}`);
@@ -76,6 +97,7 @@ async function launchApp(userData, serverBase) {
       `--remote-debugging-port=${cdpPort}`,
       "--use-fake-device-for-media-stream",
       "--use-fake-ui-for-media-stream",
+      ...(CAMERA ? [`--use-file-for-fake-video-capture=${CAMERA}`] : []),
       "--autoplay-policy=no-user-gesture-required",
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
     ],
