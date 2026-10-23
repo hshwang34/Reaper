@@ -13,6 +13,9 @@
 
 import "./style.css";
 import "./product.css";
+import "./trust.css";
+import { applyLinks } from "./links";
+import { initPricing } from "./pricing";
 import { Chat, IDLE_LINES, esc, sleep } from "./chat";
 import { BASE_ID, HeroPlayer, loadHeroManifest, type HeroClip, type HeroManifest } from "./heroPlayer";
 
@@ -371,3 +374,6 @@ document.addEventListener("keydown", (event) => {
     menuToggle.focus();
   }
 });
+
+applyLinks();
+initPricing();

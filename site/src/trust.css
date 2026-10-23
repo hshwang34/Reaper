@@ -1,0 +1,105 @@
+/* Pricing, Discord, and the legal pages. Same tokens as product.css. */
+
+/* ---------- pricing ---------- */
+
+.pricing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 56px; align-items: center; }
+.pricing-text h2 { margin-bottom: 18px; }
+.pricing-text .lead { font-size: 1rem; max-width: 44ch; }
+.price-rule { display: inline-flex; align-items: baseline; gap: 12px; margin: 26px 0 0; padding: 14px 20px; border-radius: 14px; background: #ffe3d6; color: #72200f; font-weight: 700; letter-spacing: -.03em; }
+.price-rule b { font-size: 2rem; }
+.price-rule span { font-size: .9rem; font-weight: 600; letter-spacing: 0; }
+.pricing-points { list-style: none; margin: 26px 0 0; padding: 0; display: grid; gap: 10px; font-size: .88rem; color: var(--muted); }
+.pricing-points li { padding-left: 22px; position: relative; }
+.pricing-points li::before { content: '✓'; position: absolute; left: 0; color: #d43a20; }
+.pricing-points b { color: var(--ink); }
+
+.calc { border: 1px solid var(--line); border-radius: 22px; background: var(--surface); padding: 30px; display: grid; gap: 22px; }
+.calc-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; }
+.calc-label { font-family: var(--font-mono); font-size: .65rem; letter-spacing: .13em; color: var(--muted); margin-bottom: 6px; }
+.calc-amount { font-size: 3rem; font-weight: 700; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+.calc-secs { font-size: .9rem; color: var(--muted); }
+.calc-secs b { color: var(--ink); }
+.calc input[type=range] { width: 100%; accent-color: #e73e21; height: 28px; margin: 0; cursor: pointer; }
+.calc-scale { display: flex; justify-content: space-between; font: .68rem var(--font-mono); color: var(--muted); margin-top: -14px; }
+
+.split-bar { display: flex; height: 22px; border-radius: 7px; overflow: hidden; gap: 2px; background: var(--line); }
+.split-bar i { width: var(--w); min-width: 3px; transition: width .2s ease; }
+.split-bar [data-k=streamer], .sw-streamer { background: #1f9d61; }
+.split-bar [data-k=stripe], .sw-stripe { background: #8a7f78; }
+.split-bar [data-k=ai], .sw-ai { background: #ff8d73; }
+.split-bar [data-k=platform], .sw-platform { background: #d43a20; }
+
+.split-rows { margin: 0; display: grid; gap: 0; }
+.split-rows div { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding: 11px 0; border-top: 1px solid var(--line); }
+.split-rows dt { font-size: .88rem; }
+.split-rows dt small { display: block; color: var(--muted); font-size: .76rem; margin-top: 2px; }
+.split-rows dd { margin: 0; font: 500 .95rem var(--font-mono); font-variant-numeric: tabular-nums; }
+.split-rows .sw { width: 12px; height: 12px; border-radius: 3px; align-self: center; }
+.split-rows .you dt, .split-rows .you dd { font-weight: 700; }
+.split-rows .you dd { color: #157a4a; font-size: 1.15rem; }
+.calc-note { font-size: .74rem; color: var(--muted); line-height: 1.6; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .price-rule { background: #3a211a; color: #ffc2ae; }
+  :root:not([data-theme="light"]) .split-rows .you dd { color: #3ccf87; }
+}
+:root[data-theme="dark"] .price-rule { background: #3a211a; color: #ffc2ae; }
+:root[data-theme="dark"] .split-rows .you dd { color: #3ccf87; }
+
+@media (max-width: 900px) {
+  .pricing { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+}
+@media (max-width: 760px) {
+  .calc { padding: 22px 18px; border-radius: 18px; }
+  .calc-amount { font-size: 2.4rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .split-bar i { transition: none; }
+}
+
+/* ---------- Discord ---------- */
+
+.btn-discord { background: #5865f2; color: #fff; border: 1px solid #4752c4; box-shadow: 0 4px 0 #3c45a5; }
+.btn-discord:hover { background: #4752c4; transform: translateY(-2px); box-shadow: 0 6px 0 #3c45a5; }
+.btn-discord svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+.nav-discord { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; color: var(--muted); }
+.nav-discord:hover { color: #5865f2; background: var(--surface); }
+.nav-discord svg { width: 22px; height: 22px; fill: currentColor; }
+[data-discord][hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { .btn-discord:hover { transform: none; } }
+
+/* ---------- trust strip ---------- */
+
+.trust { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; list-style: none; margin: 28px 0 0; padding: 0; }
+.trust li { border: 1px solid var(--line); border-radius: 16px; padding: 20px; background: var(--surface); display: grid; gap: 6px; align-content: start; }
+.trust b { font-size: .95rem; letter-spacing: -.02em; }
+.trust span { font-size: .82rem; color: var(--muted); line-height: 1.55; }
+.trust .ic { font-size: 1.3rem; line-height: 1; margin-bottom: 4px; }
+@media (max-width: 900px) { .trust { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .trust { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- footer additions ---------- */
+
+.footer-legal a { color: inherit; text-underline-offset: 3px; }
+.footer-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: .8125rem; }
+.footer-meta a { color: var(--muted); text-decoration: none; }
+.footer-meta a:hover { color: var(--ink); }
+
+/* ---------- legal pages ---------- */
+
+.legal { max-width: 74ch; padding-block: 56px 88px; }
+.legal h1 { font-size: clamp(2.2rem, 4vw, 3rem); letter-spacing: -.05em; font-weight: 700; margin-bottom: 10px; }
+.legal .updated { font: .75rem var(--font-mono); color: var(--muted); letter-spacing: .06em; margin-bottom: 28px; }
+.legal .summary { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px; margin-bottom: 36px; }
+.legal .summary h2 { font-size: 1rem; letter-spacing: -.01em; margin: 0 0 10px; }
+.legal .summary ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.legal h2 { font-size: 1.3rem; letter-spacing: -.03em; margin: 36px 0 10px; }
+.legal p, .legal li { line-height: 1.7; font-size: .95rem; }
+.legal p + p { margin-top: 12px; }
+.legal ul { padding-left: 20px; display: grid; gap: 6px; margin: 10px 0; }
+.legal a { color: inherit; text-underline-offset: 3px; }
+.legal-nav { display: flex; gap: 18px; font-size: .88rem; margin-left: auto; }
+.legal-nav a { color: var(--muted); text-decoration: none; }
+.legal-nav a:hover, .legal-nav a[aria-current] { color: var(--ink); }
+.cta-actions .btn { min-width: 200px; }
+@media (max-width: 760px) { .nav-discord { display: none; } }

@@ -11,6 +11,14 @@
     <meta property="og:title" content="Stream Hijack" />
     <meta property="og:description" content="Let viewers pay to take over your camera. Every dollar buys a second on your stream, with their name on it. One source in OBS." />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Stream Hijack" />
+    <meta property="og:url" content="https://streamhijack.com/" />
+    <meta property="og:image" content="https://streamhijack.com/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Stream Hijack: viewers pay $1 a second to restyle a streamer's camera with live AI effects." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://streamhijack.com/" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f2ec" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121112" />
     <link rel="icon" href="/brand/icon-32.png" type="image/png" />
@@ -34,6 +42,7 @@
         <path d="M6 3h20a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z" fill="none" stroke="currentColor" stroke-width="2.4"/>
         <path d="M29 6v20a3 3 0 0 1-3 3H11.5L29 6z" fill="currentColor"/>
       </symbol>
+      <symbol id="ic-discord" viewBox="0 0 24 24"><path d="M20.32 4.37a19.8 19.8 0 0 0-4.89-1.52.07.07 0 0 0-.08.04c-.21.38-.44.86-.61 1.25a18.27 18.27 0 0 0-5.49 0 12.64 12.64 0 0 0-.62-1.25.08.08 0 0 0-.08-.04 19.74 19.74 0 0 0-4.88 1.52.07.07 0 0 0-.03.03C.53 9.05-.32 13.58.1 18.06a.08.08 0 0 0 .03.06 19.9 19.9 0 0 0 5.99 3.03.08.08 0 0 0 .09-.03c.46-.63.87-1.3 1.22-1.99a.08.08 0 0 0-.04-.11 13.1 13.1 0 0 1-1.87-.89.08.08 0 0 1 0-.13l.37-.29a.07.07 0 0 1 .08-.01c3.93 1.79 8.18 1.79 12.06 0a.07.07 0 0 1 .08.01l.37.29a.08.08 0 0 1 0 .13c-.6.35-1.22.65-1.87.89a.08.08 0 0 0-.04.11c.36.7.77 1.36 1.22 1.99a.08.08 0 0 0 .09.03 19.84 19.84 0 0 0 6-3.03.08.08 0 0 0 .03-.06c.5-5.18-.84-9.67-3.55-13.66a.06.06 0 0 0-.03-.03zM8.02 15.33c-1.18 0-2.16-1.09-2.16-2.42s.96-2.42 2.16-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.33-.96 2.42-2.16 2.42zm7.97 0c-1.18 0-2.15-1.09-2.15-2.42s.95-2.42 2.15-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.33-.95 2.42-2.16 2.42z"/></symbol>
     </svg>
 
     <header class="nav">
@@ -45,10 +54,12 @@
         <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="main-navigation">Menu <span aria-hidden="true">+</span></button>
         <nav class="nav-links" id="main-navigation" aria-label="Sections">
           <a href="#how">How it works</a>
+          <a href="#pricing">Pricing</a>
           <a href="#control">Control</a>
           <a href="#obs">OBS</a>
           <a href="#faq">FAQ</a>
         </nav>
+        <a class="nav-discord" data-discord hidden href="#" aria-label="Join the Stream Hijack Discord" title="Discord"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#ic-discord"/></svg></a>
         <a class="btn btn-primary btn-sm" href="#alpha">Join the alpha</a>
       </div>
     </header>
@@ -65,7 +76,7 @@
               <a class="btn btn-primary btn-lg" href="#alpha">Join the free alpha <span aria-hidden="true">↗</span></a>
               <a class="btn btn-quiet btn-lg" href="#demo"><span aria-hidden="true">▶</span> Try the demo</a>
             </div>
-            <p class="launch-note">Made for OBS · macOS alpha · You get paid for every hijack</p>
+            <p class="launch-note">$1 = 1 second of hijack · Streamers keep about 87% · macOS and Windows</p>
           </div>
           <div class="mascot-stage" aria-label="Stream Hijack mascot">
             <span class="mascot-caption">YOUR CHAT’S NEW PARTNER IN CRIME</span>
@@ -262,6 +273,50 @@
         </ol>
       </section>
 
+      <!-- ============ Pricing ============ -->
+      <section class="section wrap" id="pricing" aria-labelledby="pricing-h">
+        <div class="pricing">
+          <div class="pricing-text">
+            <p class="brand-eyebrow">SIMPLE MATH. NO SUBSCRIPTIONS.</p>
+            <h2 id="pricing-h">Every dollar buys<br />a second on stream.</h2>
+            <p class="lead">Viewers choose how long their hijack lasts by how much they pay. Streamers keep most of every payment, and it's free to start.</p>
+            <p class="price-rule"><b>$1 = 1 second</b><span>of hijack</span></p>
+            <ul class="pricing-points">
+              <li><b>Free for streamers.</b> No monthly fee and nothing up front. You never pay for a hijack yourself.</li>
+              <li><b>You set the limits.</b> Pick the lowest price and the longest a hijack can run.</li>
+              <li><b>Paid out by Stripe.</b> Money goes straight to your own Stripe account, not through us.</li>
+              <li><b>Refunded if it doesn't play.</b> If a paid hijack never makes it on stream, the viewer gets their money back automatically.</li>
+            </ul>
+          </div>
+          <div class="calc">
+            <div class="calc-head">
+              <div>
+                <p class="calc-label">A VIEWER PAYS</p>
+                <div class="calc-amount" data-p="amount">$10</div>
+              </div>
+              <p class="calc-secs">for <b data-p="secs">10 seconds</b> of hijack</p>
+            </div>
+            <label class="sr-only" for="priceRange">Payment amount in dollars</label>
+            <input id="priceRange" type="range" min="2" max="60" step="1" value="10" />
+            <div class="calc-scale" aria-hidden="true"><span>$2</span><span>$60</span></div>
+            <div class="split-bar" aria-hidden="true"><i data-k="streamer"></i><i data-k="ai"></i><i data-k="platform"></i><i data-k="stripe"></i></div>
+            <dl class="split-rows" aria-live="polite">
+              <div class="you"><span class="sw sw-streamer"></span><dt>The streamer gets <small><span data-p="pct">87%</span> of the payment, paid out by Stripe</small></dt><dd data-p="streamer">$8.71</dd></div>
+              <div><span class="sw sw-ai"></span><dt>AI video time <small>What the AI costs to run: 2¢ a second</small></dt><dd data-p="ai">$0.20</dd></div>
+              <div><span class="sw sw-platform"></span><dt>Stream Hijack <small>5% platform fee</small></dt><dd data-p="platform">$0.50</dd></div>
+              <div><span class="sw sw-stripe"></span><dt>Card processing <small>Stripe's fee: 2.9% + 30¢</small></dt><dd data-p="stripe">$0.59</dd></div>
+            </dl>
+            <p class="calc-note">Card fees shown at Stripe's standard US rate; Stripe's actual fee depends on the card and country. Because of Stripe's fixed 30¢ per payment, streamers keep more on larger hijacks, so we suggest a lowest price of $2 or more.</p>
+          </div>
+        </div>
+        <ul class="trust" aria-label="Why you can trust it">
+          <li><span class="ic" aria-hidden="true">💳</span><b>Payments by Stripe</b><span>Cards are handled by Stripe. We never see or store card numbers.</span></li>
+          <li><span class="ic" aria-hidden="true">↩️</span><b>Automatic refunds</b><span>A paid hijack that never plays is refunded to the viewer without anyone asking.</span></li>
+          <li><span class="ic" aria-hidden="true">🛡️</span><b>Screened before it runs</b><span>Typed ideas and photos are checked first. Nudity, minors and real people are always blocked.</span></li>
+          <li><span class="ic" aria-hidden="true">📜</span><b>Clear rules</b><span>Read our <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>. Viewers must be 18 or older.</span></li>
+        </ul>
+      </section>
+
       <!-- ============ Control ============ -->
       <section class="section wrap" id="control" aria-labelledby="control-h">
         <div class="split">
@@ -287,14 +342,14 @@
               <div class="gr-presets">
                 <span class="gr-sub">Enabled presets</span>
                 <div class="gr-checks">
-                  <span class="check on">🌋 Lava Room</span>
-                  <span class="check on">🌊 Underwater</span>
-                  <span class="check on">📼 80s Anime</span>
-                  <span class="check on">🌃 Cyberpunk City</span>
-                  <span class="check">👻 Haunted</span>
-                  <span class="check on">❄️ Winter Wonderland</span>
-                  <span class="check on">🪞 Become the Photo</span>
-                </div>
+                    <span class="check on">🗽 Statue of Liberty</span>
+                    <span class="check on">📼 Anime</span>
+                    <span class="check on">👻 Ghost</span>
+                    <span class="check on">🔥 Hair on fire</span>
+                    <span class="check">🟢 Slime</span>
+                    <span class="check on">🧟 Mummy</span>
+                    <span class="check on">💇 Platinum bob</span>
+                  </div>
               </div>
               <div class="gr-panic">
                 <span>Panic key</span>
@@ -400,23 +455,24 @@
           </div>
           <div class="cta-actions"><img class="cta-mascot" src="/brand/icon-180.png" width="96" height="96" alt="" loading="lazy" />
             <a class="btn btn-primary btn-lg" href="mailto:hello@streamhijack.com?subject=Alpha%20access%20request&body=Channel%20link%3A%20%0AAverage%20viewers%3A%20%0AWhat%20I%20stream%3A%20%0ACountry%20you%27d%20get%20paid%20in%3A%20%0A">Join the alpha</a>
+            <a class="btn btn-discord btn-lg" data-discord hidden href="#"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#ic-discord"/></svg>Join our Discord</a>
             <span class="cta-note">Email us your channel and we’ll follow up with onboarding and download details. Or write to <a href="mailto:hello@streamhijack.com">hello@streamhijack.com</a>.</span>
-            <a class="cta-link" href="https://github.com/hshwang34/Reaper/commits/main">Release notes on GitHub</a>
           </div>
         </div>
       </section>
 
       <!-- ============ FAQ ============ -->
       <section class="section wrap faq" id="faq" aria-labelledby="faq-h">
-        <div class="faq-intro"><p class="brand-eyebrow">BEFORE YOU HIT GO</p><h2 id="faq-h">Good questions.<br />Straight answers.</h2><p>Still curious? <a href="mailto:hello@streamhijack.com">hello@streamhijack.com</a></p></div>
+        <div class="faq-intro"><p class="brand-eyebrow">BEFORE YOU HIT GO</p><h2 id="faq-h">Good questions.<br />Straight answers.</h2><p>Still curious? <span data-discord hidden>Ask us in <a data-discord href="#">Discord</a> or email </span><a href="mailto:hello@streamhijack.com">hello@streamhijack.com</a></p></div>
         <div class="faq-list">
           <details class="faq-item"><summary>What do I need?</summary><p>OBS Studio with its WebSocket server on, a Stripe account to get paid (the app sets it up with you), and the Stream Hijack desktop app, for macOS or Windows.</p></details>
           <details class="faq-item"><summary>Is this a Twitch extension?</summary><p>No. Viewers pay by card on your own hijack page, so it works alongside Twitch, Kick or YouTube. No Bits, no extension review.</p></details>
-          <details class="faq-item"><summary>Where does the money go?</summary><p>Viewers pay by card on your hijack page, through Stripe. Each payment first covers the AI video time it buys and a small platform fee, plus Stripe's card fee; the rest goes to your Stripe account. On a $10 hijack you keep about $8.70. If a paid hijack never plays, the viewer is refunded automatically.</p></details>
+          <details class="faq-item"><summary>Where does the money go?</summary><p>Viewers pay by card on your hijack page, through Stripe. Every dollar buys one second. Each payment first covers the AI video time it uses (2¢ a second), a 5% platform fee and Stripe's card fee; the rest goes to your Stripe account. On a $10 hijack you keep about $8.71. See the <a href="#pricing">pricing breakdown</a>. If a paid hijack never plays, the viewer is refunded automatically.</p></details>
           <details class="faq-item"><summary>How long does a hijack last?</summary><p>As many seconds as they paid for, up to the maximum you set. A short wipe covers the cut in and the cut out.</p></details>
           <details class="faq-item"><summary>Is there a delay?</summary><p>The restyled picture runs a little behind your camera, as any live AI video does. The wipe hides the jump at both ends, and the countdown is on screen so viewers know what is happening.</p></details>
           <details class="faq-item"><summary>What can a viewer make it do?</summary><p>An effect you have turned on, or their own idea if you allow typed prompts. Every typed idea and photo is screened against your rules before it runs, and nudity, minors and real people are always blocked.</p></details>
-          <details class="faq-item"><summary>Does it cost me anything?</summary><p>Nothing up front. Each viewer payment covers its own AI video time plus a small platform fee, so you never pay for a hijack yourself.</p></details>
+          <details class="faq-item"><summary>Who runs Stream Hijack?</summary><p>Stream Hijack is an independent product built by <a href="https://github.com/hshwang34">Hyunseok Hwang</a>. You can reach a real person at <a href="mailto:support@streamhijack.com">support@streamhijack.com</a><span data-discord hidden> or in our <a data-discord href="#">Discord</a></span>. The rules are in our <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p></details>
+            <details class="faq-item"><summary>Does it cost me anything?</summary><p>Nothing up front. Each viewer payment covers its own AI video time plus a small platform fee, so you never pay for a hijack yourself.</p></details>
         </div>
       </section>
     </main>
@@ -424,7 +480,7 @@
     <footer class="footer">
       <div class="wrap footer-inner">
         <div class="footer-brand">
-          <a class="brand" href="#top" aria-label="Stream Hijack, back to top">
+          <a class="brand" href="/#top" aria-label="Stream Hijack, home">
             <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
             <span class="wordmark">Stream <strong>Hijack</strong></span>
           </a>
@@ -433,33 +489,32 @@
         <nav class="footer-cols" aria-label="Footer">
           <div>
             <h4>Product</h4>
-            <a href="#how">How it works</a>
-              <a href="#control">Control</a>
-            <a href="#alpha">Join the alpha</a>
+            <a href="/#how">How it works</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#control">Control</a>
+            <a href="/#faq">FAQ</a>
           </div>
           <div>
-            <h4>Behind the scenes</h4>
-            <a href="https://github.com/hshwang34/Reaper">Source on GitHub</a>
-            <a href="https://github.com/hshwang34/Reaper/blob/main/FEASIBILITY.md">Feasibility notes</a>
-            <a href="https://github.com/hshwang34/Reaper/commits/main">Release notes</a>
-            <a href="https://github.com/hshwang34">Built by Hyunseok Hwang</a>
+            <h4>Community</h4>
+            <a data-discord hidden href="#">Discord</a>
+            <a href="/#alpha">Join the free alpha</a>
           </div>
           <div>
-            <h4>Early access</h4>
-            <a href="#alpha">Join the free alpha</a>
-            <a href="#control">Your controls</a>
+            <h4>Legal</h4>
+            <a href="/terms">Terms of Service</a>
+            <a href="/privacy">Privacy Policy</a>
           </div>
           <div>
             <h4>Contact</h4>
-            <a href="mailto:hello@streamhijack.com">hello@streamhijack.com</a>
+            <a href="mailto:hello@streamhijack.com">General: hello@</a>
             <a href="mailto:support@streamhijack.com">Help: support@</a>
             <a href="mailto:info@streamhijack.com">Press &amp; business: info@</a>
           </div>
         </nav>
         <p class="footer-legal">
-          © 2026 Stream Hijack. OBS and OBS Studio are trademarks of Wizards of OBS, LLC. Stripe, Twitch,
-          Kick and YouTube are trademarks of their respective owners; none of them endorse this app.
-          Camera photo by Yan Krukau on Pexels.
+          © 2026 Stream Hijack. Built by <a href="https://github.com/hshwang34">Hyunseok Hwang</a>.
+          OBS and OBS Studio are trademarks of Wizards of OBS, LLC. Stripe, Twitch, Kick, YouTube and
+          Discord are trademarks of their respective owners; none of them endorse this app.
         </p>
       </div>
     </footer>
