@@ -16,6 +16,7 @@ import "./product.css";
 import "./trust.css";
 import { applyLinks } from "./links";
 import { initPricing } from "./pricing";
+import { initGuardrails } from "./guardrails";
 import { Chat, IDLE_LINES, esc, sleep } from "./chat";
 import { BASE_ID, HeroPlayer, loadHeroManifest, type HeroClip, type HeroManifest } from "./heroPlayer";
 
@@ -345,9 +346,11 @@ class Mirrors {
 void loadHeroManifest().then((m) => {
   if (!m) {
     $("stageSource").textContent = "The demo video didn't load. Refresh to try again.";
+    initGuardrails([]);
     return;
   }
   new HeroDemo(m);
+  initGuardrails(m.clips);
   const base = m.clips.find((c) => c.id === BASE_ID)!;
   const fx = m.clips.filter((c) => c.id !== BASE_ID);
   new Mirrors(

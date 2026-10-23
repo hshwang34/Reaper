@@ -318,56 +318,85 @@
       </section>
 
       <!-- ============ Control ============ -->
+      <!--
+        The guardrails panel is a working copy of the streamer's real settings
+        (shared/src/settings.ts); src/guardrails.ts wires it. The audience buttons are example
+        setups, not a separate feature.
+      -->
       <section class="section wrap" id="control" aria-labelledby="control-h">
-        <div class="split">
-          <div class="split-text">
-            <p class="brand-eyebrow">YOU’RE STILL THE BOSS</p><h2 id="control-h">Unleash chat.<br /><em>Keep the off switch.</em></h2>
-            <ul class="facts">
-              <li><b>You build the menu.</b> Turn effects on or off, set the lowest price and the longest a hijack can run.</li>
-              <li><b>Viewers' own ideas are screened first.</b> Typed prompts and photos pass automatic screening before anything reaches your camera, and you can switch them off in one click.</li>
-              <li><b>One key ends it.</b> <kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd> from anywhere cuts back to your camera and pauses the queue.</li>
-              <li><b>Every hijack ends on time.</b> Automatic time limits bring your normal camera back. You set the maximum length before anyone pays.</li>
-            </ul>
+        <div class="control-head">
+          <div>
+            <p class="brand-eyebrow">YOU’RE STILL THE BOSS</p>
+            <h2 id="control-h">Unleash chat.<br /><em>Keep the off switch.</em></h2>
           </div>
-          <div class="shot">
-            <div class="app guardrails ui" role="img" aria-label="The streamer's guardrail settings">
-              <div class="app-label branded-app-label"><img src="/brand/icon-180.png" width="32" height="32" alt="" />Stream Hijack <span> / Guardrails</span></div>
-              <div class="gr-fields">
-                <label><span>Lowest price ($)</span><div class="field mono">2</div></label>
-                <label><span>Max duration (s)</span><div class="field mono">60</div></label>
-                <label><span>Cooldown (s)</span><div class="field mono">3</div></label>
-                <label><span>Queue depth</span><div class="field mono">5</div></label>
-              </div>
-              <div class="gr-toggle"><span class="switch" data-on="false"><i></i></span>Allow custom free-text prompts</div>
-              <div class="gr-presets">
-                <span class="gr-sub">Enabled presets</span>
-                <div class="gr-checks">
-                    <span class="check on">🗽 Statue of Liberty</span>
-                    <span class="check on">📼 Anime</span>
-                    <span class="check on">👻 Ghost</span>
-                    <span class="check on">🔥 Hair on fire</span>
-                    <span class="check">🟢 Slime</span>
-                    <span class="check on">🧟 Mummy</span>
-                    <span class="check on">💇 Platinum bob</span>
-                  </div>
-              </div>
-              <div class="gr-panic">
-                <span>Panic key</span>
-                <span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd></span>
-                <span class="gr-note">Also in the menu bar</span>
-              </div>
-              <div class="gr-timers" aria-hidden="true">
-                <span class="gr-sub">Run cap, three ways</span>
-                <div class="timer-rows">
-                  <div class="timer-row"><span>App timer</span><i style="--w:70%"></i><em>7 s</em></div>
-                  <div class="timer-row"><span>Local watchdog</span><i style="--w:86%"></i><em>+10 s</em></div>
-                  <div class="timer-row"><span>Provider token</span><i style="--w:100%"></i><em>expires</em></div>
-                </div>
-              </div>
-            </div>
-            <span class="shot-caption">Streamer dashboard · guardrails</span>
-          </div>
+          <p>Set the rules for your audience before anyone pays: how short and how long a hijack can be, how wild it gets, and what viewers can ask for. Try it.</p>
         </div>
+
+        <div class="gr-live">
+          <form class="gr-panel ui" id="guardrails" aria-label="Guardrail settings">
+            <div class="gr-top">
+              <span class="gr-title"><img src="/brand/icon-180.png" width="26" height="26" alt="" />Guardrails</span>
+              <span class="gr-custom" data-g="audience"></span>
+            </div>
+            <div class="gr-aud" role="group" aria-label="Start from a setup for your audience">
+              <span class="gr-cap">Who’s watching?</span>
+              <button type="button" data-audience="family"><b>👪 Family-friendly</b><small>Short, gentle, you approve ideas</small></button>
+              <button type="button" data-audience="chill"><b>☕ Chill hangout</b><small>A bit spooky, ideas screened</small></button>
+              <button type="button" data-audience="wild"><b>🔥 Anything goes</b><small>Every effect, up to a minute</small></button>
+            </div>
+
+            <div class="gr-ranges">
+              <label class="gr-range"><span class="gr-l">Shortest hijack<output data-g="minSec"></output></span>
+                  <input type="range" name="minUsd" min="1" max="20" step="1" value="2" />
+                  <small>Also your lowest price: $1 buys 1 second</small></label>
+              <label class="gr-range"><span class="gr-l">Longest hijack<output data-g="maxSec"></output></span>
+                  <input type="range" name="maxSec" min="5" max="120" step="5" value="60" />
+                  <small>No single payment runs longer</small></label>
+              <label class="gr-range"><span class="gr-l">Break between hijacks<output data-g="cooldown"></output></span>
+                  <input type="range" name="cooldown" min="0" max="30" step="1" value="3" />
+                  <small>Your normal camera in between</small></label>
+              <label class="gr-range"><span class="gr-l">Waiting in line<output data-g="queue"></output></span>
+                  <input type="range" name="queue" min="1" max="10" step="1" value="5" />
+                  <small>More payments wait until there’s room</small></label>
+            </div>
+
+            <fieldset class="gr-seg gr-seg-5"><legend>How wild can it get?</legend><div><label><input type="radio" name="wild" value="1" /><span>Mild</span></label><label><input type="radio" name="wild" value="2" /><span>Silly</span></label><label><input type="radio" name="wild" value="3" /><span>Spooky</span></label><label><input type="radio" name="wild" value="4" /><span>Wild</span></label><label><input type="radio" name="wild" value="5" /><span>Unhinged</span></label></div></fieldset>
+
+            <fieldset class="gr-cats"><legend>Kinds of effects</legend><div>
+              <label><input type="checkbox" name="cat" value="environment" /><span>🏝️ Scenery</span></label>
+              <label><input type="checkbox" name="cat" value="character" /><span>🎭 Characters</span></label>
+              <label><input type="checkbox" name="cat" value="horror" /><span>👻 Horror</span></label>
+              <label><input type="checkbox" name="cat" value="chaotic" /><span>🌀 Chaos</span></label>
+            </div></fieldset>
+
+            <fieldset class="gr-seg"><legend>Viewers’ own ideas</legend><div><label><input type="radio" name="ideas" value="off" /><span>Off</span></label><label><input type="radio" name="ideas" value="classified" /><span>Screened</span></label><label><input type="radio" name="ideas" value="classified+approval" /><span>I approve each</span></label></div></fieldset>
+            <fieldset class="gr-seg"><legend>Photo uploads</legend><div><label><input type="radio" name="photos" value="off" /><span>Off</span></label><label><input type="radio" name="photos" value="scenes" /><span>Places &amp; styles</span></label><label><input type="radio" name="photos" value="likeness" /><span>Faces, with consent</span></label></div></fieldset>
+
+            <label class="gr-switch"><input type="checkbox" name="aiLabel" /><span class="switch-ui" aria-hidden="true"><i></i></span>Show an “AI effect” label on stream</label>
+          </form>
+
+          <aside class="gr-sum" aria-label="What your viewers get with these settings">
+            <p class="gr-cap">What your chat gets</p>
+            <div class="gr-price"><b data-g="range">$2 – $60</b><span>buys <span data-g="rangeSec">2 to 60 seconds</span></span></div>
+            <p class="gr-line" data-g="line">Up to 5 hijacks wait in line, 3 s apart.</p>
+            <div class="gr-fx-head"><span class="gr-cap">Effects on the menu</span><span data-g="count"></span></div>
+            <ul class="gr-fx" id="grEffects"></ul>
+            <ul class="gr-facts">
+              <li data-g="ideas">Their own ideas too, screened first</li>
+              <li data-g="photos">Photos with faces, only with the person’s consent</li>
+              <li data-g="aiLabel">“AI effect” label shows on stream</li>
+            </ul>
+            <div class="gr-always"><b>Always blocked, whatever you pick</b>Nudity, anything involving minors, and real people without their consent.</div>
+            <div class="gr-panic2"><span>Panic key: cuts back to your camera and pauses the line</span><span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd></span></div>
+          </aside>
+        </div>
+
+        <ul class="control-facts">
+          <li><b>Change it any time.</b> Settings apply to the next hijack, even mid-stream.</li>
+          <li><b>Screened before it reaches you.</b> Typed ideas and photos are checked before anyone can pay.</li>
+          <li><b>Every hijack ends on time.</b> Three separate timers bring your camera back, even if your computer freezes.</li>
+          <li><b>Block a viewer.</b> Ban names and words from your dashboard.</li>
+        </ul>
       </section>
 
       <!-- ============ OBS ============ -->
