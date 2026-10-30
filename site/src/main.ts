@@ -7,14 +7,14 @@
 //
 // 2. The product mocks further down (Mirrors): the hijack page, the stream output, the
 //    dashboard and OBS replay one paid hijack after another (pay → live countdown → done),
-//    showing stills from the same renders.
+//    playing the same renders (stills under reduced motion).
 //
 // Nothing here calls the model.
 
 import "./style.css";
 import "./product.css";
 import { Chat, IDLE_LINES, esc, sleep } from "./chat";
-import { BASE_ID, HeroPlayer, loadHeroManifest, type HeroClip, type HeroManifest } from "./heroPlayer";
+import { BASE_ID, HeroPlayer, activate, loadHeroManifest, makeVideo, type HeroClip, type HeroManifest } from "./heroPlayer";
 
 /* ---------- theme hook for screenshots (?theme=dark|light) ---------- */
 
@@ -88,7 +88,9 @@ class HeroDemo {
     this.choices = [manifest.clips.find((c) => c.id === BASE_ID)!, ...this.player.effects()];
     this.buildPicker();
     this.playBtn.addEventListener("click", () => {
-      this.player.setPlaying(!this.player.isPlaying);
+      const play = !this.player.isPlaying;
+      this.player.unlock();
+      this.player.setPlaying(play);
       this.syncPlayButton();
     });
     $("nextBtn").addEventListener("click", () => {
@@ -129,11 +131,22 @@ class HeroDemo {
     this.buttons = [...this.picker.querySelectorAll<HTMLButtonElement>("button")];
   }
 
-  /** A reader's pick. */
+  /** Call inside any tap: autoplay-blocked phones start playing on the reader's first touch. */
+  unlock(): void {
+    this.player.unlock();
+    this.syncPlayButton();
+  }
+
+  /** A reader's pick. Picking is asking to watch, so it also starts a paused or blocked player. */
   private choose(id: string): void {
     this.touched = true;
     clearTimeout(this.attractTimer);
     this.press(id);
+    this.player.unlock(); // synchronously, while the tap still counts as one
+    if (!this.player.isPlaying) {
+      this.player.setPlaying(true);
+      this.syncPlayButton();
+    }
     void this.player.show(id);
   }
 
@@ -223,7 +236,12 @@ interface Cycle {
 class Mirrors {
   private mini = $("miniFrame");
   private obs = $("obsFrame");
-  private camEls = [this.mini, this.obs].map((f) => f.querySelector<HTMLImageElement>(".cam")!);
+  private frames = [this.mini, this.obs];
+  private camEls = this.frames.map((f) => f.querySelector<HTMLImageElement>(".cam")!);
+  // The real clips over those stills: the stream between hijacks, the render during one.
+  // Each plays only while its frame is on screen, so a phone downloads nothing it never shows.
+  private videos: HTMLVideoElement[] = [];
+  private onScreen = new Set<Element>();
   private i = 0;
 
   constructor(
@@ -231,9 +249,32 @@ class Mirrors {
     private readonly cycles: Cycle[],
   ) {
     this.buildPortal();
+    if (!REDUCED) {
+      this.videos = this.camEls.map((img) => {
+        const v = makeVideo("cam");
+        v.preload = "none";
+        img.after(v);
+        return v;
+      });
+      const io = new IntersectionObserver(
+        (entries) => {
+          for (const e of entries) e.isIntersecting ? this.onScreen.add(e.target) : this.onScreen.delete(e.target);
+          this.applyPlay();
+        },
+        { threshold: 0.15 },
+      );
+      for (const f of this.frames) io.observe(f);
+      document.addEventListener("visibilitychange", () => this.applyPlay());
+    }
     this.setStill(base);
     if (REDUCED) this.renderStatic();
     else void this.loop();
+  }
+
+  /** Call inside any tap (see HeroDemo.unlock). */
+  unlock(): void {
+    for (const v of this.videos) activate(v, false);
+    this.applyPlay();
   }
 
   private buildPortal(): void {
@@ -251,6 +292,23 @@ class Mirrors {
 
   private setStill(c: HeroClip): void {
     for (const img of this.camEls) if (img.getAttribute("src") !== c.poster) img.src = c.poster;
+    for (const v of this.videos) {
+      if (v.dataset.id === c.id) continue;
+      // every clip is the same 30 s, frame-aligned: carry the moment over so the person keeps talking
+      const t = v.currentTime;
+      v.dataset.id = c.id;
+      v.poster = c.poster;
+      v.src = c.sd;
+      v.currentTime = t;
+    }
+    this.applyPlay();
+  }
+
+  private applyPlay(): void {
+    this.videos.forEach((v, i) => {
+      if (this.onScreen.has(this.frames[i]!) && !document.hidden) v.play().catch(() => {});
+      else v.pause();
+    });
   }
 
   private async loop(): Promise<void> {
@@ -344,13 +402,24 @@ void loadHeroManifest().then((m) => {
     $("stageSource").textContent = "The demo video didn't load. Refresh to try again.";
     return;
   }
-  new HeroDemo(m);
+  const hero = new HeroDemo(m);
   const base = m.clips.find((c) => c.id === BASE_ID)!;
   const fx = m.clips.filter((c) => c.id !== BASE_ID);
-  new Mirrors(
+  const mirrors = new Mirrors(
     base,
     fx.map((clip, i) => ({ clip, who: PAYERS[i % PAYERS.length]!, amount: 5 + (i % 4) })),
   );
+  // iOS Low Power Mode blocks even muted autoplay until a tap. The reader's first tap or key
+  // anywhere on the page unlocks every video. Bubble phase, so the play button and the effect
+  // picker act on the tap first and this never undoes them. Not touchend: a scroll ends in one
+  // but is no gesture to WebKit, and this listener only gets one go.
+  const events = ["click", "keydown"] as const;
+  const unlock = () => {
+    hero.unlock();
+    mirrors.unlock();
+    for (const ev of events) document.removeEventListener(ev, unlock);
+  };
+  for (const ev of events) document.addEventListener(ev, unlock);
 });
 
 const menuToggle = document.querySelector<HTMLButtonElement>(".mobile-menu-toggle")!;
