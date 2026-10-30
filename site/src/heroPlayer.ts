@@ -14,6 +14,9 @@
 // - While an effect is up, a per-frame check nudges its playbackRate (small drift) or re-seeks
 //   it (big drift) so it stays locked to the base, across loop wrap-arounds too.
 // - Nothing decodes while the player is off screen or the tab is hidden.
+// - When the browser refuses autoplay (iOS Low Power Mode, Reduce Motion's still start), the
+//   reader's first tap unlocks every <video> at once: WebKit only lets an element play later,
+//   from a timer or after an await, if play() was called on THAT element inside a tap.
 
 export interface HeroClip {
   id: string;
@@ -60,7 +63,7 @@ function liteMode(): boolean {
   );
 }
 
-function makeVideo(cls: string): HTMLVideoElement {
+export function makeVideo(cls: string): HTMLVideoElement {
   const v = document.createElement("video");
   v.className = `clip ${cls}`;
   // muted must be set as a property before play() for autoplay to be allowed
@@ -76,6 +79,18 @@ function makeVideo(cls: string): HTMLVideoElement {
   return v;
 }
 
+/**
+ * Call inside a tap or key press. WebKit lifts its autoplay block per element, and only for a
+ * play() made during the gesture, so each <video> that may start later must be touched here.
+ * A play() on an element with no src still counts. `keep` = leave it playing.
+ */
+export function activate(v: HTMLVideoElement, keep: boolean): void {
+  if (v.dataset.activated) return;
+  v.dataset.activated = "1";
+  v.play().catch(() => {});
+  if (!keep) v.pause();
+}
+
 const once = (el: EventTarget, ev: string, ms: number) =>
   new Promise<void>((resolve) => {
     const t = setTimeout(resolve, ms);
@@ -85,7 +100,7 @@ const once = (el: EventTarget, ev: string, ms: number) =>
 export interface HeroPlayerOptions {
   /** Called once the picture actually shows `id` (null = the original stream). */
   onShow?: (id: string | null) => void;
-  /** Called when the browser refused to autoplay (e.g. Low Power Mode); a click on play fixes it. */
+  /** Called when the browser refused to autoplay (e.g. Low Power Mode); any tap then fixes it (unlock). */
   onBlocked?: () => void;
   /** Start paused on posters (prefers-reduced-motion). */
   still?: boolean;
@@ -106,6 +121,7 @@ export class HeroPlayer {
   private prefetching = false;
   private onScreen = false;
   private playing: boolean;
+  private autoBlocked = false; // the browser, not the reader, paused us
 
   constructor(
     private readonly frame: HTMLElement,
@@ -163,8 +179,20 @@ export class HeroPlayer {
     void this.prefetch(id);
   }
 
+  /**
+   * Call from inside a tap or key press: lets every layer play from now on, and resumes the
+   * stream if the browser blocked autoplay. Cheap after the first call.
+   */
+  unlock(): void {
+    const run = this.playing || this.autoBlocked;
+    activate(this.base, run);
+    this.layers.forEach((l, i) => activate(l, run && i === this.front));
+    if (this.autoBlocked) this.setPlaying(true);
+  }
+
   setPlaying(on: boolean): void {
     this.playing = on;
+    this.autoBlocked = false;
     if (on) {
       const base = this.clips.get(BASE_ID)!;
       if (!this.base.getAttribute("src")) this.base.src = this.url(base);
@@ -284,6 +312,7 @@ export class HeroPlayer {
   private blocked(): void {
     if (!this.playing) return;
     this.playing = false;
+    this.autoBlocked = true;
     this.opts.onBlocked?.();
   }
 
