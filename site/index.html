@@ -49,7 +49,7 @@
           <a href="#obs">OBS</a>
           <a href="#faq">FAQ</a>
         </nav>
-        <a class="btn btn-primary btn-sm" href="#alpha">Join the alpha</a>
+        <a class="btn btn-primary btn-sm" href="#alpha">Join the waitlist</a>
       </div>
     </header>
 
@@ -62,7 +62,7 @@
             <h1 id="hero-h">Give chat<br />the power to<br /><em>steal the show.</em></h1>
             <p class="lead">Your camera becomes their playground. Viewers pay to transform your stream with live AI effects. You decide how wild it gets.</p>
             <div class="actions">
-              <a class="btn btn-primary btn-lg" href="#alpha">Join the free alpha <span aria-hidden="true">↗</span></a>
+              <a class="btn btn-primary btn-lg" href="#alpha">Join the waitlist <span aria-hidden="true">↗</span></a>
               <a class="btn btn-quiet btn-lg" href="#demo"><span aria-hidden="true">▶</span> Try the demo</a>
             </div>
             <p class="launch-note">Made for OBS · macOS alpha · You get paid for every hijack</p>
@@ -390,7 +390,7 @@
           <div class="cta-text"><p class="brand-eyebrow">LET’S MAKE YOUR NEXT STREAM WEIRD.</p>
             <h2 id="alpha-h">Your chat has ideas.<br />Give them the button.</h2>
             <p>
-              Join the free alpha. We’ll help you get set up and bring your first hijack to life. Small cohort. Real streams. Your feedback shapes what’s next.
+              The alpha is free and invite-only. Join the waitlist and we’ll approve streamers in small batches, help you get set up, and bring your first hijack to life. Real streams. Your feedback shapes what’s next.
             </p>
             <dl class="reqs">
               <div><dt>App</dt><dd>macOS 13 or newer (one build for Apple silicon and Intel) and Windows 10 or newer. Download details provided during onboarding.</dd></div>
@@ -399,8 +399,27 @@
             </dl>
           </div>
           <div class="cta-actions"><img class="cta-mascot" src="/brand/icon-180.png" width="96" height="96" alt="" loading="lazy" />
-            <a class="btn btn-primary btn-lg" href="mailto:hello@streamhijack.com?subject=Alpha%20access%20request&body=Channel%20link%3A%20%0AAverage%20viewers%3A%20%0AWhat%20I%20stream%3A%20%0ACountry%20you%27d%20get%20paid%20in%3A%20%0A">Join the alpha</a>
-            <span class="cta-note">Email us your channel and we’ll follow up with onboarding and download details. Or write to <a href="mailto:hello@streamhijack.com">hello@streamhijack.com</a>.</span>
+            <form class="waitlist" id="waitlist" novalidate>
+              <label class="wl-field"><span>Email</span>
+                <input name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
+              <label class="wl-field"><span>Your channel</span>
+                <input name="channel" type="text" autocomplete="url" required placeholder="twitch.tv/yourname" /></label>
+              <label class="wl-field"><span>Average live viewers</span>
+                <select name="viewers" required>
+                  <option value="" selected disabled>Pick one</option>
+                  <option value="under-10">Under 10</option>
+                  <option value="10-50">10–50</option>
+                  <option value="50-200">50–200</option>
+                  <option value="200-plus">200+</option>
+                </select></label>
+              <label class="wl-field"><span>What would chat turn you into? <em>Optional</em></span>
+                <input name="idea" type="text" maxlength="280" placeholder="A muppet, a marble statue, a 90s anime villain…" /></label>
+              <!-- Honeypot: hidden from people, filled by bots. -->
+              <label class="hp" aria-hidden="true">Website<input name="website" type="text" tabindex="-1" autocomplete="off" /></label>
+              <button class="btn btn-primary btn-lg" type="submit">Join the waitlist</button>
+              <p class="waitlist-status" id="waitlistStatus" role="status" aria-live="polite"></p>
+            </form>
+            <span class="cta-note">Small cohort, approved in batches. Your invite to the private creator Discord and the download comes from hello@streamhijack.com. We use your email for that and nothing else.</span>
             <a class="cta-link" href="https://github.com/hshwang34/Reaper/commits/main">Release notes on GitHub</a>
           </div>
         </div>
@@ -435,7 +454,7 @@
             <h4>Product</h4>
             <a href="#how">How it works</a>
               <a href="#control">Control</a>
-            <a href="#alpha">Join the alpha</a>
+            <a href="#alpha">Join the waitlist</a>
           </div>
           <div>
             <h4>Behind the scenes</h4>

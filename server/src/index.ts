@@ -9,6 +9,7 @@
 //                                             viewer rejected (local-plane)
 //   /c/:login                                — hosted viewer portal (SPA)
 //   /uploads/:channel/*                      — reference images
+//   /api/waitlist, /api/admin/waitlist/*     — site signup form; admin (Bearer)
 
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
@@ -52,6 +53,7 @@ import {
   refreshPayouts,
   sweepStalePaid,
 } from "./payments.js";
+import { waitlistRouter } from "./waitlist.js";
 
 const app = express();
 // Real client IPs behind the edge proxy (see env.trustProxy): strikes and the
@@ -105,6 +107,8 @@ app.use("/auth", perIp(30, 60_000));
 app.post("/api/c/:channel/checkout", perIp(10, 60_000));
 // Registered before the channel API mount, so it runs first for this path.
 app.post("/api/c/:channel/submissions", perIp(20, 60_000));
+app.post("/api/waitlist", perIp(5, 60_000));
+app.use("/api/admin", perIp(60, 60_000));
 
 // ── Health ────────────────────────────────────────────────────────────────
 app.get("/healthz", (_req, res) => {
@@ -115,6 +119,9 @@ app.get("/healthz", (_req, res) => {
     decart: Boolean(env.decartApiKey),
   });
 });
+
+// ── Waitlist (marketing site form + admin approvals) ──────────────────────
+app.use(waitlistRouter());
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 
