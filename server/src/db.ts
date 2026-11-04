@@ -145,6 +145,22 @@ export const stripeEvents = sqliteTable("stripe_events", {
   receivedAt: integer("received_at").notNull(),
 });
 
+/** Streamer waitlist (server/src/waitlist.ts). One row per email; status:
+ *  pending → invited | declined. `inviteUrl` is the single-use Discord invite
+ *  minted on approval. */
+export const waitlist = sqliteTable("waitlist", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  channel: text("channel").notNull(),
+  viewers: text("viewers").notNull(),
+  idea: text("idea").notNull().default(""),
+  status: text("status").notNull(),
+  inviteUrl: text("invite_url"),
+  ipHash: text("ip_hash").notNull(),
+  createdAt: integer("created_at").notNull(),
+  invitedAt: integer("invited_at"),
+});
+
 // ── Bootstrap + migrations ────────────────────────────────────────────────
 // Versioned with SQLite's own `PRAGMA user_version`: migration N runs once,
 // in order, inside a transaction, and bumps the version. Append new steps;
@@ -252,6 +268,21 @@ CREATE TABLE stripe_events (
   type TEXT NOT NULL,
   received_at INTEGER NOT NULL
 );
+`,
+  /* 3 — streamer waitlist */ `
+CREATE TABLE waitlist (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  channel TEXT NOT NULL,
+  viewers TEXT NOT NULL,
+  idea TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  invite_url TEXT,
+  ip_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  invited_at INTEGER
+);
+CREATE INDEX idx_waitlist_status ON waitlist(status, created_at);
 `,
 ];
 

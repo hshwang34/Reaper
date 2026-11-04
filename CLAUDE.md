@@ -62,6 +62,8 @@ npm run tour              # the Creator Studio, clicked through end to end: real
                           #   OBS; every button asserted, every screen screenshotted → tour/<time>/
 npm run smoke:live        # on demand: a real test-mode Stripe Checkout (4242) on prod → real hijack;
                           #   needs the streamer app open + armed; ~$0.06 of Decart per run
+npm run waitlist          # review/approve site waitlist signups → single-use Discord invites
+                          #   (docs/WAITLIST.md; `discord:setup` builds the Discord server)
 npm run build             # builds the web app only
 npm run start             # production demo rig: build, then ONE process on :7712
 

@@ -22,3 +22,9 @@ process.on("exit", () => {
 });
 process.env.RH_JWT_SECRET = "test-secret";
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+// waitlist.test.ts drives the admin API over HTTP.
+process.env.RH_ADMIN_TOKEN = "a".repeat(40);
+// Empty (not unset) so a developer's .env can't make the tests call Discord:
+// dotenv never overrides a variable that already exists.
+process.env.DISCORD_BOT_TOKEN = "";
+process.env.DISCORD_INVITE_CHANNEL_ID = "";

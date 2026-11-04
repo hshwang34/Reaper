@@ -9,11 +9,14 @@
 //    dashboard and OBS replay one paid hijack after another (pay → live countdown → done),
 //    playing the same renders (stills under reduced motion).
 //
+// 3. The waitlist form (waitlist.ts) — the one network call: it posts to the control plane.
+//
 // Nothing here calls the model.
 
 import "./style.css";
 import "./product.css";
 import { Chat, IDLE_LINES, esc, sleep } from "./chat";
+import { initWaitlist } from "./waitlist";
 import { BASE_ID, HeroPlayer, activate, loadHeroManifest, makeVideo, type HeroClip, type HeroManifest } from "./heroPlayer";
 
 /* ---------- theme hook for screenshots (?theme=dark|light) ---------- */
@@ -440,3 +443,5 @@ document.addEventListener("keydown", (event) => {
     menuToggle.focus();
   }
 });
+
+initWaitlist();

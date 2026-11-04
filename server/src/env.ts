@@ -124,6 +124,23 @@ export const env = {
   /** Free test hijacks per channel per UTC day — the only GPU we fund.
    *  Test seam (the UI tour runs the wizard test AND a studio preview). */
   freeTestsPerDay: Math.max(1, Number(process.env.RH_FREE_TESTS_PER_DAY ?? 1) || 1),
+  /** Bearer token for /api/admin/* (the waitlist CLI). Under 32 chars → the
+   *  admin API answers 401 to everyone. Optional: nothing public needs it. */
+  adminToken: str("RH_ADMIN_TOKEN"),
+  /** Origins allowed to POST the waitlist form cross-origin (the Vercel site). */
+  siteOrigins: (
+    str("RH_SITE_ORIGINS") ||
+    "https://streamhijack.com,https://www.streamhijack.com" +
+      (isProduction ? "" : ",http://localhost:5173,http://localhost:4173,http://localhost:4174")
+  )
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
+  /** Discord bot that mints single-use invites for approved waitlist signups,
+   *  and the channel those invites land in (#welcome). Both optional: without
+   *  them, approving answers 503 and signups still collect. */
+  discordBotToken: str("DISCORD_BOT_TOKEN"),
+  discordInviteChannelId: str("DISCORD_INVITE_CHANNEL_ID"),
 };
 
 /** No Twitch app registered (dev only) → dev auth, loudly. Never in prod:

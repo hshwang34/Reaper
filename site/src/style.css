@@ -2005,6 +2005,86 @@ kbd {
   font-size: 0.875rem;
   color: var(--muted);
 }
+/* The CTA card stays cream in both themes (product.css), so the form pins the
+   light palette instead of inheriting the page's dark tokens. */
+.waitlist {
+  --ink: #211d1c;
+  --bg: #fbf8f3;
+  --line-strong: #b9aa98;
+  --live: #b42b14;
+  --ok: #17784a;
+  --focus: #c43820;
+  color: var(--ink);
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+  text-align: left;
+}
+.wl-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.wl-field em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--muted);
+}
+.wl-field input,
+.wl-field select {
+  font: inherit;
+  font-weight: 400;
+  font-size: 1rem; /* 16px: iOS zooms into anything smaller */
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-height: 44px;
+  width: 100%;
+}
+.wl-field input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+.wl-field input:focus-visible,
+.wl-field select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--focus);
+}
+.wl-field [aria-invalid="true"] {
+  border-color: var(--live);
+}
+.waitlist .btn {
+  justify-self: stretch;
+}
+.waitlist .btn[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+.hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.waitlist-status {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.waitlist-status[data-state="error"] {
+  color: var(--live);
+}
+.waitlist-status[data-state="done"] {
+  color: var(--ok);
+  font-weight: 600;
+}
 @media (min-width: 861px) {
   .cta-actions {
     justify-items: end;
