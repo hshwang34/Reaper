@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Download · Stream Hijack</title>
+    <meta name="description" content="Download the Stream Hijack beta for Mac. Free to install: sign in with Twitch, connect OBS and let chat pay to restyle your camera live." />
+    <link rel="canonical" href="https://streamhijack.com/download" />
+    <meta property="og:title" content="Download the Stream Hijack beta for Mac" />
+    <meta property="og:description" content="Free to install. Sign in with Twitch, connect OBS, and let chat take over your camera." />
+    <meta property="og:image" content="https://streamhijack.com/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f2ec" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121112" />
+    <link rel="icon" href="/brand/icon-32.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/brand/icon-180.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+    <script type="module" src="/src/download.ts"></script>
+  </head>
+  <body>
+    <!-- The download page. The button always points at GitHub's stable "latest release" URL
+         (app/electron-builder.yml fixes the asset name), so it works with no JavaScript;
+         src/download.ts only adds the version, size and checksum, and the right note for
+         Windows, Linux and phone visitors. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+      <symbol id="ic-discord" viewBox="0 0 24 24"><path d="M20.32 4.37a19.8 19.8 0 0 0-4.89-1.52.07.07 0 0 0-.08.04c-.21.38-.44.86-.61 1.25a18.27 18.27 0 0 0-5.49 0 12.64 12.64 0 0 0-.62-1.25.08.08 0 0 0-.08-.04 19.74 19.74 0 0 0-4.88 1.52.07.07 0 0 0-.03.03C.53 9.05-.32 13.58.1 18.06a.08.08 0 0 0 .03.06 19.9 19.9 0 0 0 5.99 3.03.08.08 0 0 0 .09-.03c.46-.63.87-1.3 1.22-1.99a.08.08 0 0 0-.04-.11 13.1 13.1 0 0 1-1.87-.89.08.08 0 0 1 0-.13l.37-.29a.07.07 0 0 1 .08-.01c3.93 1.79 8.18 1.79 12.06 0a.07.07 0 0 1 .08.01l.37.29a.08.08 0 0 1 0 .13c-.6.35-1.22.65-1.87.89a.08.08 0 0 0-.04.11c.36.7.77 1.36 1.22 1.99a.08.08 0 0 0 .09.03 19.84 19.84 0 0 0 6-3.03.08.08 0 0 0 .03-.06c.5-5.18-.84-9.67-3.55-13.66a.06.06 0 0 0-.03-.03zM8.02 15.33c-1.18 0-2.16-1.09-2.16-2.42s.96-2.42 2.16-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.33-.96 2.42-2.16 2.42zm7.97 0c-1.18 0-2.15-1.09-2.15-2.42s.95-2.42 2.15-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.33-.95 2.42-2.16 2.42z"/></symbol>
+      <symbol id="ic-down" viewBox="0 0 20 20"><path d="M10 2.5v10.2m0 0-4.2-4.2M10 12.7l4.2-4.2M3.5 16.5h13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    </svg>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="/" aria-label="Stream Hijack, home">
+          <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
+          <span class="wordmark">Stream <strong>Hijack</strong></span>
+        </a>
+        <nav class="legal-nav" aria-label="Site">
+          <a href="/">Home</a>
+          <a href="/setup">Setup</a>
+          <a href="/#pricing">Pricing</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap dl">
+      <section class="dl-hero" aria-labelledby="dl-h">
+        <div class="dl-copy">
+          <p class="brand-eyebrow"><span class="dl-dot" aria-hidden="true"></span>OPEN BETA · FREE TO INSTALL</p>
+          <h1 id="dl-h">Stream Hijack<br /><em>for Mac.</em></h1>
+          <p class="lead">Install it next to OBS, sign in with Twitch, and chat can start paying to restyle your camera tonight. You keep about 87% of every hijack.</p>
+
+          <div class="dl-box">
+            <a class="btn btn-primary btn-lg dl-btn" id="dlBtn" href="https://github.com/hshwang34/Reaper/releases/latest/download/Stream-Hijack-mac.dmg">
+              <svg aria-hidden="true" viewBox="0 0 20 20"><use href="#ic-down"/></svg>
+              <span id="dlLabel">Download for Mac</span>
+            </a>
+            <p class="dl-meta" id="dlMeta"><span id="dlVersion">Latest beta</span><span id="dlSize" hidden></span><span>Apple silicon &amp; Intel</span><span>macOS 13+</span></p>
+
+            <!-- Shown by src/download.ts for visitors who can't run the Mac app here. -->
+            <div class="dl-notice" id="dlNotice" hidden>
+              <p id="dlNoticeText"></p>
+              <p class="dl-notice-actions">
+                <button class="btn btn-quiet btn-sm" type="button" id="dlCopy">Copy the download link</button>
+                <a class="btn btn-quiet btn-sm" data-discord hidden href="#"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#ic-discord"/></svg>Get Windows news on Discord</a>
+              </p>
+            </div>
+          </div>
+
+          <p class="dl-trust">Signed by Apple and notarized, so it opens like any Mac app. <a id="dlNotes" href="https://github.com/hshwang34/Reaper/releases/latest">Release notes</a></p>
+        </div>
+
+        <figure class="dl-shot">
+          <div class="dl-window">
+            <div class="dl-titlebar" aria-hidden="true"><i></i><i></i><i></i><span>Stream Hijack</span></div>
+            <img src="/setup/obs.webp" alt="Stream Hijack setup, step 2 of 7: connected to OBS, with the AI Hijack overlay added above the facecam in two scenes." width="664" height="582" decoding="async" fetchpriority="high" />
+          </div>
+          <figcaption>The real app: setup finds OBS and adds the overlay for you.</figcaption>
+        </figure>
+      </section>
+
+      <section class="dl-section" aria-labelledby="steps-h">
+        <h2 id="steps-h">Up and running in three steps.</h2>
+        <ol class="dl-steps">
+          <li>
+            <span class="dl-n">1</span>
+            <h3>Install</h3>
+            <p>Open <b>Stream-Hijack-mac.dmg</b> and drag Stream Hijack into <b>Applications</b>.</p>
+          </li>
+          <li>
+            <span class="dl-n">2</span>
+            <h3>Sign in with Twitch</h3>
+            <p>Open the app and click <b>Sign in with Twitch</b>. Your hijack page, payments and the AI are handled for you.</p>
+          </li>
+          <li>
+            <span class="dl-n">3</span>
+            <h3>Follow the setup</h3>
+            <p>The app connects OBS, picks your camera, sets up payouts and runs a free test hijack. <a href="/setup">See every step with screenshots.</a></p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="dl-section dl-split" aria-labelledby="need-h">
+        <div>
+          <h2 id="need-h">What you need</h2>
+          <ul class="dl-need">
+            <li><b>A Mac</b> on macOS 13 Ventura or newer. One download runs on Apple silicon and Intel.</li>
+            <li><b>OBS Studio 30</b> or newer. The app adds its overlay for you.</li>
+            <li><b>A webcam</b> and a <b>Twitch account</b> to sign in with. You can stream to Twitch, Kick or YouTube.</li>
+            <li><b>A Stripe account</b> to get paid. The app sets one up with you in a few minutes.</li>
+          </ul>
+        </div>
+        <div>
+          <h2>About the beta</h2>
+          <dl class="dl-facts">
+            <div><dt>Free to install</dt><dd>Viewers pay for every hijack. You never pay for one yourself. <a href="/#pricing">How the money splits</a></dd></div>
+            <div><dt>Updates itself</dt><dd>New versions download in the background and install the next time you quit the app.</dd></div>
+            <div><dt>Mac now, Windows next</dt><dd>The beta is Mac only while we polish it. Windows is the next build.</dd></div>
+            <div><dt>Tell us what breaks</dt><dd>Write to <a href="mailto:support@streamhijack.com">support@streamhijack.com</a><span data-discord hidden> or find us in <a data-discord href="#">Discord</a></span>. A real person reads every message.</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <p class="dl-check" id="dlCheck" hidden>SHA-256 of <span id="dlFile">Stream-Hijack-mac.dmg</span>: <code id="dlSha"></code></p>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <a class="brand" href="/#top" aria-label="Stream Hijack, home">
+            <img class="mark mascot-mark" src="/brand/icon-180.png" width="56" height="56" alt="" />
+            <span class="wordmark">Stream <strong>Hijack</strong></span>
+          </a>
+          <p>A little mischief.<br />A whole new stream.</p>
+        </div>
+        <nav class="footer-cols" aria-label="Footer">
+          <div>
+            <h4>Product</h4>
+            <a href="/download">Download for Mac</a>
+            <a href="/#how">How it works</a>
+            <a href="/setup">Setup guide</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#control">Control</a>
+            <a href="/#faq">FAQ</a>
+          </div>
+          <div>
+            <h4>Community</h4>
+            <a data-discord hidden href="#">Discord</a>
+            <a href="mailto:support@streamhijack.com">Get help</a>
+          </div>
+          <div>
+            <h4>Legal</h4>
+            <a href="/terms">Terms of Service</a>
+            <a href="/privacy">Privacy Policy</a>
+          </div>
+          <div>
+            <h4>Contact</h4>
+            <a href="mailto:hello@streamhijack.com">General: hello@</a>
+            <a href="mailto:support@streamhijack.com">Help: support@</a>
+            <a href="mailto:info@streamhijack.com">Press &amp; business: info@</a>
+          </div>
+        </nav>
+        <p class="footer-legal">
+          © 2026 Stream Hijack. Built by <a href="https://github.com/hshwang34">Hyunseok Hwang</a>.
+          OBS and OBS Studio are trademarks of Wizards of OBS, LLC. Apple, Mac and macOS are trademarks
+          of Apple Inc. Stripe, Twitch, Kick, YouTube and Discord are trademarks of their respective
+          owners; none of them endorse this app.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>
