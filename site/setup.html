@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Setup guide · Stream Hijack</title>
-    <meta name="description" content="Set up Stream Hijack in about 10 minutes: download the app, connect OBS, set up payouts, run a free test and share your hijack page." />
+    <meta name="description" content="Set up Stream Hijack on your Mac in about 10 minutes: download the app, connect OBS, set up payouts, run a free test and share your hijack page." />
     <link rel="canonical" href="https://streamhijack.com/setup" />
     <meta property="og:title" content="Set up Stream Hijack in 10 minutes" />
     <meta property="og:description" content="Download, connect OBS, set up payouts, run a free test, share your hijack page." />
@@ -36,7 +36,7 @@
           <a href="/setup" aria-current="page">Setup</a>
           <a href="/#pricing">Pricing</a>
         </nav>
-        <a class="btn btn-primary btn-sm" href="/#alpha">Join the alpha</a>
+        <a class="btn btn-primary btn-sm" href="/download">Download</a>
       </div>
     </header>
 
@@ -48,10 +48,6 @@
           <p class="lead">The app walks you through each step, and does most of it for you. Here’s what to expect, with the real screens.</p>
         </div>
         <div class="su-controls">
-          <div class="su-os" role="radiogroup" aria-label="Your computer">
-            <label><input type="radio" name="os" value="mac" /><span>Mac</span></label>
-            <label><input type="radio" name="os" value="win" /><span>Windows</span></label>
-          </div>
           <div class="su-progress">
             <div class="su-meter" aria-hidden="true"><i id="suMeter"></i></div>
             <p><b id="suCount">0 of 9</b> steps done <button type="button" class="su-reset" id="suReset" hidden>Start over</button></p>
@@ -68,18 +64,15 @@
           <div class="su-text">
             <p class="su-n">STEP 1 · 2 min</p>
             <h2 id="download-h">Download the app</h2>
-            <p>Stream Hijack is a small app that sits next to OBS. Join the alpha and we’ll email you the download.</p>
+            <p>Stream Hijack is a small Mac app that sits next to OBS. It’s free to download during the beta.</p>
             <ul class="su-list">
-              <li data-os="mac">Open <b>Stream-Hijack-mac.dmg</b> and drag Stream Hijack into Applications. One download works on Apple silicon and Intel Macs.</li>
-              <li data-os="win">Run <b>Stream-Hijack-Setup.exe</b>. It installs just for you, so it won’t ask for an admin password.</li>
+              <li>Open <b>Stream-Hijack-mac.dmg</b> and drag Stream Hijack into Applications. One download works on Apple silicon and Intel Macs.</li>
             </ul>
-            <div class="su-note" data-os="mac"><b>Mac says it “could not verify” the app?</b> That’s normal during the alpha. Open <b>System Settings → Privacy &amp; Security</b>, scroll down, and click <b>Open Anyway</b>.</div>
-            <div class="su-note" data-os="win"><b>Windows says it “protected your PC”?</b> That’s normal during the alpha. Click <b>More info</b>, then <b>Run anyway</b>.</div>
-            <p class="su-actions"><a class="btn btn-primary" href="/#alpha">Join the alpha to get it</a></p>
+            <p class="su-actions"><a class="btn btn-primary" href="/download">Download for Mac</a></p>
             <label class="su-done"><input type="checkbox" data-step="download" /><span class="su-box" aria-hidden="true"></span>Done</label>
           </div><div class="su-req"><span class="gr-cap">You’ll need</span>
               <ul>
-                <li><span data-os="mac">macOS 13 or newer</span><span data-os="win">Windows 10 or 11 (64-bit)</span></li>
+                <li>macOS 13 or newer</li>
                 <li>OBS Studio 30 or newer</li>
                 <li>A Twitch account</li>
                 <li>A webcam</li>
@@ -103,7 +96,7 @@
             <h2 id="obs-h">Connect OBS</h2>
             <p>The app finds OBS for you. If OBS needs permission to be controlled, the app asks you to close OBS and clicks <b>Switch it on</b> for you.</p>
             <p>Then click <b>Add the overlay</b>. The app adds one hidden <b>AI Hijack</b> overlay to your scenes. It only shows while a hijack is playing. Nothing else in your scenes changes.</p>
-            <details class="su-help"><summary>Not working?</summary><ul><li><b>“OBS is still open”:</b> close OBS completely (check the <span data-os="mac">menu bar</span><span data-os="win">system tray</span>), then try again.</li>
+            <details class="su-help"><summary>Not working?</summary><ul><li><b>“OBS is still open”:</b> close OBS completely (check the menu bar), then try again.</li>
               <li><b>Never connects:</b> update OBS to version 30 or newer. You can also turn it on yourself in OBS under “Tools → WebSocket Server Settings → Enable WebSocket server”.</li>
               <li><b>Overlay in the wrong place:</b> in OBS, drag <b>AI Hijack</b> to the top of your Sources, above your camera.</li></ul></details>
             <label class="su-done"><input type="checkbox" data-step="obs" /><span class="su-box" aria-hidden="true"></span>Done</label>
@@ -120,7 +113,6 @@
               <li>Click <b>Start Virtual Camera</b> in the app (or in OBS).</li>
               <li>When you see yourself and a green check, click <b>Looks good, continue</b>.</li>
             </ol>
-            <div class="su-note" data-os="mac"><b>First time on a Mac?</b> macOS asks you to allow the OBS Virtual Camera once, under <b>System Settings → Privacy &amp; Security</b>. Allow camera access for Stream Hijack too.</div>
             <details class="su-help"><summary>Not working?</summary><ul><li><b>Black or frozen picture:</b> make sure nothing else is using the camera, and that you allowed camera access.</li>
               <li><b>“This is not the OBS Virtual Camera”:</b> start the Virtual Camera in OBS, then pick it in the app.</li></ul></details>
             <label class="su-done"><input type="checkbox" data-step="camera" /><span class="su-box" aria-hidden="true"></span>Done</label>
@@ -205,13 +197,13 @@
             <h2 id="live-h">Go live. Two things to remember.</h2>
             <div class="su-live-grid">
               <div><b>Keep the app open.</b><p>Stream Hijack runs each hijack, so keep its window open while you stream. It can sit behind OBS.</p></div>
-              <div><b>Know your panic key.</b><p>Press <span data-os="mac"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd></span><span data-os="win"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>H</kbd></span> from any app. The effect disappears at once and new hijacks wait in line until you press it again or click <b>Resume hijacks</b>.</p></div>
+              <div><b>Know your panic key.</b><p>Press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>H</kbd> from any app. The effect disappears at once and new hijacks wait in line until you press it again or click <b>Resume hijacks</b>.</p></div>
             </div>
           </section>
 
           <section class="su-stuck" aria-labelledby="stuck-h">
             <h2 id="stuck-h">Still stuck?</h2>
-            <p>A real person will help. Email <a href="mailto:support@streamhijack.com">support@streamhijack.com</a><span data-discord hidden> or ask in our <a data-discord href="#">Discord</a></span>. You can run setup again any time from the Stream Hijack icon in your <span data-os="mac">menu bar</span><span data-os="win">system tray</span>: <b>Run setup again…</b></p>
+            <p>A real person will help. Email <a href="mailto:support@streamhijack.com">support@streamhijack.com</a><span data-discord hidden> or ask in our <a data-discord href="#">Discord</a></span>. You can run setup again any time from the Stream Hijack icon in your menu bar: <b>Run setup again…</b></p>
           </section>
         </div>
       </div>
@@ -228,6 +220,7 @@
         <nav class="footer-cols" aria-label="Footer">
           <div>
             <h4>Product</h4>
+            <a href="/download">Download for Mac</a>
             <a href="/#how">How it works</a>
             <a href="/setup">Setup guide</a>
             <a href="/#pricing">Pricing</a>
@@ -237,7 +230,7 @@
           <div>
             <h4>Community</h4>
             <a data-discord hidden href="#">Discord</a>
-            <a href="/#alpha">Join the free alpha</a>
+            <a href="mailto:support@streamhijack.com">Get help</a>
           </div>
           <div>
             <h4>Legal</h4>

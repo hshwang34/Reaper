@@ -1,4 +1,4 @@
-// The setup guide: Mac/Windows instructions, "Done" ticks remembered in this browser, a
+// The setup guide (Mac only during the beta): "Done" ticks remembered in this browser, a
 // progress meter, and a step rail that follows the scroll. Ticks are a per-viewer
 // convenience, so storage failures are ignored and the page works without them.
 import "./style.css";
@@ -25,22 +25,6 @@ const store = {
     }
   },
 };
-
-/* ---------- Mac / Windows ---------- */
-
-const detected = /Win/i.test(navigator.platform || navigator.userAgent) ? "win" : "mac";
-const setOs = (os: string) => {
-  document.documentElement.dataset.os = os;
-  const r = document.querySelector<HTMLInputElement>(`input[name=os][value=${os}]`);
-  if (r) r.checked = true;
-};
-setOs(store.get("rh-setup-os") ?? detected);
-for (const r of document.querySelectorAll<HTMLInputElement>("input[name=os]")) {
-  r.addEventListener("change", () => {
-    setOs(r.value);
-    store.set("rh-setup-os", r.value);
-  });
-}
 
 /* ---------- done ticks + progress ---------- */
 
