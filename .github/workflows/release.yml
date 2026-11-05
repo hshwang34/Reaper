@@ -103,6 +103,12 @@ jobs:
           for v in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
             [ -n "${!v}" ] || unset "$v"
           done
+          # On Windows, electron-builder falls back from WIN_CSC_LINK to CSC_LINK,
+          # which would sign the installer with the Apple Developer ID cert.
+          # Windows gets only its own certificate (or none).
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
+          fi
           # electron-builder wants APPLE_API_KEY as a PATH to the .p8, so the
           # secret's contents go to a runner-temp file (deleted with the runner).
           if [ -n "${APPLE_API_KEY_P8:-}" ]; then
