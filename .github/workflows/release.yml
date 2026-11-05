@@ -1,11 +1,13 @@
-# Desktop app release: macOS (Apple silicon + Intel DMGs) and Windows (x64
-# installer). docs/DISTRIBUTION.md is the runbook.
+# Desktop app release: macOS (one universal DMG) and Windows (x64 installer).
+# docs/DISTRIBUTION.md is the runbook.
 #
 # Two ways in:
-#   · push a v* tag      → build on both OSes, sign whatever has secrets, and
-#                          upload into ONE draft GitHub Release (both jobs
-#                          add to the same draft). Publishing the draft is the
-#                          human step — it's what electron-updater sees.
+#   · push a v* tag      → build, sign, and upload into ONE draft GitHub
+#                          Release. The public beta is Mac only, so a tag
+#                          builds macOS alone: a Windows asset on the release
+#                          would be a download we don't support yet.
+#                          Publishing the draft is the human step — it's what
+#                          electron-updater (and the site's Download button) see.
 #   · Run workflow (UI)  → same builds (signed too, if secrets exist), nothing
 #                          published: the installers land as workflow
 #                          artifacts. This is how to get a Windows build to
@@ -14,7 +16,10 @@
 # Signing is gated on secrets and degrades to unsigned builds when they're
 # absent (Gatekeeper / SmartScreen then warn on first launch):
 #   macOS   CSC_LINK, CSC_KEY_PASSWORD             Developer ID Application .p12 (base64)
-#           APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID   notarization
+#           APPLE_API_KEY_P8, APPLE_API_KEY_ID, APPLE_API_ISSUER
+#                                                  notarization, with an App Store
+#                                                  Connect API key: no Apple ID
+#                                                  password or 2FA in CI
 #   Windows WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD     code-signing .pfx (base64)
 name: release
 
@@ -56,13 +61,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-14 # Apple silicon runner; the universal build needs both chips' resources staged
-            platform: --mac --universal
-            archs: arm64,x64
-          - os: windows-latest
-            platform: --win
-            archs: x64
+        # macOS on an Apple silicon runner (the universal build needs both chips'
+        # resources staged); Windows only on manual runs, while the beta is Mac only.
+        include: ${{ fromJSON(startsWith(github.ref, 'refs/tags/')
+          && '[{"os":"macos-14","platform":"--mac --universal","archs":"arm64,x64"}]'
+          || '[{"os":"macos-14","platform":"--mac --universal","archs":"arm64,x64"},{"os":"windows-latest","platform":"--win","archs":"x64"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -87,9 +90,9 @@ jobs:
           RH_CLOUD_URL: ${{ vars.RH_CLOUD_URL }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -97,9 +100,16 @@ jobs:
           # An unset secret arrives as "", and electron-builder reads an empty
           # CSC_LINK as a (directory) path and fails — unset the empties so a
           # missing secret means "unsigned", as intended.
-          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
             [ -n "${!v}" ] || unset "$v"
           done
+          # electron-builder wants APPLE_API_KEY as a PATH to the .p8, so the
+          # secret's contents go to a runner-temp file (deleted with the runner).
+          if [ -n "${APPLE_API_KEY_P8:-}" ]; then
+            export APPLE_API_KEY="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+            printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY"
+            unset APPLE_API_KEY_P8
+          fi
           npm run prepackage
           npx electron-builder ${{ matrix.platform }} \
             --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}

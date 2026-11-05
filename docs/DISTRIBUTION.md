@@ -105,10 +105,15 @@ The server refuses to look like production without a Twitch app: with no
 
 1. Bump `app/package.json` `version`, commit, then tag `v<version>` and push the
    tag. (CI refuses a tag that doesn't match the version.)
-2. `.github/workflows/release.yml` builds macOS (on an Apple-silicon runner)
-   and Windows (on a Windows runner), runs `npm run check` on both, and uploads
-   everything into one **draft** GitHub Release.
-3. Publish the draft. That's the moment installed apps see the update.
+2. `.github/workflows/release.yml` builds macOS (on an Apple-silicon runner),
+   runs `npm run check`, signs + notarizes, and uploads into one **draft**
+   GitHub Release. **The public beta is Mac only**, so a tag builds macOS alone;
+   Windows builds come from manual runs (below) until it ships.
+3. Check the draft's DMG (`spctl`, below), then publish it. That's the moment
+   installed apps see the update, and the moment the site's Download button
+   (`releases/latest/download/Stream-Hijack-mac.dmg`) starts working. For the
+   first release, publish **before** merging the site's /download page, so the
+   button never points at a 404.
 
 **Run workflow** in the Actions tab builds the same installers without
 publishing and attaches them to the run. That's the way to get a Windows build
@@ -130,15 +135,28 @@ Without it: *"Apple could not verify 'Stream Hijack' is free of malware"*.
 Since macOS 15 the user can't even right-click → Open. They have to go to
 System Settings → Privacy & Security → Open Anyway.
 
-1. Enroll at developer.apple.com with a personal Apple ID (individual
-   enrollment; approval takes ~1–2 days).
-2. Create a **Developer ID Application** certificate and export it as `.p12`.
-3. Create an app-specific password for the Apple ID (appleid.apple.com).
-4. Repo secrets: `CSC_LINK` (base64 of the .p12), `CSC_KEY_PASSWORD`,
-   `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`.
+Done (2026-11-04) on the personal team `V56DG94ZL5`. To redo or rotate:
 
-The next tagged build is then signed **and notarized** (`mac.notarize: true`
-in `electron-builder.yml`; it skips with a warning while the `APPLE_*`
+1. A **Developer ID Application** certificate (developer.apple.com →
+   Certificates → +; only the Account Holder can create one). Note: the
+   *Apple Distribution* certificate used for TestFlight can't sign a
+   downloaded app. Bundle it with its key and Apple's Developer ID G2 CA into
+   a `.p12` with `openssl pkcs12 -export -legacy …`: macOS `security import`,
+   which CI uses, can't read OpenSSL 3's default AES encryption.
+2. An **App Store Connect API key** for notarization (App Store Connect →
+   Users and Access → Integrations → Team Keys, Developer access). It
+   replaces the Apple ID + app-specific password, so no password or 2FA lives
+   in CI. The `.p8` downloads once.
+3. Repo secrets: `CSC_LINK` (base64 of the .p12), `CSC_KEY_PASSWORD`,
+   `APPLE_API_KEY_P8` (the .p8's contents; the workflow writes it to a file,
+   because electron-builder wants `APPLE_API_KEY` as a path),
+   `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`.
+
+The signing material stays on the release Mac in `~/.config/streamhijack-signing/`,
+never in the repo.
+
+Tagged builds are then signed **and notarized** (`mac.notarize: true`
+in `electron-builder.yml`; it skips with a warning while the `APPLE_API_*`
 secrets are absent), using the hardened runtime and
 `app/build/entitlements.mac.plist`. To confirm on a Mac:
 
