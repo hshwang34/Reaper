@@ -268,3 +268,4 @@ export function webDistDir(): string {
   if (root) return resolve(root, "web", "dist");
   return resolve(process.resourcesPath, "web-dist");
 }
+// checkpoint 2026-11-11
