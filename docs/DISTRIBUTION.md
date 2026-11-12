@@ -101,6 +101,41 @@ Deploying it is account work, in this order:
 The server refuses to look like production without a Twitch app: with no
 `TWITCH_CLIENT_ID` it boots in DEV AUTH (fake accounts) and says so loudly.
 
+### Stripe: test mode → live mode
+
+Production started on a **test-mode** Stripe platform account: checkout works
+with test cards only. Going live is all dashboard + secrets work, with one
+code behaviour to know about: Connect accounts exist in one mode, so after the
+switch every streamer onboarded in test mode is **forgotten at boot**
+(`reconcileAccounts` in `server/src/payments.ts`) and onboards again for
+real. Their portal says "hasn't finished setting up payments" until then.
+Each account records the mode it was made in, and only an account from the
+*other* mode is forgotten. A wrong key in the same mode (another Stripe
+account's `sk_live_`) pauses payouts and logs `PAYOUTS PAUSED … needs manual
+action`, but never wipes real accounts: fix the key and redeploy.
+
+1. Stripe Dashboard, **live mode**: activate the platform account (business
+   details, bank account), then in Connect settings set the platform profile
+   and branding. Confirm **Express + Managed Risk** is enabled for live (the
+   accounts are created with the `2026-09-30.preview` API version; preview
+   access granted in test mode doesn't always carry over).
+2. Developers → API keys (live): the secret key `sk_live_…`.
+3. Developers → Webhooks (live): **+ Add endpoint**, *Events on Connected
+   accounts*, URL `https://reality-hijack.fly.dev/stripe/webhook`, events
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `account.updated`. Copy its signing secret `whsec_…`.
+4. Switch while no paid hijack is waiting (a test payment still `paid` can't be
+   refunded with the live key and lands in `refund_failed`, which is harmless:
+   it was test money):
+   ```bash
+   fly secrets set --app reality-hijack STRIPE_SECRET_KEY=sk_live_… STRIPE_WEBHOOK_SECRET=whsec_…
+   ```
+   Setting secrets redeploys. The boot log says `forgot N Connect account(s)`.
+5. Check: `npm run smoke:prod`, onboard one streamer for real, pay the $3
+   minimum with a real card on their page, then refund it from the dashboard.
+   `npm run smoke:live` is test-mode only from here on (a 4242 card is
+   declined in live mode).
+
 ## Releasing
 
 1. Bump `app/package.json` `version`, commit, then tag `v<version>` and push the
