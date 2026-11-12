@@ -37,11 +37,14 @@
 //      ok → delivered.
 //   5. Boot: runtimes are in-memory, so any payment still `paid` (accepted,
 //      not settled) belonged to a job the restart destroyed → refunded.
-//   6. Test → live: Connect accounts belong to one Stripe mode. After the
-//      platform key switches, a stored test `acct_…` doesn't exist for the
-//      live key, so any account Stripe can't find is forgotten (and
-//      re-checked for every channel at boot): the streamer onboards again in
-//      the key's mode instead of being stuck on a dead account.
+//   6. Test → live: Connect accounts belong to one Stripe mode, recorded per
+//      channel at creation. After the platform key switches, a stored account
+//      from the OTHER mode is forgotten (checked for every channel at boot), so
+//      the streamer onboards again instead of being stuck on a dead account.
+//      An account missing in the SAME mode is never forgotten automatically:
+//      that's a wrong key (another Stripe account) or a deleted account, and
+//      wiping every streamer's real account on a mis-pasted key would cost
+//      them their verification. Payouts pause and it's logged for a human.
 
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -111,6 +114,16 @@ export function setStripeForTests(fake: StripeLike | null): void {
 }
 
 export const paymentsEnabled = () => Boolean(stripe());
+
+let liveOverride: boolean | null = null;
+/** Is the platform key a live-mode key? (sk_live_… / rk_live_…) */
+export function keyIsLive(): boolean {
+  return liveOverride ?? /^(sk|rk)_live_/.test(env.stripeSecretKey);
+}
+/** Tests pick the key's mode; production never calls this. */
+export function setKeyModeForTests(live: boolean | null): void {
+  liveOverride = live;
+}
 
 const fees = (): FeeConfig => ({
   platformFeePct: env.platformFeePct,
@@ -183,7 +196,10 @@ export async function onboardingLink(channelId: string, country: string, returnT
         apiVersion: EXPRESS_MANAGED_RISK_API,
       })
     ).id;
-    db.update(channels).set({ stripeAccountId: id, payoutsEnabled: 0 }).where(eq(channels.id, channelId)).run();
+    db.update(channels)
+      .set({ stripeAccountId: id, payoutsEnabled: 0, stripeAccountLivemode: keyIsLive() ? 1 : 0 })
+      .where(eq(channels.id, channelId))
+      .run();
     log("payments", `created Connect account ${id} for ${row.login} (${country})`);
     return id;
   };
@@ -192,9 +208,11 @@ export async function onboardingLink(channelId: string, country: string, returnT
   try {
     return (await linkFor(row.stripeAccountId)).url;
   } catch (e) {
-    // a test-mode account after the switch to live (or a deleted one): start over
     if (!isMissingAccount(e)) throw e;
-    forgetAccount(channelId, row.stripeAccountId);
+    // a test-mode account after the switch to live: start over in the key's mode
+    if (!accountMissing(channelId, row.stripeAccountId, row.stripeAccountLivemode)) {
+      throw new PaymentError(502, "Stripe can't find your payout account. We've been alerted; contact support.");
+    }
     return (await linkFor(await createAccount())).url;
   }
 }
@@ -208,14 +226,21 @@ export function isMissingAccount(e: unknown): boolean {
   return /no such account|does not have access to account/i.test(err.message ?? "");
 }
 
-/** Drop a channel's dead Connect account: payments stop (409 "hasn't finished
- *  setting up payments") and the next onboarding creates a fresh account. */
-function forgetAccount(channelId: string, accountId: string): void {
-  db.update(channels)
-    .set({ stripeAccountId: null, payoutsEnabled: 0 })
-    .where(and(eq(channels.id, channelId), eq(channels.stripeAccountId, accountId)))
-    .run();
-  warn("payments", `forgot Connect account ${accountId} for ${channelId}: Stripe can't find it with this key (test/live switch?)`);
+/** Stripe can't see a channel's account. Payments stop either way. Returns
+ *  true when the account was FORGOTTEN (it's from the other Stripe mode: the
+ *  next onboarding makes a fresh one), false when it was kept for a human
+ *  (same mode: a wrong key or a deleted account; see the header, point 6). */
+function accountMissing(channelId: string, accountId: string, livemode: number | null): boolean {
+  const accountLive = livemode === 1; // NULL: made before modes were recorded, in test mode
+  const sameAccount = and(eq(channels.id, channelId), eq(channels.stripeAccountId, accountId));
+  if (accountLive !== keyIsLive()) {
+    db.update(channels).set({ stripeAccountId: null, payoutsEnabled: 0, stripeAccountLivemode: null }).where(sameAccount).run();
+    warn("payments", `forgot ${accountLive ? "live" : "test"}-mode Connect account ${accountId} for ${channelId}: the key is now ${keyIsLive() ? "live" : "test"} mode`);
+    return true;
+  }
+  db.update(channels).set({ payoutsEnabled: 0 }).where(sameAccount).run();
+  warn("payments", `PAYOUTS PAUSED for ${channelId}: Stripe can't find ${accountId} with a same-mode key (wrong STRIPE_SECRET_KEY? deleted account?) — needs manual action`);
+  return false;
 }
 
 /** Pull the account's capability from Stripe (on return from onboarding,
@@ -229,7 +254,7 @@ export async function refreshPayouts(channelId: string): Promise<boolean> {
     acct = await s.accounts.retrieve(row.stripeAccountId);
   } catch (e) {
     if (!isMissingAccount(e)) throw e;
-    forgetAccount(channelId, row.stripeAccountId);
+    accountMissing(channelId, row.stripeAccountId, row.stripeAccountLivemode);
     return false;
   }
   const enabled = acct.charges_enabled === true;
@@ -388,10 +413,12 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
   } else if (event.type === "account.updated") {
     const account = event.data.object as Stripe.Account;
     const channelId = account.metadata?.channelId;
-    if (channelId) {
+    // only for the account the channel uses NOW: an event from a forgotten
+    // account must not switch a newer one's payments on or off
+    if (channelId && event.account) {
       db.update(channels)
         .set({ payoutsEnabled: account.charges_enabled ? 1 : 0 })
-        .where(eq(channels.id, channelId))
+        .where(and(eq(channels.id, channelId), eq(channels.stripeAccountId, event.account)))
         .run();
     }
   }
@@ -635,7 +662,7 @@ export async function reconcileAccounts(): Promise<number> {
       warn("payments", `couldn't check the Connect account for ${id}: ${(e as Error).message}`);
     }
   }
-  if (forgotten) warn("payments", `forgot ${forgotten} Connect account(s) this key can't see; those streamers onboard again`);
+  if (forgotten) warn("payments", `forgot ${forgotten} Connect account(s) from the other Stripe mode; those streamers onboard again`);
   return forgotten;
 }
 

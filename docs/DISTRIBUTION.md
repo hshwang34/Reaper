@@ -109,6 +109,10 @@ code behaviour to know about: Connect accounts exist in one mode, so after the
 switch every streamer onboarded in test mode is **forgotten at boot**
 (`reconcileAccounts` in `server/src/payments.ts`) and onboards again for
 real. Their portal says "hasn't finished setting up payments" until then.
+Each account records the mode it was made in, and only an account from the
+*other* mode is forgotten. A wrong key in the same mode (another Stripe
+account's `sk_live_`) pauses payouts and logs `PAYOUTS PAUSED … needs manual
+action`, but never wipes real accounts: fix the key and redeploy.
 
 1. Stripe Dashboard, **live mode**: activate the platform account (business
    details, bank account), then in Connect settings set the platform profile

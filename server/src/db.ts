@@ -38,6 +38,11 @@ export const channels = sqliteTable("channels", {
   /** Mirrors the account's `transfers` capability: until Stripe has verified
    *  the streamer, the portal can't take payments for this channel. */
   payoutsEnabled: integer("payouts_enabled").notNull().default(0),
+  /** The Stripe mode the account was created in (1 live, 0 test). Accounts
+   *  exist in one mode only; this is what lets the server tell a test → live
+   *  switch (forget the account) from a wrong key (keep it). NULL = created
+   *  before this column, when production was test-mode only. */
+  stripeAccountLivemode: integer("stripe_account_livemode"),
 });
 
 /** Rotating refresh tokens (hashed — a DB leak must not mint sessions). */
@@ -252,6 +257,9 @@ CREATE TABLE stripe_events (
   type TEXT NOT NULL,
   received_at INTEGER NOT NULL
 );
+`,
+  /* 3 — which Stripe mode each Connect account lives in */ `
+ALTER TABLE channels ADD COLUMN stripe_account_livemode INTEGER;
 `,
 ];
 

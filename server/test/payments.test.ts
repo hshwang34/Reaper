@@ -21,6 +21,7 @@ import {
   reconcileAccounts,
   reconcileOnBoot,
   refreshPayouts,
+  setKeyModeForTests,
   setStripeForTests,
   settleJob,
   type StripeLike,
@@ -302,7 +303,8 @@ test("onboarding creates ONE Express + Managed Risk account per channel, then re
 // ── Test → live switch ────────────────────────────────────────────────────
 // Connect accounts exist in one Stripe mode. After the platform key goes live,
 // a stored test account is "No such account" to Stripe; the channel must not
-// be stuck on it.
+// be stuck on it. But a same-mode "missing" (a wrong key) must never wipe real
+// accounts. Accounts made before modes were recorded (livemode NULL) are test.
 
 /** What the Stripe SDK throws for an account the key can't see. */
 const noSuchAccount = (id: string) =>
@@ -311,6 +313,7 @@ const noSuchAccount = (id: string) =>
 const accountOf = (id: string) => db.select().from(channels).where(eq(channels.id, id)).get()!;
 
 test("onboarding with a test-mode account after the switch to live starts a fresh account", async () => {
+  setKeyModeForTests(true);
   upsertChannel("dev:switched", "switched", "Switched");
   db.update(channels).set({ stripeAccountId: "acct_testmode", payoutsEnabled: 1 }).where(eq(channels.id, "dev:switched")).run();
   const realLinks = fake.accountLinks.create;
@@ -323,13 +326,63 @@ test("onboarding with a test-mode account after the switch to live starts a fres
     const row = accountOf("dev:switched");
     assert.equal(row.stripeAccountId, "acct_test", "a new account, made with the live key");
     assert.equal(row.payoutsEnabled, 0, "not payable until the new account is verified");
+    assert.equal(row.stripeAccountLivemode, 1, "the new account is recorded as live");
   } finally {
     fake.accountLinks.create = realLinks;
+    setKeyModeForTests(null);
     getRuntime("dev:switched")?.stop();
   }
 });
 
-test("boot forgets every account the key can't see, keeps the rest, and stops their payments", async () => {
+test("a live account missing under a live key (wrong key?) is kept for a human, never replaced", async () => {
+  setKeyModeForTests(true);
+  payableChannel("dev:wrongkey");
+  db.update(channels).set({ stripeAccountId: "acct_live_real", stripeAccountLivemode: 1 }).where(eq(channels.id, "dev:wrongkey")).run();
+  const realRetrieve = fake.accounts.retrieve;
+  const realLinks = fake.accountLinks.create;
+  fake.accounts.retrieve = async (id) => {
+    if (id === "acct_live_real") throw noSuchAccount(id);
+    return realRetrieve(id);
+  };
+  fake.accountLinks.create = async (p) => {
+    if (p.account === "acct_live_real") throw noSuchAccount(p.account);
+    return realLinks(p);
+  };
+  try {
+    await reconcileAccounts();
+    assert.equal(accountOf("dev:wrongkey").stripeAccountId, "acct_live_real", "the real account is kept");
+    assert.equal(accountOf("dev:wrongkey").payoutsEnabled, 0, "but payments pause");
+    await assert.rejects(onboardingLink("dev:wrongkey", "US", "/dashboard"), (e) => e instanceof PaymentError && e.status === 502);
+    assert.equal(accountOf("dev:wrongkey").stripeAccountId, "acct_live_real", "and no second account was created");
+  } finally {
+    fake.accounts.retrieve = realRetrieve;
+    fake.accountLinks.create = realLinks;
+    setKeyModeForTests(null);
+    getRuntime("dev:wrongkey")?.stop();
+  }
+});
+
+test("account.updated only touches the account the channel uses now", async () => {
+  payableChannel("dev:moved");
+  db.update(channels).set({ stripeAccountId: "acct_new", payoutsEnabled: 0 }).where(eq(channels.id, "dev:moved")).run();
+  const event = (id: string, account: string) =>
+    Buffer.from(
+      JSON.stringify({
+        id,
+        type: "account.updated",
+        account,
+        data: { object: { id: account, charges_enabled: true, metadata: { channelId: "dev:moved" } } },
+      }),
+    );
+  await handleWebhook(event("evt_acct_old", "acct_paid"), "ok");
+  assert.equal(accountOf("dev:moved").payoutsEnabled, 0, "an event from the forgotten account changes nothing");
+  await handleWebhook(event("evt_acct_new", "acct_new"), "ok");
+  assert.equal(accountOf("dev:moved").payoutsEnabled, 1);
+  getRuntime("dev:moved")?.stop();
+});
+
+test("boot after the switch to live forgets the test accounts, keeps the rest, and stops their payments", async () => {
+  setKeyModeForTests(true);
   payableChannel("dev:keeps");
   const gone = payableChannel("dev:gone");
   db.update(channels).set({ stripeAccountId: "acct_gone" }).where(eq(channels.id, "dev:gone")).run();
@@ -351,6 +404,7 @@ test("boot forgets every account the key can't see, keeps the rest, and stops th
     );
   } finally {
     fake.accounts.retrieve = realRetrieve;
+    setKeyModeForTests(null);
     gone.stop();
     getRuntime("dev:keeps")?.stop();
   }
