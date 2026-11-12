@@ -48,6 +48,7 @@ import {
   PaymentError,
   paymentsEnabled,
   payoutStatus,
+  reconcileAccounts,
   reconcileOnBoot,
   refreshPayouts,
   sweepStalePaid,
@@ -537,6 +538,9 @@ process.on("unhandledRejection", (e) => warn("process", `unhandled rejection: ${
 restoreTriggeredRuntimes();
 // Payments accepted by an engine this restart destroyed will never run.
 void reconcileOnBoot();
+// Connect accounts this Stripe key can't see (a test → live switch) are forgotten,
+// so those streamers onboard again instead of hitting a dead account.
+void reconcileAccounts();
 // Backstop: paid hijacks that never started (paused, stuck) get refunded.
 setInterval(() => void sweepStalePaid(), 60_000).unref();
 

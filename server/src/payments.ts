@@ -37,6 +37,11 @@
 //      ok → delivered.
 //   5. Boot: runtimes are in-memory, so any payment still `paid` (accepted,
 //      not settled) belonged to a job the restart destroyed → refunded.
+//   6. Test → live: Connect accounts belong to one Stripe mode. After the
+//      platform key switches, a stored test `acct_…` doesn't exist for the
+//      live key, so any account Stripe can't find is forgotten (and
+//      re-checked for every channel at boot): the streamer onboards again in
+//      the key's mode instead of being stuck on a dead account.
 
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -164,24 +169,53 @@ export async function onboardingLink(channelId: string, country: string, returnT
   if (!row) throw new PaymentError(404, "unknown channel");
   if (!/^[A-Z]{2}$/.test(country)) throw new PaymentError(400, "country must be a 2-letter code");
 
-  let accountId = row.stripeAccountId;
-  if (!accountId) {
-    accountId = (
+  const back = `${env.publicUrl}/api/c/${encodeURIComponent(channelId)}/payouts/return?to=${encodeURIComponent(returnTo)}`;
+  const linkFor = (account: string) =>
+    s.accountLinks.create({
+      account,
+      type: "account_onboarding",
+      refresh_url: back, // link expired/reused → our return route re-checks and the UI offers a new link
+      return_url: back,
+    });
+  const createAccount = async () => {
+    const id = (
       await s.v2.core.accounts.create(accountParams(channelId, row.login, country), {
         apiVersion: EXPRESS_MANAGED_RISK_API,
       })
     ).id;
-    db.update(channels).set({ stripeAccountId: accountId }).where(eq(channels.id, channelId)).run();
-    log("payments", `created Connect account ${accountId} for ${row.login} (${country})`);
+    db.update(channels).set({ stripeAccountId: id, payoutsEnabled: 0 }).where(eq(channels.id, channelId)).run();
+    log("payments", `created Connect account ${id} for ${row.login} (${country})`);
+    return id;
+  };
+
+  if (!row.stripeAccountId) return (await linkFor(await createAccount())).url;
+  try {
+    return (await linkFor(row.stripeAccountId)).url;
+  } catch (e) {
+    // a test-mode account after the switch to live (or a deleted one): start over
+    if (!isMissingAccount(e)) throw e;
+    forgetAccount(channelId, row.stripeAccountId);
+    return (await linkFor(await createAccount())).url;
   }
-  const back = `${env.publicUrl}/api/c/${encodeURIComponent(channelId)}/payouts/return?to=${encodeURIComponent(returnTo)}`;
-  const link = await s.accountLinks.create({
-    account: accountId,
-    type: "account_onboarding",
-    refresh_url: back, // link expired/reused → our return route re-checks and the UI offers a new link
-    return_url: back,
-  });
-  return link.url;
+}
+
+/** Stripe's answer for an account this key can't see: it was made in the
+ *  other mode (test vs live), or deleted. Any other error is a real failure. */
+export function isMissingAccount(e: unknown): boolean {
+  const err = e as { code?: string; statusCode?: number; message?: string } | null;
+  if (!err) return false;
+  if (err.code === "resource_missing" || err.code === "account_invalid") return true;
+  return /no such account|does not have access to account/i.test(err.message ?? "");
+}
+
+/** Drop a channel's dead Connect account: payments stop (409 "hasn't finished
+ *  setting up payments") and the next onboarding creates a fresh account. */
+function forgetAccount(channelId: string, accountId: string): void {
+  db.update(channels)
+    .set({ stripeAccountId: null, payoutsEnabled: 0 })
+    .where(and(eq(channels.id, channelId), eq(channels.stripeAccountId, accountId)))
+    .run();
+  warn("payments", `forgot Connect account ${accountId} for ${channelId}: Stripe can't find it with this key (test/live switch?)`);
 }
 
 /** Pull the account's capability from Stripe (on return from onboarding,
@@ -190,7 +224,14 @@ export async function refreshPayouts(channelId: string): Promise<boolean> {
   const s = stripe();
   const row = channelRow(channelId);
   if (!s || !row?.stripeAccountId) return false;
-  const acct = await s.accounts.retrieve(row.stripeAccountId);
+  let acct: { charges_enabled?: boolean };
+  try {
+    acct = await s.accounts.retrieve(row.stripeAccountId);
+  } catch (e) {
+    if (!isMissingAccount(e)) throw e;
+    forgetAccount(channelId, row.stripeAccountId);
+    return false;
+  }
   const enabled = acct.charges_enabled === true;
   db.update(channels)
     .set({ payoutsEnabled: enabled ? 1 : 0 })
@@ -573,6 +614,29 @@ export async function reconcileOnBoot(): Promise<number> {
   for (const p of orphans) await refund(p.id, "server restarted before the hijack ran");
   if (orphans.length) warn("payments", `refunded ${orphans.length} payment(s) orphaned by a restart`);
   return orphans.length;
+}
+
+/** Re-check every stored Connect account against the current key, so a
+ *  test → live switch takes effect at the deploy, not at each streamer's next
+ *  payment. Also catches capabilities that changed while we were down. */
+export async function reconcileAccounts(): Promise<number> {
+  if (!stripe()) return 0;
+  const rows = db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(sql`${channels.stripeAccountId} IS NOT NULL`)
+    .all();
+  let forgotten = 0;
+  for (const { id } of rows) {
+    try {
+      await refreshPayouts(id);
+      if (!channelRow(id)?.stripeAccountId) forgotten++;
+    } catch (e) {
+      warn("payments", `couldn't check the Connect account for ${id}: ${(e as Error).message}`);
+    }
+  }
+  if (forgotten) warn("payments", `forgot ${forgotten} Connect account(s) this key can't see; those streamers onboard again`);
+  return forgotten;
 }
 
 /** Dashboard summary for a channel. */
